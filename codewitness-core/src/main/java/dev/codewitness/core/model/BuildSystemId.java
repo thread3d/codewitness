@@ -8,6 +8,8 @@ public record BuildSystemId(String id) {
 
     public static final BuildSystemId MAVEN = new BuildSystemId("maven");
     public static final BuildSystemId GRADLE = new BuildSystemId("gradle");
+    /** Python packaging driven by {@code pyproject.toml}, {@code setup.py} or {@code requirements.txt}. */
+    public static final BuildSystemId PYTHON = new BuildSystemId("python");
     public static final BuildSystemId NONE = new BuildSystemId("none");
 
     public BuildSystemId {

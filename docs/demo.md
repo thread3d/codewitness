@@ -205,3 +205,30 @@ codewitness verify . --requirements requirements.md
 
 Start with one requirement and one scenario. If CodeWitness reports `UNVERIFIED`, read the rationale:
 it always says why, and usually the answer is "you have not told me how to execute this yet".
+
+## 8. The same thing for Python
+
+The walkthrough above uses the Java fixture, but nothing about it is Java-specific. The Python fixture
+is a ledger with two introduced defects, verified with nothing but a Python interpreter:
+
+```bash
+./codewitness verify fixtures/python-withdrawal-ledger \
+    --requirements fixtures/python-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  inputs: {t1=85800000, a1=700, t2=90000000, a2=700}  actual: 1400
+  CE-003  R-003  inputs: {amount=-100}                               actual: 400
+```
+
+The scenario fragments are Python, the generated tests are `unittest` cases, and the counterexample's
+replay command runs the saved generated module with the recorded seed and case. R-002 reaches
+`VERIFIED` through an executed generated test; R-004 declares no scenario and stays `UNVERIFIED`.
+Mutation runs through the standard library `ast` module, so no mutation framework has to be installed.

@@ -12,6 +12,7 @@ import java.util.Objects;
 public record LanguageId(String id) {
 
     public static final LanguageId JAVA = new LanguageId("java");
+    public static final LanguageId PYTHON = new LanguageId("python");
     public static final LanguageId UNKNOWN = new LanguageId("unknown");
 
     public LanguageId {

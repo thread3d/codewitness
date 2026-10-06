@@ -7,6 +7,8 @@ change has to respect.
 
 - Java 25 or newer (the build targets release 25)
 - Maven 3.9+ (or use `./mvnw`, which pins 3.9.16), on `PATH`, or `MAVEN_HOME`/`M2_HOME` set
+- Python 3.9+ on `PATH` for the Python adapter and its end-to-end fixture (only the standard library
+  is needed; pytest and coverage.py are used when present)
 - Network access for the first build (dependencies) and for the end-to-end tests
 
 ## Build and test
@@ -60,9 +62,10 @@ implementation), plus `requirements.md` and `codewitness.yaml`.
 
 To add one:
 
-1. Copy the structure of `fixtures/withdrawal-ledger`: standalone Maven project, Java 25, JUnit 5,
-   surefire 3.2.5. Keep at least one fixture on an older release (currently `correct-implementation`
-   on Java 17) so the adapter's "Java 17+" claim stays exercised against real bytecode.
+1. Copy the structure of `fixtures/withdrawal-ledger` (Java, Maven, JUnit 5) or
+   `fixtures/python-withdrawal-ledger` (Python, `pyproject.toml`, `unittest`/pytest). Keep at least
+   one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
+   adapter's "Java 17+" claim stays exercised against real bytecode.
 2. Introduce **one** defect, and state it in a comment at the top of the class — the comment is part
    of the fixture's contract.
 3. Write requirements that describe the intended behaviour, not the defect.
@@ -81,12 +84,16 @@ To add one:
    `build()`, `runTests()`, `analyze()` and `capabilities()`. Detection belongs in its own
    inspectable class, like `JavaProjectDetector`.
 3. Implement the tool providers you need from `VerificationTools` and register them where the CLI
-   wires everything (`JavaAdapterBundle` is the worked example).
+   wires everything (`JavaAdapterBundle` and `PythonAdapterBundle` are the worked examples). If your
+   tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
+   counterexample carries a command that actually runs.
 4. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the
    adapter class name.
 5. Do not add anything language specific to `codewitness-core`. If you believe the core must change,
    say so in the pull request instead of changing it — an engine that grows a language branch is an
-   engine that can no longer claim to be language independent.
+   engine that can no longer claim to be language independent. Declaring the file extensions your
+   language uses as source (`ProjectInfo.sourceExtensions`) is the intended mechanism for the few
+   places the core must find files.
 
 ## Adding a verification tool
 
@@ -133,7 +140,9 @@ outcomes. You cannot assign a verdict; the engine does that from your evidence. 
 ## Commit and review checklist
 
 - [ ] `mvn -Pe2e test` passes.
-- [ ] `./demo.sh` still finds the four defects in `fixtures/withdrawal-ledger`.
+- [ ] `./demo.sh` still finds the four defects in `fixtures/withdrawal-ledger`, and
+      `codewitness verify fixtures/python-withdrawal-ledger` still reports R-001 and R-003 as `FAILED`
+      and R-002 as `VERIFIED`.
 - [ ] No `.codewitness` run data, build output or generated test sources are committed.
 - [ ] The README's "honest status" section still describes what the tool actually does.
 - [ ] Any new limitation is stated in the README and, where it affects a run, in the report's

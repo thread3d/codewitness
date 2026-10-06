@@ -20,6 +20,7 @@ import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.core.spi.VerificationStrategy;
+import dev.codewitness.core.spi.VerificationTools;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -126,11 +127,16 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
         context.budget().recordIteration();
         context.budget().recordGeneratedTests(execution.executed().size());
 
+        var executor = executors.getFirst();
         TestResult result = execution.result();
         Map<String, GeneratedTest> byClass = new LinkedHashMap<>();
         for (GeneratedTest test : generated) {
             byClass.put(test.className(), test);
         }
+
+        Long batchSeed = generated.stream().map(GeneratedTest::seed).filter(java.util.Objects::nonNull)
+                .findFirst().orElse(null);
+        List<String> batchReplay = executor.reproductionCommand(context, generated, batchSeed, null);
 
         Evidence batch = context.evidence().newEvidence(EvidenceType.GENERATED_TEST)
                 .description("Executed " + execution.executed().size() + " generated tests for "
@@ -143,13 +149,10 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
                 .output(execution.note() == null ? "" : execution.note())
                 .requirement(requirement.id())
                 .metadata("generated_classes", generated.stream().map(GeneratedTest::className).toList())
-                .metadata("seed", generated.stream().map(GeneratedTest::seed).filter(java.util.Objects::nonNull)
-                        .findFirst().orElse(null))
+                .metadata("seed", batchSeed)
                 .metadata("artifacts", execution.artifacts().stream().map(java.nio.file.Path::toString).toList())
                 .artifacts(execution.artifacts())
-                .reproductionCommand(String.join(" ", reproductionCommand(context, generated,
-                        generated.stream().map(GeneratedTest::seed).filter(java.util.Objects::nonNull).findFirst().orElse(null),
-                        null)))
+                .reproductionCommand(batchReplay.isEmpty() ? null : String.join(" ", batchReplay))
                 .build();
         context.evidence().add(batch);
         evidence.add(batch);
@@ -179,7 +182,7 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
                     continue;
                 }
                 test.obligationIds().forEach(failedObligations::add);
-                counterexamples.add(counterexample(context, requirement, test, testCase, batch));
+                counterexamples.add(counterexample(context, requirement, test, testCase, batch, executor));
             }
         }
 
@@ -222,7 +225,8 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
             Requirement requirement,
             GeneratedTest test,
             TestCaseResult testCase,
-            Evidence batch) {
+            Evidence batch,
+            VerificationTools.GeneratedTestExecutor executor) {
 
         Optional<Map<String, String>> decoded =
                 CounterexampleProtocol.decode(testCase.failureMessage() == null
@@ -259,10 +263,12 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
             inputs.put("note", "the failing test did not report structured inputs");
         }
 
-        List<String> command = reproductionCommand(context, List.of(test), seed, caseIndex);
+        List<String> command = executor.reproductionCommand(context, List.of(test), seed, caseIndex);
         String reproduction = String.join(" ", command);
+        // The source artefact is named after the generated test in whatever extension the language
+        // uses, so match on the stem rather than hard coding a suffix.
         java.nio.file.Path sourceArtifact = batch.artifacts().stream()
-                .filter(path -> path.getFileName().toString().equals(test.simpleName() + ".java"))
+                .filter(path -> path.getFileName().toString().startsWith(test.simpleName() + "."))
                 .findFirst()
                 .orElse(null);
 
@@ -303,47 +309,6 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
                 .build();
         context.evidence().add(evidence);
         return counterexample;
-    }
-
-    /**
-     * Builds a command that replays exactly the failing case.
-     *
-     * <p>For Maven the seed and case index travel as system properties, which Surefire forwards to the
-     * test JVM. Gradle does not forward system properties to the test JVM, so they are passed through
-     * the environment instead; the generated tests read both.
-     */
-    private static List<String> reproductionCommand(
-            VerificationContext context, List<GeneratedTest> tests, Long seed, Integer caseIndex) {
-        boolean gradle = context.projectInfo().buildSystem().id().equals("gradle");
-        List<String> command = new ArrayList<>();
-        List<String> build = context.state().build().command();
-        if (gradle) {
-            command.add("env");
-            if (seed != null) {
-                command.add("CODEWITNESS_SEED=" + seed);
-            }
-            if (caseIndex != null) {
-                command.add("CODEWITNESS_CASE=" + caseIndex);
-            }
-            command.add(build.isEmpty() ? "./gradlew" : build.getFirst());
-            command.add("test");
-            for (GeneratedTest test : tests) {
-                command.add("--tests");
-                command.add(test.className());
-            }
-            return command;
-        }
-        command.add(build.isEmpty() ? "mvn" : build.getFirst());
-        command.add("-Dtest=" + tests.stream().map(GeneratedTest::simpleName)
-                .collect(java.util.stream.Collectors.joining(",")));
-        if (seed != null) {
-            command.add("-D" + CounterexampleProtocol.seedProperty() + "=" + seed);
-        }
-        if (caseIndex != null) {
-            command.add("-D" + CounterexampleProtocol.caseProperty() + "=" + caseIndex);
-        }
-        command.add("test");
-        return command;
     }
 
     private static Map<String, String> reproductionProperties(Integer caseIndex, Long seed) {

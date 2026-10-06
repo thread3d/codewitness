@@ -48,22 +48,44 @@ abstract class EndToEndSupport {
     }
 
     static String findMaven() {
-        for (String homeVariable : List.of("MAVEN_HOME", "M2_HOME")) {
-            String home = System.getenv(homeVariable);
-            if (home != null && !home.isBlank()) {
-                Path candidate = Path.of(home, "bin", "mvn");
+        return findExecutable("mvn");
+    }
+
+    /** Skips the test when no Python interpreter is available, instead of failing spuriously. */
+    static void assumePythonAvailable() {
+        Assumptions.assumeTrue(findPython() != null,
+                "no Python interpreter on PATH or VIRTUAL_ENV: Python end-to-end verification cannot run");
+    }
+
+    /** @return the first Python interpreter that exists, preferring an active virtual environment. */
+    static String findPython() {
+        String virtualEnv = System.getenv("VIRTUAL_ENV");
+        if (virtualEnv != null && !virtualEnv.isBlank()) {
+            for (String relative : List.of("bin/python", "Scripts/python.exe")) {
+                Path candidate = Path.of(virtualEnv, relative);
                 if (Files.isExecutable(candidate)) {
                     return candidate.toString();
                 }
             }
         }
+        for (String name : List.of("python3", "python")) {
+            String found = findExecutable(name);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    /** @return an executable found on {@code PATH}, or {@code null}. */
+    static String findExecutable(String name) {
         String path = System.getenv("PATH");
         if (path != null) {
             for (String element : path.split(File.pathSeparator)) {
                 if (element.isBlank()) {
                     continue;
                 }
-                Path candidate = Path.of(element, "mvn");
+                Path candidate = Path.of(element, name);
                 if (Files.isExecutable(candidate)) {
                     return candidate.toString();
                 }

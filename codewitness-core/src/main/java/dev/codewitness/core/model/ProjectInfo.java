@@ -28,6 +28,7 @@ public final class ProjectInfo {
     private final Set<String> testFrameworks;
     private final Path buildWrapper;
     private final String javaVersion;
+    private final Set<String> sourceExtensions;
     private final Map<String, String> attributes;
     private final List<Path> detectedDescriptors;
 
@@ -40,6 +41,7 @@ public final class ProjectInfo {
         this.testFrameworks = Collections.unmodifiableSet(new LinkedHashSet<>(builder.testFrameworks));
         this.buildWrapper = builder.buildWrapper;
         this.javaVersion = builder.javaVersion;
+        this.sourceExtensions = Collections.unmodifiableSet(new LinkedHashSet<>(builder.sourceExtensions));
         this.attributes = Collections.unmodifiableMap(new LinkedHashMap<>(builder.attributes));
         this.detectedDescriptors = List.copyOf(builder.detectedDescriptors);
     }
@@ -82,6 +84,34 @@ public final class ProjectInfo {
         return Optional.ofNullable(javaVersion);
     }
 
+    /**
+     * File extensions, without the leading dot, of the files this project's adapter treats as source.
+     *
+     * <p>The core uses this to find source and test files without hard coding a language: a mapping,
+     * a mutation location or an advisory prompt reads the same rule for every language. The default
+     * is {@code java} so that existing adapters keep working unchanged.
+     */
+    public Set<String> sourceExtensions() {
+        return sourceExtensions;
+    }
+
+    /** @return {@code true} when the file name has one of {@link #sourceExtensions()}. */
+    public boolean isSourceFile(Path file) {
+        return isSourceFileName(file == null ? null : file.getFileName().toString());
+    }
+
+    /** @return {@code true} when the file name has one of {@link #sourceExtensions()}. */
+    public boolean isSourceFileName(String fileName) {
+        if (fileName == null) {
+            return false;
+        }
+        int dot = fileName.lastIndexOf('.');
+        if (dot < 0 || dot == fileName.length() - 1) {
+            return false;
+        }
+        return sourceExtensions.contains(fileName.substring(dot + 1).toLowerCase(java.util.Locale.ROOT));
+    }
+
     public Map<String, String> attributes() {
         return attributes;
     }
@@ -118,9 +148,11 @@ public final class ProjectInfo {
     }
 
     public String describe() {
+        String runtime = javaVersion != null ? "Java " + javaVersion
+                : attributes.getOrDefault("runtimeVersion", null);
         return language + " project using " + buildSystem
                 + (modules.size() > 1 ? " (" + modules.size() + " modules)" : "")
-                + (javaVersion == null ? "" : ", Java " + javaVersion);
+                + (runtime == null ? "" : ", " + runtime);
     }
 
     public static final class Builder {
@@ -132,6 +164,7 @@ public final class ProjectInfo {
         private final Set<String> testFrameworks = new LinkedHashSet<>();
         private Path buildWrapper;
         private String javaVersion;
+        private Set<String> sourceExtensions = Set.of("java");
         private final Map<String, String> attributes = new LinkedHashMap<>();
         private final List<Path> detectedDescriptors = new ArrayList<>();
 
@@ -178,6 +211,13 @@ public final class ProjectInfo {
 
         public Builder javaVersion(String javaVersion) {
             this.javaVersion = javaVersion;
+            return this;
+        }
+
+        /** Source file extensions (without dot) used by core mapping and advisory phases. */
+        public Builder sourceExtensions(Set<String> sourceExtensions) {
+            this.sourceExtensions = sourceExtensions == null || sourceExtensions.isEmpty()
+                    ? Set.of("java") : sourceExtensions;
             return this;
         }
 

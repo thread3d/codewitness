@@ -14,6 +14,7 @@ import dev.codewitness.core.result.Counterexample;
 import dev.codewitness.core.result.ObligationOutcome;
 import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
+import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.core.spi.VerificationStrategy;
 
 import java.util.ArrayList;
@@ -41,9 +42,11 @@ import java.util.Map;
 public final class ExistingTestsStrategy implements VerificationStrategy {
 
     private final RequirementCodeMapper mapper;
+    private final VerificationProviderRegistry providers;
 
-    public ExistingTestsStrategy(RequirementCodeMapper mapper) {
+    public ExistingTestsStrategy(RequirementCodeMapper mapper, VerificationProviderRegistry providers) {
         this.mapper = mapper;
+        this.providers = providers;
     }
 
     @Override
@@ -124,6 +127,14 @@ public final class ExistingTestsStrategy implements VerificationStrategy {
         for (TestCaseResult failure : failedMapped) {
             Map<String, Object> inputs = new LinkedHashMap<>();
             inputs.put("test", failure.displayName());
+            // The replay command is language specific, so it comes from the adapter's test runner.
+            // When no runner can produce one, the recipe keeps an empty command and the report says
+            // nothing it cannot back up rather than printing a Maven command for a Python project.
+            List<String> replay = providers.testRunners(context.projectInfo()).stream()
+                    .map(runner -> runner.replayCommand(context, failure))
+                    .filter(command -> command != null && !command.isEmpty())
+                    .findFirst()
+                    .orElse(List.of());
             Counterexample counterexample = new Counterexample(
                     context.state().nextCounterexampleId(),
                     requirement.id(),
@@ -139,8 +150,7 @@ public final class ExistingTestsStrategy implements VerificationStrategy {
                     null,
                     new Counterexample.ReproductionRecipe(
                             "Re-run the failing test in the project",
-                            List.of(context.state().build().command().isEmpty() ? "mvn" : "mvn",
-                                    "-Dtest=" + failure.suite() + "#" + failure.name(), "test"),
+                            replay,
                             null,
                             null,
                             Map.of()),

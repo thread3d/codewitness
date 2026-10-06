@@ -5,7 +5,11 @@ CodeWitness cannot guess your API, so you supply the setup, the calls and the in
 and CodeWitness supplies the mechanical part: boundary enumeration, seeded random search, concurrency
 scheduling, execution, and reproducible counterexamples.
 
-Scenarios live in `codewitness.yaml` under `scenarios:`.
+Scenarios live in `codewitness.yaml` under `scenarios:`. The fragments (`setup`, `call`,
+`observation`, `invariant`) are written in the **project's own language**: Java for a Java project,
+Python for a Python project. Everything else — modes, inputs, ranges, seeds, the counterexample
+protocol — is identical. The examples below are Java; the Python forms are shown in
+[Python projects](#python-projects).
 
 ```yaml
 scenarios:
@@ -53,10 +57,10 @@ scenarios:
 | `requirement` | yes | The requirement id this scenario executes. Scenarios are only attached to that requirement. |
 | `description` | no | Human readable description, shown in evidence. |
 | `mode` | no | `single` (default), `sequence` or `concurrent`. |
-| `setup` | no | Java statements executed once per case, before the steps. Variables declared here are visible to every step, to `observation` and to `invariant`. |
+| `setup` | no | Statements executed once per case, before the steps, in the project's language. Variables declared here are visible to every step, to `observation` and to `invariant`. |
 | `steps` | yes | One or more calls executed in order for each case. |
-| `observation` | no | A Java expression evaluated after each step and made available as a variable named `observation` to `invariant`. |
-| `invariant` | no | A Java boolean expression that must be true. A false value fails the case and produces a counterexample. |
+| `observation` | no | An expression in the project's language, evaluated after each step and made available as a variable named `observation` to `invariant`. |
+| `invariant` | no | A boolean expression that must be true. A false value fails the case and produces a counterexample. |
 | `cases` | no | Number of randomised cases (default 100). Ignored in `mode: single` when there is nothing to search. |
 | `seed` | no | Random seed (default 42). Recorded in evidence so a failing case can be replayed exactly. |
 | `timeout_seconds` | no | Per-case budget hint recorded with the scenario. |
@@ -157,6 +161,54 @@ expression, so it can be a `try`/`catch`, an `if`, or several statements. Two ca
 `catch (Exception e) { }` throws away the distinction between "rejected as required" and "crashed for
 another reason", so catch the specific type; and a swallowed exception leaves nothing to observe, so
 check the state afterwards with an `observation` if it matters.
+
+## Python projects
+
+For a Python project the same scenario is written in Python. `type` is a Python type (or the `domain`
+field is given explicitly), and `${name}` becomes a Python variable:
+
+```yaml
+language:
+  adapter: python
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      from ledger import WithdrawalLedger
+      ledger = WithdrawalLedger()
+    steps:
+      - call: "ledger.withdraw(${t1}, ${a1})"
+        inputs:
+          - {name: t1, type: int, domain: integer, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: decimal.Decimal, domain: decimal, values: ["700"], range: {min: 100, max: 900, scale: 2}}
+    observation: "ledger.total_within_last_24_hours(${t1})"
+    invariant: "observation <= decimal.Decimal(\"1000\")"
+    cases: 200
+    seed: 42
+```
+
+Notes specific to Python:
+
+- generated tests are standard-library `unittest` cases, so they run whether or not pytest is
+  installed; pytest collects them unchanged when it is present;
+- the generated module is saved in the run directory and put on `PYTHONPATH`, so the replay command in
+  the report runs the saved module directly and no generated file is left in your project;
+- put any imports a fragment needs in `setup` (for example `from ledger import WithdrawalLedger`).
+  CodeWitness puts the project's detected source roots on `PYTHONPATH` but does not guess your modules;
+- `mode: concurrent` uses `threading`. The CPython GIL means a data race is not guaranteed to
+  interleave, so a passing concurrent case is evidence rather than proof;
+- the invariant is checked after every step, so an invariant that only holds after all steps belongs
+  in a single compound step — the fixture's fee scenario does exactly that.
+
+Python rejection is expressed the same way, in Python:
+
+```yaml
+steps:
+  - call: "try:\n    ledger.withdraw(amount)\nexcept ValueError:\n    pass\n"
+    description: an amount above the limit must be rejected by raising ValueError
+```
 
 ## Practical advice
 

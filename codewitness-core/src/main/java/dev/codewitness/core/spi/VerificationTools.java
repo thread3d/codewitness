@@ -6,6 +6,7 @@ import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.MutationReport;
 import dev.codewitness.core.model.ProjectInfo;
+import dev.codewitness.core.model.TestCaseResult;
 import dev.codewitness.core.model.TestResult;
 import dev.codewitness.core.requirements.Requirement;
 import dev.codewitness.core.requirements.VerificationObligation;
@@ -46,6 +47,21 @@ public final class VerificationTools {
         boolean supports(ProjectInfo project);
 
         TestResult runTests(VerificationContext context);
+
+        /**
+         * Builds the command that re-runs one already-executed test.
+         *
+         * <p>The core needs a replay command to put in a counterexample, but only the language
+         * adapter knows how its tests are invoked. Returning an empty list means "no replay command
+         * is available", and the report says so rather than printing a command that would not work.
+         *
+         * @param context  the run context
+         * @param testCase the failing test case to replay
+         * @return argv style command, or an empty list when replay is not supported
+         */
+        default List<String> replayCommand(VerificationContext context, TestCaseResult testCase) {
+            return List.of();
+        }
     }
 
     /** Produces normalised static analysis findings. */
@@ -116,5 +132,24 @@ public final class VerificationTools {
         boolean supports(ProjectInfo project);
 
         GeneratedTestExecution execute(VerificationContext context, List<GeneratedTest> tests);
+
+        /**
+         * Builds the command that replays generated tests, optionally pinned to one seed and case.
+         *
+         * <p>Replaying a generated counterexample is execution, so it belongs to the executor rather
+         * than to the strategy that interpreted the result. An empty list means the language has no
+         * replay command; the engine then records the counterexample without one instead of printing
+         * a command that cannot work.
+         *
+         * @param context   the run context
+         * @param tests     the generated tests to replay
+         * @param seed      seed to pin, or {@code null}
+         * @param caseIndex case index to pin, or {@code null}
+         * @return argv style command, or an empty list when replay is not supported
+         */
+        default List<String> reproductionCommand(
+                VerificationContext context, List<GeneratedTest> tests, Long seed, Integer caseIndex) {
+            return List.of();
+        }
     }
 }

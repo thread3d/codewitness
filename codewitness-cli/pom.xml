@@ -31,6 +31,10 @@
       <artifactId>codewitness-adapter-java</artifactId>
     </dependency>
     <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-adapter-python</artifactId>
+    </dependency>
+    <dependency>
       <groupId>info.picocli</groupId>
       <artifactId>picocli</artifactId>
     </dependency>

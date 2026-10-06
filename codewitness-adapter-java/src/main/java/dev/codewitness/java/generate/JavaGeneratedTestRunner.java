@@ -59,6 +59,47 @@ public final class JavaGeneratedTestRunner implements VerificationTools.Generate
         return project.buildSystem().id().equals(buildSystem.id());
     }
 
+    /**
+     * Replays generated tests, pinning the seed and case index when they are known.
+     *
+     * <p>For Maven the seed and case index travel as system properties, which Surefire forwards to
+     * the test JVM. Gradle does not forward system properties to the test JVM, so they are passed
+     * through the environment instead; the generated tests read both.
+     */
+    @Override
+    public List<String> reproductionCommand(
+            VerificationContext context, List<GeneratedTest> tests, Long seed, Integer caseIndex) {
+        List<String> build = context.state().build().command();
+        List<String> command = new ArrayList<>();
+        if (buildSystem.id().equals("gradle")) {
+            command.add("env");
+            if (seed != null) {
+                command.add("CODEWITNESS_SEED=" + seed);
+            }
+            if (caseIndex != null) {
+                command.add("CODEWITNESS_CASE=" + caseIndex);
+            }
+            command.add(build.isEmpty() ? "./gradlew" : build.getFirst());
+            command.add("test");
+            for (GeneratedTest test : tests) {
+                command.add("--tests");
+                command.add(test.className());
+            }
+            return List.copyOf(command);
+        }
+        command.add(build.isEmpty() ? "mvn" : build.getFirst());
+        command.add("-Dtest=" + tests.stream().map(GeneratedTest::simpleName)
+                .collect(java.util.stream.Collectors.joining(",")));
+        if (seed != null) {
+            command.add("-D" + dev.codewitness.core.engine.CounterexampleProtocol.seedProperty() + "=" + seed);
+        }
+        if (caseIndex != null) {
+            command.add("-D" + dev.codewitness.core.engine.CounterexampleProtocol.caseProperty() + "=" + caseIndex);
+        }
+        command.add("test");
+        return List.copyOf(command);
+    }
+
     @Override
     public GeneratedTestExecution execute(VerificationContext context, List<GeneratedTest> tests) {
         if (tests.isEmpty()) {

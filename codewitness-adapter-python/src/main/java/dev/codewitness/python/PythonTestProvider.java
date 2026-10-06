@@ -1,0 +1,171 @@
+package dev.codewitness.python;
+
+import dev.codewitness.core.exec.ProcessResult;
+import dev.codewitness.core.exec.ProcessSpec;
+import dev.codewitness.core.model.ProjectInfo;
+import dev.codewitness.core.model.TestCaseResult;
+import dev.codewitness.core.model.TestResult;
+import dev.codewitness.core.spi.VerificationContext;
+import dev.codewitness.core.spi.VerificationTools;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Runs a Python project's existing tests.
+ *
+ * <p>pytest is used when the interpreter can import it, because it is what most Python projects use
+ * and it writes JUnit XML without any plugin. When it is not installed, the standard library
+ * {@code unittest} runner is used instead, through a small script that writes the same XML. That
+ * matters: verification must not depend on a package the project may not have, and "pytest is
+ * missing" must not become "the tests could not be run".
+ *
+ * <p>The result is always parsed from the raw report. A run that produced no report is reported as
+ * "tests did not execute" with the interpreter's own output, never as a pass.
+ */
+public final class PythonTestProvider implements VerificationTools.TestRunner {
+
+    /** Attribute recorded with the framework actually used in the last run. */
+    public static final String ATTR_USED_FRAMEWORK = "usedTestFramework";
+
+    @Override
+    public String id() {
+        return "python-tests";
+    }
+
+    @Override
+    public boolean supports(ProjectInfo project) {
+        return project.language().equals(dev.codewitness.core.model.LanguageId.PYTHON);
+    }
+
+    @Override
+    public TestResult runTests(VerificationContext context) {
+        ProjectInfo project = context.projectInfo();
+        List<Path> testDirs = project.testSourceDirs();
+        if (testDirs.isEmpty()) {
+            return TestResult.notExecuted("no Python test directory was detected");
+        }
+        String interpreter = interpreter(project, context);
+        PythonScripts.Scripts scripts = PythonScripts.write(context);
+        boolean pytest = usePytest(project);
+
+        Path report = context.artifacts().artifactsDirectory().resolve("python/tests/junit.xml");
+        PythonTestReportParser.deleteIfExists(report);
+        try {
+            Files.createDirectories(report.getParent());
+        } catch (IOException e) {
+            return TestResult.notExecuted("cannot prepare the JUnit report directory: " + e);
+        }
+        List<String> command = command(interpreter, scripts, project, context.projectRoot(), testDirs, pytest, report);
+        context.emit("tests", "running " + (pytest ? "pytest" : "unittest") + " for " + testDirs.size() + " directory(ies)");
+
+        ProcessSpec spec = ProcessSpec.builder(command, context.projectRoot())
+                .environment(PythonInterpreter.environment(project, context.projectRoot(), List.of()))
+                .timeout(context.config().limits().timeout())
+                .maxOutputBytes(1_000_000)
+                .build();
+        ProcessResult result = context.runner().run(spec);
+
+        if (!Files.isRegularFile(report)) {
+            return TestResult.notExecuted("the Python test runner produced no JUnit report ("
+                    + result.describeOutcome() + "); last output: " + lastLines(result.combinedOutput(), 6));
+        }
+        return PythonTestReportParser.parse(List.of(report), context.projectRoot(),
+                "parsed from " + (pytest ? "pytest" : "unittest") + " JUnit XML; " + result.describeOutcome());
+    }
+
+    @Override
+    public List<String> replayCommand(VerificationContext context, TestCaseResult testCase) {
+        ProjectInfo project = context.projectInfo();
+        String interpreter = interpreter(project, context);
+        Path testFile = context.projectRoot().resolve(testCase.suite().replace('.', '/') + ".py");
+        List<String> command = new ArrayList<>();
+        Map<String, String> environment = PythonInterpreter.environment(project, context.projectRoot(), List.of());
+        String pythonPath = environment.get("PYTHONPATH");
+        if (pythonPath != null && !pythonPath.isBlank()) {
+            // The replayed command runs outside CodeWitness's process environment, so the module path
+            // the run used has to be part of the command or the project's package will not import.
+            command.add("env");
+            command.add("PYTHONPATH=" + pythonPath);
+        }
+        if (usePytest(project)) {
+            String selection = testFile + "::" + String.join("::", testCase.name().split("\\."));
+            command.add(interpreter);
+            command.add("-m");
+            command.add("pytest");
+            command.add("-p");
+            command.add("no:cacheprovider");
+            command.add(selection);
+        } else {
+            command.add(interpreter);
+            command.add("-m");
+            command.add("unittest");
+            command.add(testCase.suite() + "." + testCase.name());
+        }
+        return List.copyOf(command);
+    }
+
+    private static List<String> command(
+            String interpreter,
+            PythonScripts.Scripts scripts,
+            ProjectInfo project,
+            Path projectRoot,
+            List<Path> testDirs,
+            boolean pytest,
+            Path report) {
+        List<String> command = new ArrayList<>();
+        command.add(interpreter);
+        if (pytest) {
+            command.add("-m");
+            command.add("pytest");
+            command.add("--rootdir");
+            command.add(projectRoot.toString());
+            command.add("-p");
+            command.add("no:cacheprovider");
+            command.add("-q");
+            command.add("--junitxml=" + report);
+            testDirs.forEach(directory -> command.add(directory.toString()));
+            return command;
+        }
+        command.add(scripts.unittestRunner().toString());
+        command.add("--xml");
+        command.add(report.toString());
+        command.add("--root");
+        command.add(projectRoot.toString());
+        command.add("--pattern");
+        command.add("test*.py");
+        for (Path directory : testDirs) {
+            command.add("--start");
+            command.add(directory.toString());
+        }
+        return command;
+    }
+
+    public static boolean usePytest(ProjectInfo project) {
+        return Boolean.parseBoolean(project.attributes().getOrDefault(PythonInterpreter.ATTR_HAS_PYTEST, "false"));
+    }
+
+    public static String interpreter(ProjectInfo project, VerificationContext context) {
+        String interpreter = project.attributes().get(PythonInterpreter.ATTR_INTERPRETER);
+        if (interpreter != null && !interpreter.isBlank()) {
+            return interpreter;
+        }
+        return PythonInterpreter.resolve(context.projectRoot(), System.getenv());
+    }
+
+    public static String lastLines(String text, int count) {
+        if (text == null || text.isBlank()) {
+            return "(no output)";
+        }
+        String[] lines = text.strip().split("\\R");
+        StringBuilder sb = new StringBuilder();
+        for (int i = Math.max(0, lines.length - count); i < lines.length; i++) {
+            sb.append(lines[i]).append(" | ");
+        }
+        return sb.toString();
+    }
+}

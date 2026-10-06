@@ -166,6 +166,7 @@ public final class VerificationContext {
                 .buildSystem(info.buildSystem())
                 .buildRoot(rebase(info.buildRoot()))
                 .javaVersion(info.javaVersion().orElse(null))
+                .sourceExtensions(info.sourceExtensions())
                 .attributes(info.attributes());
         info.buildWrapper().ifPresent(wrapper -> builder.buildWrapper(rebase(wrapper)));
         info.detectedDescriptors().forEach(d -> builder.addDetectedDescriptor(rebase(d)));

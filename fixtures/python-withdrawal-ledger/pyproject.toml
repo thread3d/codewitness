@@ -1,0 +1,10 @@
+[project]
+name = "withdrawal-ledger"
+version = "1.0.0"
+description = "CodeWitness Python fixture: a ledger with deliberately introduced defects."
+requires-python = ">=3.9"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

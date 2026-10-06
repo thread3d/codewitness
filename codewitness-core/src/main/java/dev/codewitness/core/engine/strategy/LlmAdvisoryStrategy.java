@@ -124,7 +124,7 @@ public final class LlmAdvisoryStrategy implements VerificationStrategy {
                 continue;
             }
             try (var walk = Files.walk(root)) {
-                for (Path file : walk.filter(p -> p.toString().endsWith(".java")).limit(200).toList()) {
+                for (Path file : walk.filter(context.projectInfo()::isSourceFile).limit(200).toList()) {
                     if (budget <= 0) {
                         break;
                     }

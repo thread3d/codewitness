@@ -26,7 +26,16 @@ public final class WorkspaceManager {
 
     /** Directories that are never copied: build output, VCS metadata and previous runs. */
     private static final Set<String> EXCLUDED_DIRECTORIES = Set.of(
-            "target", "build", "out", ".git", ".gradle", ".idea", ".codewitness", "node_modules", ".mvn-cache");
+            "target", "build", "out", ".git", ".gradle", ".idea", ".codewitness", "node_modules", ".mvn-cache",
+            // Python build output, caches and virtual environments. A virtual environment is a copy of
+            // an interpreter with absolute paths baked in: copying it into the workspace would both be
+            // enormous and produce an interpreter that cannot find itself.
+            "__pycache__", ".venv", "venv", ".tox", ".nox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+            ".hypothesis", ".eggs", "dist", ".pytype");
+
+    private static boolean isExcludedDirectory(String name) {
+        return EXCLUDED_DIRECTORIES.contains(name) || name.endsWith(".egg-info");
+    }
 
     private WorkspaceManager() {
     }
@@ -69,7 +78,7 @@ public final class WorkspaceManager {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                     if (!dir.equals(source) && !isSourceDirectory(source, dir)
-                            && EXCLUDED_DIRECTORIES.contains(dir.getFileName().toString())) {
+                            && isExcludedDirectory(dir.getFileName().toString())) {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
                     Files.createDirectories(target.resolve(source.relativize(dir).toString()));

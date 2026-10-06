@@ -71,6 +71,17 @@ public final class JavaTestProvider implements VerificationTools.TestRunner {
         return parsed;
     }
 
+    @Override
+    public List<String> replayCommand(VerificationContext context, dev.codewitness.core.model.TestCaseResult testCase) {
+        List<String> build = context.state().build().command();
+        boolean gradle = buildSystem.id().equals("gradle");
+        String executable = build.isEmpty() ? (gradle ? "./gradlew" : "mvn") : build.getFirst();
+        if (gradle) {
+            return List.of(executable, "test", "--tests", testCase.suite() + "." + testCase.name());
+        }
+        return List.of(executable, "-Dtest=" + testCase.suite() + "#" + testCase.name(), "test");
+    }
+
     private static String lastLines(String text, int count) {
         if (text == null || text.isBlank()) {
             return "(no output)";

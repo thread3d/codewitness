@@ -403,7 +403,7 @@ public final class VerificationEngine {
             List<VerificationObligation> obligations =
                     new ArrayList<>(planner.plan(requirement, config.scenarios()));
             planned.add(requirement.withObligations(obligations));
-            recordMutationWeaknesses(requirement, state.mutation(), mapper, limitations);
+            recordMutationWeaknesses(requirement, state.mutation(), mapper, info, limitations);
         }
         RequirementSet plannedSet = new RequirementSet(planned);
 
@@ -525,7 +525,7 @@ public final class VerificationEngine {
 
     private List<VerificationStrategy> defaultStrategies(RequirementCodeMapper mapper) {
         return List.of(
-                new ExistingTestsStrategy(mapper),
+                new ExistingTestsStrategy(mapper, providers),
                 new StaticAnalysisStrategy(mapper),
                 new GeneratedTestsStrategy(providers),
                 new MutationStrategy(mapper),
@@ -595,14 +595,15 @@ public final class VerificationEngine {
      * limitations list instead.
      */
     private static void recordMutationWeaknesses(
-            Requirement requirement, MutationReport mutation, RequirementCodeMapper mapper, List<String> limitations) {
+            Requirement requirement, MutationReport mutation, RequirementCodeMapper mapper,
+            ProjectInfo project, List<String> limitations) {
         if (!mutation.measured() || mutation.survivors().isEmpty()) {
             return;
         }
         List<SurvivingMutant> relevant = new ArrayList<>();
         for (SurvivingMutant mutant : mutation.survivors()) {
-            String path = mutant.className() == null ? "" : mutant.className().replace('.', '/') + ".java";
-            if (mapper.requirementsForFile(path).contains(requirement.id())) {
+            if (mutantPaths(mutant, project).stream()
+                    .anyMatch(path -> mapper.requirementsForFile(path).contains(requirement.id()))) {
                 relevant.add(mutant);
             }
         }
@@ -655,14 +656,15 @@ public final class VerificationEngine {
 
     @SuppressWarnings("unused")
     private List<VerificationObligation> mutationObligations(
-            Requirement requirement, MutationReport mutation, RequirementCodeMapper mapper, ObligationPlanner planner) {
+            Requirement requirement, MutationReport mutation, RequirementCodeMapper mapper,
+            ProjectInfo project, ObligationPlanner planner) {
         if (!mutation.measured() || mutation.survivors().isEmpty()) {
             return List.of();
         }
         List<SurvivingMutant> relevant = new ArrayList<>();
         for (SurvivingMutant mutant : mutation.survivors()) {
-            String path = mutant.className() == null ? "" : mutant.className().replace('.', '/') + ".java";
-            if (mapper.requirementsForFile(path).contains(requirement.id())) {
+            if (mutantPaths(mutant, project).stream()
+                    .anyMatch(path -> mapper.requirementsForFile(path).contains(requirement.id()))) {
                 relevant.add(mutant);
             }
         }
@@ -684,6 +686,31 @@ public final class VerificationEngine {
                 false));
     }
 
+    /**
+     * @return the candidate paths a mutant's location may correspond to, for requirement mapping.
+     *
+     * <p>A Java mutation tool reports a class name; a Python one reports a file path. Both are turned
+     * into the same shape the requirement mapper uses, driven by the adapter's declared source
+     * extensions, so the engine does not need to know which language produced the mutant.
+     */
+    private static List<String> mutantPaths(SurvivingMutant mutant, ProjectInfo project) {
+        if (mutant.className() == null) {
+            return List.of();
+        }
+        String name = mutant.className();
+        List<String> paths = new ArrayList<>();
+        paths.add(name);
+        if (project.isSourceFileName(name)) {
+            return List.copyOf(paths);
+        }
+        String slashed = name.replace('.', '/');
+        paths.add(slashed);
+        for (String extension : project.sourceExtensions()) {
+            paths.add(slashed + "." + extension);
+        }
+        return List.copyOf(paths);
+    }
+
     private static List<Finding> diagnosticsToFindings(BuildResult build) {
         List<Finding> findings = new ArrayList<>();
         for (var diagnostic : build.diagnostics()) {
@@ -694,7 +721,7 @@ public final class VerificationEngine {
             };
             FindingCategory category = diagnostic.severity() == DiagnosticSeverity.ERROR
                     ? FindingCategory.BUG : FindingCategory.MAINTAINABILITY;
-            findings.add(new Finding("javac", diagnostic.code(), severity, category,
+            findings.add(new Finding("compiler", diagnostic.code(), severity, category,
                     diagnostic.message(), diagnostic.file(), diagnostic.line(), null, Map.of()));
         }
         return findings;

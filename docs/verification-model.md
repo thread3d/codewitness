@@ -113,6 +113,12 @@ CODEWITNESS_COUNTEREXAMPLE|case=37|seed=42|inputs={t1=85800000, a1=700, t2=90000
 A counterexample is only recorded when the failure was **observed by execution**. A suggestion from a
 model that has not been run is a `SUGGESTION`, and the two are never conflated.
 
+The model is language-independent. The examples in this document use Java because that was the first
+adapter, but a Python generated test raises the same line from its standard-library `unittest` case,
+and the engine parses it identically. What changes between languages is only how the experiment is
+run and how a replay command is built; what a counterexample is, and how it affects a verdict, does
+not.
+
 ## Verdicts
 
 `VerdictCalculator` is the only place that assigns a status, and it does so from evidence:

@@ -11,6 +11,7 @@ fixture and prints the outcome.
 | Fixture | Type of defect | Overall | Requirements | What it proves |
 | --- | --- | --- | --- | --- |
 | `withdrawal-ledger` | four defects: rolling window, discarded `BigDecimal`, negative amounts, race | `FAILED` | 4 `FAILED`, 1 `UNVERIFIED` | Several independent defects in one project, each mapped to its own requirement, each with a reproducible counterexample; and an honest `UNVERIFIED` for a requirement nobody can execute. |
+| `python-withdrawal-ledger` | Python: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language the core knows nothing about: detection, syntax build, tests, scenarios, counterexamples and AST mutation, using only the standard library. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
 | `security-vulnerability` | hardcoded credential, SQL built by concatenation | `FAILED` | 2 `FAILED` | Static security rules produce counterexamples with file, line and rule id, without any test running. |
@@ -47,6 +48,35 @@ random search for the negative amount, and eight threads released simultaneously
 
 R-005 is the interesting one: it is `UNVERIFIED`, with the rationale "every planned obligation is
 still unverified. The requirement must not be treated as passing."
+
+### `python-withdrawal-ledger`
+
+The Python counterpart of the reference fixture: a ledger whose limit is applied per calendar day
+instead of over a rolling 24-hour window (R-001) and which accepts a negative withdrawal and reduces
+the recorded total (R-003). The project's own tests pass, which is the point.
+
+```text
+Requirements
+  ✗ R-001  Rolling withdrawal limit             FAILED
+  ✓ R-002  Fees are applied to the total        VERIFIED
+  ✗ R-003  Negative amounts are rejected        FAILED
+  ? R-004  Rounding of computed totals          UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  inputs: {t1=85800000, a1=700, t2=90000000, a2=700}  actual: 1400
+  CE-002  R-001  inputs: {t1=133185906, a1=775.03, t2=7535, a2=886.94}  actual: 1661.97
+  CE-003  R-003  inputs: {amount=-100}                               actual: 400
+
+Mutation testing: 12 mutants, 5 killed, 7 survived (standard library AST mutator)
+```
+
+R-001 and R-003 fail through generated `unittest` scenarios; R-002 is discharged by an executed
+generated test, which is the only path to `VERIFIED`; R-004 declares no scenario and stays
+`UNVERIFIED`. The counterexamples carry the exact inputs and a replay command that runs the saved
+generated module with the recorded seed and case.
+
+The fixture needs an interpreter and nothing else: the adapter uses pytest when it can import it and
+a standard-library runner otherwise, so no third-party package has to be installed for this result.
 
 ### `off-by-one-boundary`
 
@@ -135,10 +165,11 @@ export PATH=/path/to/apache-maven/bin:$PATH
 ./tools/verify-all-fixtures.sh
 ```
 
-Each fixture is a standalone Maven project and can also be verified one at a time:
+Each fixture is a standalone project and can also be verified one at a time:
 
 ```bash
 codewitness verify fixtures/withdrawal-ledger --requirements fixtures/withdrawal-ledger/requirements.md
+codewitness verify fixtures/python-withdrawal-ledger --requirements fixtures/python-withdrawal-ledger/requirements.md
 codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 

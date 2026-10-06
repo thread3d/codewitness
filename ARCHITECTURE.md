@@ -48,10 +48,12 @@ Each arrow is a place where a verification tool usually starts lying. CodeWitnes
 ├──────────────────────────────────────────────────────────────┤
 │ Language adapter API   LanguageAdapter · VerificationTools    │
 ├────────────────┬───────────────────────┬─────────────────────┤
-│ Java adapter   │ (Python, TypeScript,  │                     │
-│                │  Rust … in future)    │                     │
+│ Java adapter   │ Python adapter        │ (TypeScript, Rust …  │
+│ Maven · Gradle │ pytest · unittest ·   │  in future)          │
+│ JUnit · PIT    │ coverage.py · ast     │                      │
 ├────────────────┴───────────────────────┴─────────────────────┤
-│ External tools: javac · Maven · Gradle · JUnit · PIT · JaCoCo │
+│ External tools: javac · Maven · Gradle · JUnit · PIT ·        │
+│ JaCoCo · python · pytest · coverage.py                        │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -61,12 +63,15 @@ Enforced by module boundaries, not by convention:
 | --- | --- | --- |
 | `codewitness-core` | SnakeYAML | the whole model, the engine, the SPIs |
 | `codewitness-adapter-java` | core | Java, Maven, Gradle, JUnit, PIT, JaCoCo |
+| `codewitness-adapter-python` | core | Python, pytest/unittest, coverage.py, AST mutation |
 | `codewitness-storage` | core | SQLite persistence |
 | `codewitness-report` | core, Jackson | JSON and HTML rendering |
 | `codewitness-cli` | all of the above | argument parsing and wiring |
 
-The core has no reference to Java, Maven or JUnit. That is checked by looking at the imports: the
-words do not appear outside `codewitness-adapter-java`.
+The core holds no build-tool logic: it selects an adapter, asks it to inspect, build, test and
+analyse, and reads the source extensions the adapter declares when it must find source or test files.
+Language-specific code lives in the adapter modules; the Java vocabulary appears only in
+`codewitness-adapter-java`.
 
 ## 3. The pipeline
 
@@ -74,18 +79,22 @@ words do not appear outside `codewitness-adapter-java`.
 `PhaseRecord`:
 
 1. **inspect** — language, build system, modules, source and test directories, test frameworks,
-   build wrapper, Java version (`JavaProjectDetector`).
+   build wrapper, runtime version (the language's project detector: `JavaProjectDetector`,
+   `PythonProjectDetector`).
 2. **workspace** — the project is copied into the run directory, excluding build output, VCS metadata
    and previous run data, with executable bits restored on `mvnw`/`gradlew`.
-3. **build** — `test-compile`/`testClasses` through the project's own build tool. Diagnostics are
-   parsed from the tool's output. A failure ends verification here, as `BLOCKED`.
+3. **build** — `test-compile`/`testClasses` for Java, a syntax compile of every source file for
+   Python. Diagnostics are parsed from the tool's output. A failure ends verification here, as
+   `BLOCKED`.
 4. **tests** — stale reports are deleted, the suite is run, and results are parsed from the raw XML
    reports, not from console output.
-5. **static analysis** — compiler warnings (`-Xlint:all`) plus the heuristic rule table.
+5. **static analysis** — compiler diagnostics plus the adapter's heuristic rule table.
 6. **security** — the same rule table, filtered to security rules, reported separately.
 7. **dependencies** — inventory only (see the limitations in the README).
-8. **coverage** — JaCoCo report parsing, with the agent attached automatically when needed.
-9. **mutation** — PIT, with stale reports deleted first.
+8. **coverage** — the adapter's coverage provider (JaCoCo for Java, coverage.py for Python), with the
+   Java agent attached automatically when no report exists.
+9. **mutation** — the adapter's mutation tester (PIT for Java, a bounded AST mutator for Python), with
+   stale reports deleted first.
 10. **obligation planning** — scenarios declared by the user, properties derived from requirement
     text, or an explicit "nothing can be attempted here" obligation.
 11. **strategies** — per requirement: existing tests, static analysis, generated tests, mutation,
@@ -163,8 +172,10 @@ of `VERIFIED`, which would be a lie in the other direction.
 Mapping evidence to requirements is deliberately mechanical, so that a reader can check it:
 
 - a source or test file belongs to a requirement when the requirement's id appears in it, or when the
-  requirement declares `paths:`/`tests:` explicitly;
-- a mutation class name is mapped to its source file path;
+  requirement declares `paths:`/`tests:` explicitly. The extensions that count as source come from the
+  adapter (`sourceExtensions`), so the same rule works for `.java` files and Python modules;
+- a mutation location is mapped to its source file path, whether the tool reports a Java class name
+  or a Python file;
 - anything unmapped stays unmapped and the report says so. CodeWitness never silently attributes a
   passing test to a requirement it does not mention.
 
@@ -173,12 +184,16 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
 **Another language.** Implement `LanguageAdapter` (`supports`, `inspect`, `build`, `runTests`,
 `analyze`, `capabilities`) in a new module, add a `META-INF/services` entry, and register any tool
 providers. The engine needs no change: it selects an adapter by asking each one whether it supports
-the project, and never switches on a language string.
+the project, and never switches on a language string. `codewitness-adapter-python` is the worked
+example: it reuses the whole pipeline and adds only detection, tool providers and a generator.
 
 **Another tool.** Implement one of the interfaces in `VerificationTools` (`Compiler`, `TestRunner`,
 `StaticAnalyzer`, `CoverageProvider`, `MutationTester`, `SecurityAnalyzer`, `DependencyAnalyzer`,
 `TestGenerator`, `GeneratedTestExecutor`) and register it in the composition root
-(`JavaAdapterBundle` is the example). Registration is data, not code paths.
+(`JavaAdapterBundle` and `PythonAdapterBundle` are the examples). Registration is data, not code
+paths. A `TestRunner` or `GeneratedTestExecutor` may also implement the optional replay-command
+methods, which is how a language supplies a reproducible command without the core knowing how tests
+are invoked.
 
 **Another verification strategy.** Implement `VerificationStrategy`. It receives the context, the
 requirement and its obligations, and returns evidence plus per-obligation outcomes. It cannot assign
@@ -194,8 +209,9 @@ report, and the local sandbox is explicitly documented as a resource-safety boun
 security boundary.
 
 A run records everything needed to reproduce it: project identifier, source revision, CodeWitness
-version, Java version, build tool and version, configuration fingerprint, tool versions, language
-model identifier, requirements hash, isolation level, timestamps, and every command. Run data is kept
+version, runtime version (Java or Python), build tool and version, configuration fingerprint, tool
+versions, language model identifier, requirements hash, isolation level, timestamps, and every
+command. Run data is kept
 under `<project>/.codewitness/runs/<run-id>/`, with generated sources and raw reports copied into the
 artifact store so a counterexample can be reviewed and replayed after the run.
 
@@ -210,12 +226,13 @@ reports live in the artifact store on disk, not in the database.
 ## 10. Testing strategy
 
 - **Unit tests** pin the verdict rules, the parsers, the configuration, the sandbox, the workspace
-  copier, the analyzers' rule table and the generated-test rendering (including compiling a generated
-  test to prove it is valid Java).
-- **Integration tests** drive the adapter against small projects and parse synthetic tool reports,
-  including the DOCTYPE-carrying JaCoCo and PIT formats.
+  copier, the analyzers' rule tables and the generated-test rendering (including compiling a generated
+  Java test to prove it is valid Java, and rendering a Python scenario into a runnable module).
+- **Integration tests** drive each adapter against small projects and parse synthetic tool reports,
+  including the DOCTYPE-carrying JaCoCo and PIT formats, pytest's JUnit XML and coverage.py's JSON.
 - **End-to-end tests** (`-Pe2e`) run `codewitness verify` against the fixture projects and assert the
-  verdicts, the counterexample contents and the exit codes.
+  verdicts, the counterexample contents and the exit codes. Both the Java and the Python fixture are
+  covered; the Python one uses only the standard library, so it needs an interpreter and nothing else.
 - **Fixtures** are projects with known defects — off-by-one boundaries, null handling, concurrency,
   security, weak tests, and a requirement that cannot be verified at all — used to prove that
-  CodeWitness distinguishes them.
+  CodeWitness distinguishes them, in more than one language.

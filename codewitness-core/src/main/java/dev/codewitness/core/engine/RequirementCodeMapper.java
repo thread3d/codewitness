@@ -44,11 +44,12 @@ public final class RequirementCodeMapper {
         mapper.applyExplicitDeclarations(requirements);
         List<Path> testRoots = project.testSourceDirs();
         List<Path> mainRoots = project.sourceDirs();
+        Path projectRoot = project.project().root();
         for (Path root : mainRoots) {
-            mapper.scan(root, requirements, false, testRoots);
+            mapper.scan(root, requirements, false, testRoots, projectRoot, project);
         }
         for (Path root : testRoots) {
-            mapper.scan(root, requirements, true, testRoots);
+            mapper.scan(root, requirements, true, testRoots, projectRoot, project);
         }
         return mapper;
     }
@@ -79,12 +80,18 @@ public final class RequirementCodeMapper {
         }
     }
 
-    private void scan(Path root, RequirementSet requirements, boolean testTree, List<Path> testRoots) {
+    private void scan(
+            Path root,
+            RequirementSet requirements,
+            boolean testTree,
+            List<Path> testRoots,
+            Path projectRoot,
+            ProjectInfo project) {
         if (root == null || !Files.isDirectory(root)) {
             return;
         }
         try (Stream<Path> walk = Files.walk(root)) {
-            List<Path> files = walk.filter(p -> p.toString().endsWith(".java")).toList();
+            List<Path> files = walk.filter(project::isSourceFile).toList();
             for (Path file : files) {
                 String content;
                 try {
@@ -102,7 +109,7 @@ public final class RequirementCodeMapper {
                                 .computeIfAbsent(relative, k -> new LinkedHashSet<>())
                                 .add(requirement.id());
                         if (testTree) {
-                            String className = toClassName(file, testRoots);
+                            String className = toClassName(file, testRoots, projectRoot);
                             if (className != null) {
                                 testClassesByRequirement
                                         .computeIfAbsent(requirement.id(), k -> new LinkedHashSet<>())
@@ -121,8 +128,27 @@ public final class RequirementCodeMapper {
         }
     }
 
-    /** Converts a test source file into its fully qualified class name when it sits under a source root. */
-    private static String toClassName(Path file, List<Path> roots) {
+    /**
+     * Converts a test source file into the identifier the test runner reports it under.
+     *
+     * <p>Java reports a fully qualified class name, so the file is relativized against the test
+     * source root and the extension dropped. Python reports a dotted module path, so the file is
+     * relativized against the project root instead: {@code tests/test_ledger.py} becomes
+     * {@code tests.test_ledger}, which is exactly what pytest and unittest put in their reports.
+     */
+    private static String toClassName(Path file, List<Path> roots, Path projectRoot) {
+        String fileName = file.getFileName().toString();
+        int dot = fileName.lastIndexOf('.');
+        String extension = dot < 0 ? "" : fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
+        if (extension.equals("py") || extension.equals("pyi")) {
+            Path base = projectRoot != null && file.startsWith(projectRoot) ? projectRoot : file.getParent();
+            if (base == null) {
+                return stripExtension(fileName);
+            }
+            String relative = base.relativize(file).toString().replace(java.io.File.separatorChar, '.')
+                    .replace('/', '.');
+            return stripExtension(relative);
+        }
         for (Path root : roots) {
             if (root != null && file.startsWith(root)) {
                 String relative = root.relativize(file).toString();
@@ -130,8 +156,12 @@ public final class RequirementCodeMapper {
                         .replaceAll("\\.java$", "");
             }
         }
-        String fileName = file.getFileName().toString();
-        return fileName.endsWith(".java") ? fileName.substring(0, fileName.length() - 5) : null;
+        return extension.equals("java") ? stripExtension(fileName) : null;
+    }
+
+    private static String stripExtension(String value) {
+        int dot = value.lastIndexOf('.');
+        return dot < 0 ? value : value.substring(0, dot);
     }
 
     /** @return test classes that mention the requirement. */

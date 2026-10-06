@@ -86,6 +86,14 @@ public record ProcessSpec(
             return this;
         }
 
+        /** Merges a map of environment variables over the sandbox baseline. */
+        public Builder environment(Map<String, String> values) {
+            if (values != null) {
+                this.environment.putAll(values);
+            }
+            return this;
+        }
+
         public Builder timeout(Duration value) {
             this.timeout = value;
             return this;

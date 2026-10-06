@@ -46,11 +46,21 @@ R-001 fails because the ledger applies the limit per calendar day: two withdrawa
 apart, across midnight, total 1,400 in a rolling 24-hour window. R-005 has no way to be executed, so
 it is `UNVERIFIED` — which is the honest answer, not a failure.
 
-Verify any Java project:
+Verify a Java project:
 
 ```bash
-codewitness verify ./my-project --requirements requirements.md
+codewitness verify ./my-java-project --requirements requirements.md
 ```
+
+or a Python project:
+
+```bash
+codewitness verify ./my-python-project --requirements requirements.md
+```
+
+The language is detected; `language.adapter: java` or `language.adapter: python` forces it. Python
+support needs only an interpreter: it uses `pytest` when the project has it and the standard library
+`unittest` runner otherwise, so a project with no third-party packages can still be verified.
 
 ---
 
@@ -189,11 +199,34 @@ scenarios:
     seed: 42
 ```
 
-`${name}` is substituted with a generated Java variable of the declared `type`, so write `${a1}` and
-not `new java.math.BigDecimal(${a1})`. The invariant is checked after every step. `mode: concurrent`
-releases eight threads simultaneously against one shared subject and then checks the invariant. Every
-failing case reports its exact inputs plus the seed and case index, which is what makes a
-counterexample reproducible:
+`${name}` is substituted with a generated variable of the declared `type`, so write `${a1}` and
+not `new java.math.BigDecimal(${a1})`. The fragments are written in the project's own language: for a
+Python project they are Python statements and expressions, and `${name}` becomes a Python variable:
+
+```yaml
+language:
+  adapter: python
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      from ledger import WithdrawalLedger
+      ledger = WithdrawalLedger()
+    steps:
+      - call: "ledger.withdraw(${t1}, ${a1})"
+        inputs:
+          - {name: t1, type: int, domain: integer, values: ["85800000"]}
+          - {name: a1, type: decimal.Decimal, domain: decimal, values: ["700"], range: {min: 100, max: 900, scale: 2}}
+    observation: "ledger.total_within_last_24_hours(${t1})"
+    invariant: "observation <= decimal.Decimal(\"1000\")"
+```
+
+The invariant is checked after every step. `mode: concurrent` releases eight threads simultaneously
+against one shared subject and then checks the invariant. Every failing case reports its exact inputs
+plus the seed and case index, which is what makes a counterexample reproducible. Python generated
+tests are standard-library `unittest` cases, so they run with or without pytest.
 
 ```bash
 mvn -Dtest=Cw_SC_ROLLING_OB_001_Test -Dcodewitness.seed=42 -Dcodewitness.case=37 test
@@ -212,7 +245,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java
+  adapter: auto          # auto | java | python
 
 verification:
   timeout: 15m           # per build or test command
@@ -305,6 +338,8 @@ codewitness/
 │   ├── config/                codewitness.yaml
 │   └── llm/                   advisory provider abstraction and prompt fencing
 ├── codewitness-adapter-java/  Java 17+ projects (module targets 25), Maven and Gradle, JUnit 5, PIT, JaCoCo
+├── codewitness-adapter-python/ Python 3 projects: syntax build, pytest/unittest, heuristics, security,
+│                              coverage.py, AST mutation, dependency inventory; no third-party package required
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -350,6 +385,32 @@ Implemented and exercised end to end:
 - requirement → evidence mapping, conservative verdict computation;
 - SQLite persistence, canonical JSON and self-contained HTML reports, console reporting;
 - a CLI with `verify`, `inspect`, `test`, `report`, `reproduce`, `clean`, `init`, `version`.
+
+The Python adapter is implemented and exercised end to end as well (`fixtures/python-withdrawal-ledger`):
+
+- detection of Python 3 projects (`pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`,
+  `Pipfile`, `tox.ini`, `pytest.ini`), flat and `src/` layouts, and a project virtual environment when
+  one exists;
+- a syntax build (`compile()` over every source file) whose failures are `BLOCKED`, never a defect;
+- existing tests through pytest when the interpreter can import it, and through a standard-library
+  `unittest` runner that writes the same JUnit XML when it cannot - so no third-party package is
+  required;
+- heuristic correctness rules and a separate security rule set for Python;
+- coverage through `coverage.py`, reported as not measured when it is absent;
+- mutation testing through the standard library `ast` module, with a bounded operator set, a mutant
+  cap and a wall-clock budget;
+- a dependency inventory from the project's manifests (inventory only, no vulnerability database);
+- generated adversarial tests from declared scenarios: the fragments are Python, the generated tests
+  are `unittest` cases, and a counterexample carries the exact inputs plus a replayable command.
+
+Python support is new, and the honest limits are:
+
+- mutation uses a small, documented operator set (arithmetic, comparison boundaries, boolean
+  operators and boolean constants) rather than a dedicated framework such as mutmut or cosmic-ray;
+- coverage and pytest are used when present and reported as unavailable when not: CodeWitness never
+  installs anything;
+- the heuristic rule table is intentionally small and has a known false-positive profile, exactly
+  like the Java one.
 
 Implemented but limited, and reported as such:
 

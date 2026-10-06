@@ -141,6 +141,24 @@ public final class JavaAdapterBundle {
         }
 
         @Override
+        public java.util.List<String> replayCommand(
+                dev.codewitness.core.spi.VerificationContext context,
+                dev.codewitness.core.model.TestCaseResult testCase) {
+            return new JavaTestProvider(new BuildToolLauncher(context.runner()), buildSystem)
+                    .replayCommand(context, testCase);
+        }
+
+        @Override
+        public java.util.List<String> reproductionCommand(
+                dev.codewitness.core.spi.VerificationContext context,
+                java.util.List<dev.codewitness.core.spi.GeneratedTest> tests,
+                Long seed,
+                Integer caseIndex) {
+            return new JavaGeneratedTestRunner(new BuildToolLauncher(context.runner()), buildSystem)
+                    .reproductionCommand(context, tests, seed, caseIndex);
+        }
+
+        @Override
         public dev.codewitness.core.model.MutationReport analyse(
                 dev.codewitness.core.spi.VerificationContext context) {
             return new PitMutationTester(new BuildToolLauncher(context.runner())).analyse(context);
@@ -195,6 +213,24 @@ public final class JavaAdapterBundle {
         public dev.codewitness.core.model.TestResult runTests(
                 dev.codewitness.core.spi.VerificationContext context) {
             return new JavaTestProvider(new BuildToolLauncher(context.runner()), buildSystem).runTests(context);
+        }
+
+        @Override
+        public java.util.List<String> replayCommand(
+                dev.codewitness.core.spi.VerificationContext context,
+                dev.codewitness.core.model.TestCaseResult testCase) {
+            return new JavaTestProvider(new BuildToolLauncher(context.runner()), buildSystem)
+                    .replayCommand(context, testCase);
+        }
+
+        @Override
+        public java.util.List<String> reproductionCommand(
+                dev.codewitness.core.spi.VerificationContext context,
+                java.util.List<dev.codewitness.core.spi.GeneratedTest> tests,
+                Long seed,
+                Integer caseIndex) {
+            return new JavaGeneratedTestRunner(new BuildToolLauncher(context.runner()), buildSystem)
+                    .reproductionCommand(context, tests, seed, caseIndex);
         }
 
         @Override
