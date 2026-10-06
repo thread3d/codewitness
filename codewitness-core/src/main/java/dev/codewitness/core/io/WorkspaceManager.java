@@ -68,7 +68,8 @@ public final class WorkspaceManager {
             Files.walkFileTree(source, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                    if (!dir.equals(source) && EXCLUDED_DIRECTORIES.contains(dir.getFileName().toString())) {
+                    if (!dir.equals(source) && !isSourceDirectory(source, dir)
+                            && EXCLUDED_DIRECTORIES.contains(dir.getFileName().toString())) {
                         return FileVisitResult.SKIP_SUBTREE;
                     }
                     Files.createDirectories(target.resolve(source.relativize(dir).toString()));
@@ -101,6 +102,28 @@ public final class WorkspaceManager {
     }
 
     /**
+     * @return {@code true} when {@code dir} sits under a {@code src} tree of the copied project, and
+     *     is therefore source rather than build output
+     *
+     * <p>The exclusion list matches directory <em>names</em>, and legitimate source packages are
+     * allowed to be called {@code build}, {@code out} or {@code target}. Excluding those would
+     * silently delete real packages from the isolated copy - which is exactly what happened to
+     * CodeWitness's own {@code dev.codewitness.java.build} package - and the copy would then fail to
+     * compile. Build output never lives under {@code src}, so that prefix is what distinguishes the
+     * two. The path is checked relative to the copied project, so a project that merely lives in a
+     * directory called {@code src} is unaffected.
+     */
+    private static boolean isSourceDirectory(Path source, Path dir) {
+        Path relative = source.relativize(dir);
+        for (Path element : relative) {
+            if (element.toString().equals("src")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Restores the executable bit on build wrappers. A copied {@code mvnw} that is not executable is
      * a very confusing failure, so it is handled explicitly rather than left to chance.
      */
@@ -116,7 +139,7 @@ public final class WorkspaceManager {
             permissions.add(PosixFilePermission.OWNER_EXECUTE);
             permissions.add(PosixFilePermission.GROUP_EXECUTE);
             Files.setPosixFilePermissions(file, permissions);
-        } catch (UnsupportedOperationException | IOException ignored) {
+        } catch (UnsupportedOperationException | IOException _) {
             file.toFile().setExecutable(true);
         }
     }

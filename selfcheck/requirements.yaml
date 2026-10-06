@@ -1,0 +1,70 @@
+# Self-verification requirements: CodeWitness's own documented contract, restated as claims a
+# machine can check.
+#
+# These are taken from README.md ("The five verdicts", "Command line", "Requirements",
+# "Configuration") and CONTRIBUTING.md ("Ground rules for changes"). Each one names a rule the
+# project says it will not break, so that pointing CodeWitness at its own source tree is a
+# meaningful test rather than a vanity run.
+#
+# Every requirement except CWR-007 has a scenario in selfcheck/codewitness.yaml that exercises the
+# code path the rule is about. CWR-007 is deliberately left without a scenario: its evidence lives
+# in the opt-in e2e suite, and the honest answer for an unexecuted obligation is UNVERIFIED.
+
+requirements:
+  - id: CWR-001
+    title: A failed build is BLOCKED, never FAILED
+    description: >-
+      A project that does not build must be reported as BLOCKED for every requirement, never as
+      FAILED and never as VERIFIED, even when a counterexample was also observed. CONTRIBUTING.md
+      ground rule 2.
+    paths:
+      - codewitness-core/src/main/java/dev/codewitness/core/engine/VerdictCalculator.java
+
+  - id: CWR-002
+    title: Insufficient evidence is UNVERIFIED
+    description: >-
+      A requirement with no executed evidence and no discharged obligation must be reported as
+      UNVERIFIED with a stated reason. It must never be quietly turned into a pass.
+      CONTRIBUTING.md ground rule 3.
+    paths:
+      - codewitness-core/src/main/java/dev/codewitness/core/engine/VerdictCalculator.java
+
+  - id: CWR-003
+    title: A counterexample reproduced by execution fails the requirement
+    description: >-
+      When a counterexample has been observed by execution, the requirement it belongs to must be
+      reported as FAILED. CONTRIBUTING.md ground rule 1 and the README verdict table.
+    paths:
+      - codewitness-core/src/main/java/dev/codewitness/core/engine/VerdictCalculator.java
+
+  - id: CWR-004
+    title: Language model output is advisory
+    description: >-
+      Evidence produced by a language model must not qualify as deterministic proof and must not,
+      on its own, move a requirement to VERIFIED. CONTRIBUTING.md ground rule 4.
+    paths:
+      - codewitness-core/src/main/java/dev/codewitness/core/evidence/Evidence.java
+
+  - id: CWR-005
+    title: Requirement identifiers are stable
+    description: >-
+      Parsing the same requirements document twice must yield the same identifiers, taken from the
+      document heading. README "Requirements" and the RequirementParser contract.
+    paths:
+      - codewitness-core/src/main/java/dev/codewitness/core/requirements/RequirementParser.java
+
+  - id: CWR-006
+    title: Durations parse with documented suffixes and fall back safely
+    description: >-
+      Duration text such as "10m" parses to the documented duration, and a value that cannot be
+      parsed falls back to the supplied default instead of failing the run. README "Configuration".
+    paths:
+      - codewitness-core/src/main/java/dev/codewitness/core/config/DurationParser.java
+
+  - id: CWR-007
+    title: CLI exit codes are part of the interface
+    description: >-
+      codewitness verify exits 0 when nothing failed, 1 when at least one requirement FAILED, 2 when
+      verification was BLOCKED and 3 on a usage or internal error. README "Command line".
+    tests:
+      - dev.codewitness.cli.EndToEndVerificationTest

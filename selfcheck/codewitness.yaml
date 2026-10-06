@@ -1,0 +1,143 @@
+# CodeWitness configuration for the self-verification run.
+#
+#   ./codewitness verify . \
+#       --requirements selfcheck/requirements.yaml \
+#       --config selfcheck/codewitness.yaml \
+#       --no-mutation --max-duration 30m
+#
+# Each scenario executes one of CodeWitness's own documented ground rules (CONTRIBUTING.md) against
+# the class that implements it. The scenario supplies the oracle; CodeWitness supplies boundary
+# enumeration, execution and a reproducible counterexample. A passing scenario is therefore
+# evidence that the rule's code path really does behave as the documentation claims.
+
+project:
+  name: codewitness-self-check
+
+language:
+  adapter: java
+
+verification:
+  timeout: 10m
+  max_duration: 30m
+  max_generated_tests: 30
+
+tests:
+  enabled: true
+
+property_testing:
+  enabled: true
+  max_scenarios: 20
+  concurrent: true
+
+static_analysis:
+  enabled: true
+  analyzers: [javac, heuristics]
+
+security:
+  enabled: true
+
+# Mutation testing is off: PIT over five modules is far beyond what this self-check needs, and the
+# rule under test here is the verdict logic, not test strength.
+mutation:
+  enabled: false
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: false
+
+scenarios:
+  # Ground rule 2: a failed build is BLOCKED, never FAILED. The synthetic counterexample makes the
+  # ordering explicit: even when a counterexample exists, build failure wins and the verdict is
+  # BLOCKED rather than FAILED.
+  - id: SC-CWR-001
+    requirement: CWR-001
+    description: VerdictCalculator reports BLOCKED for a failed build even with a counterexample present
+    mode: single
+    setup: |
+      dev.codewitness.core.requirements.Requirement cwr001 = dev.codewitness.core.requirements.Requirement.builder("CWR-001", "A project that does not build must be reported as BLOCKED, never as FAILED.").title("A failed build is BLOCKED, never FAILED").build();
+      dev.codewitness.core.requirements.VerificationObligation ob001 = dev.codewitness.core.requirements.VerificationObligation.of("OB-CWR1", "CWR-001", "a failed build must be reported as blocked", dev.codewitness.core.requirements.ObligationKind.BOUNDARY_VALUE, dev.codewitness.core.requirements.ObligationOrigin.USER_DECLARED);
+      dev.codewitness.core.result.Counterexample ce001 = new dev.codewitness.core.result.Counterexample("CE-CWR1", "CWR-001", "OB-CWR1", "synthetic counterexample used to test precedence", null, "the requirement holds", "observed violation", "synthetic", "self-check", "EV-CWR1", null, null, dev.codewitness.core.result.Counterexample.DiscoveryMethod.GENERATED_TEST);
+      dev.codewitness.core.result.RequirementVerdict v001 = dev.codewitness.core.engine.VerdictCalculator.compute(cwr001, java.util.List.of(ob001), java.util.List.of(), java.util.List.of(), java.util.List.of(ce001), true, "the project does not compile", java.util.List.of());
+    steps:
+      - call: '/* the verdict is computed in setup */'
+        description: compute the verdict for a project that failed to build
+    observation: 'v001.status()'
+    invariant: 'observation == dev.codewitness.core.requirements.RequirementStatus.BLOCKED'
+
+  # Ground rule 3: no evidence means UNVERIFIED, and the reason is stated.
+  - id: SC-CWR-002
+    requirement: CWR-002
+    description: A requirement with no evidence and no discharged obligation stays UNVERIFIED
+    mode: single
+    setup: |
+      dev.codewitness.core.requirements.Requirement cwr002 = dev.codewitness.core.requirements.Requirement.builder("CWR-002", "A requirement with no evidence must be reported as UNVERIFIED, not as a pass.").title("Insufficient evidence is UNVERIFIED").build();
+      dev.codewitness.core.result.RequirementVerdict v002 = dev.codewitness.core.engine.VerdictCalculator.compute(cwr002, java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(), false, null, java.util.List.of());
+    steps:
+      - call: '/* the verdict is computed in setup */'
+        description: compute the verdict from an empty evidence set
+    observation: 'v002.status()'
+    invariant: 'observation == dev.codewitness.core.requirements.RequirementStatus.UNVERIFIED'
+
+  # Ground rule 1: an executed counterexample fails its requirement.
+  - id: SC-CWR-003
+    requirement: CWR-003
+    description: A counterexample observed by execution fails the requirement it belongs to
+    mode: single
+    setup: |
+      dev.codewitness.core.requirements.Requirement cwr003 = dev.codewitness.core.requirements.Requirement.builder("CWR-003", "A counterexample reproduced by execution must fail the requirement.").title("Counterexamples fail requirements").build();
+      dev.codewitness.core.requirements.VerificationObligation ob003 = dev.codewitness.core.requirements.VerificationObligation.of("OB-CWR3", "CWR-003", "the observed counterexample must fail the requirement", dev.codewitness.core.requirements.ObligationKind.BOUNDARY_VALUE, dev.codewitness.core.requirements.ObligationOrigin.USER_DECLARED);
+      dev.codewitness.core.result.Counterexample ce003 = new dev.codewitness.core.result.Counterexample("CE-CWR3", "CWR-003", "OB-CWR3", "synthetic counterexample", null, "the requirement holds", "observed violation", "synthetic", "self-check", "EV-CWR3", null, null, dev.codewitness.core.result.Counterexample.DiscoveryMethod.GENERATED_TEST);
+      dev.codewitness.core.result.RequirementVerdict v003 = dev.codewitness.core.engine.VerdictCalculator.compute(cwr003, java.util.List.of(ob003), java.util.List.of(), java.util.List.of(), java.util.List.of(ce003), false, null, java.util.List.of());
+    steps:
+      - call: '/* the verdict is computed in setup */'
+        description: compute the verdict from a recorded counterexample
+    observation: 'v003.status()'
+    invariant: 'observation == dev.codewitness.core.requirements.RequirementStatus.FAILED'
+
+  # Ground rule 4: advisory language-model output is not proof. The observation checks both halves:
+  # the verdict is not VERIFIED, and the evidence does not qualify as deterministic proof.
+  - id: SC-CWR-004
+    requirement: CWR-004
+    description: Advisory language model evidence does not qualify as proof and does not verify a requirement
+    mode: single
+    setup: |
+      dev.codewitness.core.requirements.Requirement cwr004 = dev.codewitness.core.requirements.Requirement.builder("CWR-004", "Language model output must never count as proof.").title("Language model output is advisory").build();
+      dev.codewitness.core.requirements.VerificationObligation ob004 = dev.codewitness.core.requirements.VerificationObligation.of("OB-CWR4", "CWR-004", "advisory evidence must not discharge the obligation", dev.codewitness.core.requirements.ObligationKind.BOUNDARY_VALUE, dev.codewitness.core.requirements.ObligationOrigin.USER_DECLARED);
+      dev.codewitness.core.evidence.Evidence llm004 = dev.codewitness.core.evidence.Evidence.builder("EV-CWR4", dev.codewitness.core.evidence.EvidenceType.LLM_ANALYSIS).status(dev.codewitness.core.evidence.EvidenceStatus.SUPPORTS).confidence(dev.codewitness.core.evidence.EvidenceConfidence.ADVISORY).generatedByLlm(true).executedIndependently(false).description("an unexecuted language model suggestion that the requirement holds").requirement("CWR-004").build();
+      dev.codewitness.core.result.RequirementVerdict v004 = dev.codewitness.core.engine.VerdictCalculator.compute(cwr004, java.util.List.of(ob004), java.util.List.of(), java.util.List.of(llm004), java.util.List.of(), false, null, java.util.List.of());
+    steps:
+      - call: '/* the verdict is computed in setup */'
+        description: compute the verdict from advisory evidence only
+    observation: 'v004.status().name() + "|" + llm004.qualifiesAsDeterministicProof()'
+    invariant: 'observation.equals("UNVERIFIED|false")'
+
+  # Stable identifiers: the same document parses to the same id, taken from the heading.
+  - id: SC-CWR-005
+    requirement: CWR-005
+    description: Parsing a requirement heading yields the stable identifier from that heading
+    mode: single
+    setup: |
+      dev.codewitness.core.requirements.RequirementSet parsed005 = dev.codewitness.core.requirements.RequirementParser.parseMarkdown("# CWR-005 Stable requirement identifiers\n\nParsing the same document must always yield the same identifier.", "self-check");
+    steps:
+      - call: '/* parsing happens in setup */'
+        description: parse a one-requirement Markdown document
+    observation: 'parsed005.size() + ":" + parsed005.requirements().get(0).id()'
+    invariant: 'observation.equals("1:CWR-005")'
+
+  # Duration parsing, including the safe fallback the README documents.
+  - id: SC-CWR-006
+    requirement: CWR-006
+    description: A duration suffix parses correctly and an unparseable value falls back to the default
+    mode: single
+    setup: |
+      java.time.Duration d006 = dev.codewitness.core.config.DurationParser.parse("10m", java.time.Duration.ofSeconds(15));
+      java.time.Duration d006b = dev.codewitness.core.config.DurationParser.parse("eventually", java.time.Duration.ofSeconds(15));
+    steps:
+      - call: '/* parsing happens in setup */'
+        description: parse a valid duration and an invalid one
+    observation: 'd006.toSeconds() + ":" + d006b.toSeconds()'
+    invariant: 'observation.equals("600:15")'

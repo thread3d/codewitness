@@ -49,6 +49,10 @@
     <!-- End-to-end tests drive real Maven builds of fixture projects; they are opt-in so that the
          default build stays fast and does not need the network. Run them with -Pe2e. -->
     <excluded.groups>e2e</excluded.groups>
+    <!-- Surefire's argLine must be built from this property rather than hard-coded, because JaCoCo's
+         prepare-agent sets this property at runtime. An empty default keeps a plain `mvn test`
+         working; see the surefire configuration below. -->
+    <argLine></argLine>
   </properties>
 
   <dependencyManagement>
@@ -136,6 +140,13 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <excludedGroups>${excluded.groups}</excludedGroups>
+          <!-- sqlite-jdbc loads a native library, which JDK 24+ treats as restricted native access
+               and warns about. The warning becomes an error in a future release, so grant it here
+               rather than letting the build drift towards failure.
+               @{argLine} is late-replaced with the argLine property at execution time, which is how
+               JaCoCo's prepare-agent contributes -javaagent:... to the test JVM. Writing the flag as
+               a literal instead would silently override the agent and make coverage unmeasurable. -->
+          <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
         </configuration>
       </plugin>
     </plugins>

@@ -54,6 +54,36 @@ class WorkspaceManagerTest {
     }
 
     @Test
+    @DisplayName("a source package named build, out or target is copied, not mistaken for build output")
+    void sourcePackagesNamedLikeBuildOutputAreCopied(@TempDir Path root) throws IOException {
+        // Regression: the exclusion list matches directory names at any depth, so it used to delete
+        // CodeWitness's own dev.codewitness.java.build package from the isolated copy and the copied
+        // project then failed to compile.
+        projectWith(root, "src/main/java/com/example/build/Builder.java",
+                "package com.example.build; class Builder {}");
+        projectWith(root, "src/main/java/com/example/target/Target.java",
+                "package com.example.target; class Target {}");
+        projectWith(root, "src/test/java/com/example/out/OutTest.java",
+                "package com.example.out; class OutTest {}");
+        projectWith(root, "build/libs/app.jar", "jar");
+        projectWith(root, "target/classes/App.class", "compiled");
+
+        Workspace workspace = WorkspaceManager.prepare(ProjectRef.of(root.resolve("project")),
+                root.resolve("run"), Mode.COPY);
+
+        assertTrue(Files.exists(workspace.root().resolve("src/main/java/com/example/build/Builder.java")),
+                "a package called build under src is source, not build output");
+        assertTrue(Files.exists(workspace.root().resolve("src/main/java/com/example/target/Target.java")),
+                "a package called target under src is source, not build output");
+        assertTrue(Files.exists(workspace.root().resolve("src/test/java/com/example/out/OutTest.java")),
+                "a package called out under src is source, not build output");
+        assertFalse(Files.exists(workspace.root().resolve("build")),
+                "build output at the project root must still be excluded");
+        assertFalse(Files.exists(workspace.root().resolve("target")),
+                "build output at the project root must still be excluded");
+    }
+
+    @Test
     @DisplayName("a copied project is marked isolated and described as such")
     void copiedWorkspaceIsIsolated(@TempDir Path root) throws IOException {
         projectWith(root, "pom.xml", "<project/>");
