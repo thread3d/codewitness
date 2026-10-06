@@ -1,0 +1,12 @@
+{
+  "name": "javascript-withdrawal-ledger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CodeWitness JavaScript fixture: a ledger with deliberately introduced defects.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

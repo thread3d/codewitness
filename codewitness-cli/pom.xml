@@ -40,6 +40,10 @@
     </dependency>
     <dependency>
       <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-adapter-javascript</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.codewitness</groupId>
       <artifactId>codewitness-adapter-typescript</artifactId>
     </dependency>
     <dependency>

@@ -13,6 +13,9 @@ change has to respect.
   `cargo-llvm-cov` is used for coverage when present)
 - Node 22.6 or newer on `PATH` for the TypeScript adapter and its end-to-end fixture (no package is
   needed; a project-local `tsc` is used for type checking when present)
+- Node 18.17 or newer on `PATH` for the JavaScript adapter and its end-to-end fixture (no package is
+  needed, and there is no compiler or type check; 18.17 is the first release whose JUnit reporter the
+  test phase reads)
 - Network access for the first build (dependencies) and for the end-to-end tests
 
 ## Build and test
@@ -67,8 +70,10 @@ implementation), plus `requirements.md` and `codewitness.yaml`.
 To add one:
 
 1. Copy the structure of `fixtures/withdrawal-ledger` (Java, Maven, JUnit 5),
-   `fixtures/python-withdrawal-ledger` (Python, `pyproject.toml`, `unittest`/pytest) or
-   `fixtures/rust-withdrawal-ledger` (Rust, `Cargo.toml`, libtest). Keep at least
+   `fixtures/python-withdrawal-ledger` (Python, `pyproject.toml`, `unittest`/pytest),
+   `fixtures/rust-withdrawal-ledger` (Rust, `Cargo.toml`, libtest),
+   `fixtures/typescript-withdrawal-ledger` (TypeScript, `tsconfig.json`, `node:test`) or
+   `fixtures/javascript-withdrawal-ledger` (JavaScript, `package.json`, `node:test`). Keep at least
    one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
    adapter's "Java 17+" claim stays exercised against real bytecode.
 2. Introduce **one** defect, and state it in a comment at the top of the class — the comment is part
@@ -89,8 +94,8 @@ To add one:
    `build()`, `runTests()`, `analyze()` and `capabilities()`. Detection belongs in its own
    inspectable class, like `JavaProjectDetector`.
 3. Implement the tool providers you need from `VerificationTools` and register them where the CLI
-   wires everything (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle` and
-   `TypeScriptAdapterBundle` are the worked examples). If your
+   wires everything (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`,
+   `TypeScriptAdapterBundle` and `JavaScriptAdapterBundle` are the worked examples). If your
    tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
    counterexample carries a command that actually runs.
 4. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the
@@ -148,7 +153,8 @@ outcomes. You cannot assign a verdict; the engine does that from your evidence. 
 - [ ] `mvn -Pe2e test` passes.
 - [ ] `./demo.sh` still finds the four defects in `fixtures/withdrawal-ledger`, and
       `codewitness verify fixtures/python-withdrawal-ledger` still reports R-001 and R-003 as `FAILED`
-      and R-002 as `VERIFIED`, and `codewitness verify fixtures/rust-withdrawal-ledger` still reports
+      and R-002 as `VERIFIED`, and `codewitness verify fixtures/rust-withdrawal-ledger`,
+      `fixtures/typescript-withdrawal-ledger` and `fixtures/javascript-withdrawal-ledger` still report
       R-001 and R-003 as `FAILED`, R-002 as `VERIFIED` and R-004 as `UNVERIFIED`.
 - [ ] No `.codewitness` run data, build output or generated test sources are committed.
 - [ ] The README's "honest status" section still describes what the tool actually does.

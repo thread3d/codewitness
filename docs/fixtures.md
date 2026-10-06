@@ -14,6 +14,7 @@ fixture and prints the outcome.
 | `python-withdrawal-ledger` | Python: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language the core knows nothing about: detection, syntax build, tests, scenarios, counterexamples and AST mutation, using only the standard library. |
 | `rust-withdrawal-ledger` | Rust: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language with a build step: Cargo detection and build, libtest parsing, scenario-generated integration tests, counterexamples and bounded source mutation, with no third-party crate. |
 | `typescript-withdrawal-ledger` | TypeScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language executed by Node's type stripper: detection, syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
+| `javascript-withdrawal-ledger` | JavaScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for plain JavaScript, with no compiler and no type check anywhere: detection, `node --check` syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
 | `security-vulnerability` | hardcoded credential, SQL built by concatenation | `FAILED` | 2 `FAILED` | Static security rules produce counterexamples with file, line and rule id, without any test running. |
@@ -143,6 +144,43 @@ The fixture needs Node 22.6 or later and nothing else: it has no packages, so it
 tested, covered and mutated by the runtime it already has. Its scenario fragments reference inputs as
 `#{name}` rather than `${name}`, because `${...}` is template-literal interpolation in TypeScript.
 
+### `javascript-withdrawal-ledger`
+
+The JavaScript counterpart of the reference fixture: a plain JavaScript module whose limit is applied
+per calendar day instead of over a rolling 24-hour window (R-001) and which accepts a negative
+withdrawal and reduces the recorded total (R-003). Amounts are `bigint` minor units and instants are
+epoch milliseconds, so the arithmetic is exact and the fixture needs no package. The project's own
+tests pass, which is the point.
+
+```text
+Requirements
+  ✗ R-001  Rolling withdrawal limit              FAILED
+  ✓ R-002  Fees are applied to the recorded total VERIFIED
+  ✗ R-003  Negative amounts are rejected         FAILED
+  ? R-004  Rounding of computed totals           UNVERIFIED
+
+Tests:            2 executed, 2 passed
+Coverage:         line 97.3% (73/75), branch 88.9% (8/9)   (V8, via LCOV)
+Mutation testing: 12 mutants, 5 killed, 7 survived         (built-in source mutator)
+```
+
+R-001 and R-003 fail through generated `node:test` modules; R-002 is discharged by an executed
+generated test, which is the only path to `VERIFIED`; R-004 declares no scenario and stays
+`UNVERIFIED`. Each counterexample carries the exact inputs and a replay command that runs the saved
+generated test with the recorded seed and case. Coverage and mutation are measured exactly as they are
+for the TypeScript fixture, with no compiler anywhere in the pipeline.
+
+The fixture needs Node 18.17 or later and nothing else: it has no packages, so it is syntax-checked,
+tested, covered and mutated by the runtime it already has. Its `codewitness.yaml` names the built-in
+mutator as `mutation.tool: javascript-text`. Its scenario fragments reference inputs as
+`#{name}` rather than `${name}`, because `${...}` is template-literal interpolation in JavaScript, and
+the generated test is written with the `.test.mjs` extension so it is unambiguously an ES module.
+
+Unlike the TypeScript fixture, nothing here is type checked: the JavaScript adapter has no compiler,
+and its build is a syntax check with the runtime's own parser. The two adapters are exclusive — a
+project with a `tsconfig.json` or any TypeScript source belongs to the TypeScript adapter — so a
+JavaScript run never implies a type check happened.
+
 ### `off-by-one-boundary`
 
 ```text
@@ -237,6 +275,7 @@ codewitness verify fixtures/withdrawal-ledger --requirements fixtures/withdrawal
 codewitness verify fixtures/python-withdrawal-ledger --requirements fixtures/python-withdrawal-ledger/requirements.md
 codewitness verify fixtures/rust-withdrawal-ledger --requirements fixtures/rust-withdrawal-ledger/requirements.md
 codewitness verify fixtures/typescript-withdrawal-ledger --requirements fixtures/typescript-withdrawal-ledger/requirements.md
+codewitness verify fixtures/javascript-withdrawal-ledger --requirements fixtures/javascript-withdrawal-ledger/requirements.md
 codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 

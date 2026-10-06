@@ -150,10 +150,11 @@ public final class RequirementCodeMapper {
                     .replace('/', '.');
             return stripExtension(relative);
         }
-        if (extension.equals("ts") || extension.equals("tsx") || extension.equals("mts") || extension.equals("cts")) {
+        if (extension.equals("js") || extension.equals("mjs") || extension.equals("cjs")
+                || extension.equals("ts") || extension.equals("tsx") || extension.equals("mts") || extension.equals("cts")) {
             // Node's test runner reports a test file by path and its cases by display name, so the
             // stable identifier is the file's own name: the extension and the test/spec marker are
-            // dropped, which is what TypeScriptTestReportParser produces for the same file.
+            // dropped, which is what the Node test report parser produces for the same file.
             return stripTestMarker(stripExtension(fileName));
         }
         for (Path root : roots) {

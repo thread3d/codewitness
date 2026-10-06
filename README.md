@@ -70,14 +70,23 @@ or a TypeScript project:
 codewitness verify ./my-typescript-project --requirements requirements.md
 ```
 
-The language is detected; `language.adapter: java`, `python`, `rust` or `typescript` forces it. Python
-support needs only an interpreter: it uses `pytest` when the project has it and the standard library
-`unittest` runner otherwise, so a project with no third-party packages can still be verified. Rust
-support needs only `cargo`: a dependency-free crate is built, tested, analysed and mutated by the
-toolchain it already has, and generated scenarios become ordinary Cargo integration tests. TypeScript
-support needs only Node 22.6 or later: a project with no `node_modules` is syntax-checked, tested,
-analysed and mutated by the runtime it already has, and generated scenarios become ordinary
-`node:test` modules.
+or a JavaScript project:
+
+```bash
+codewitness verify ./my-javascript-project --requirements requirements.md
+```
+
+The language is detected; `language.adapter: java`, `python`, `rust`, `typescript` or `javascript`
+forces it. Python support needs only an interpreter: it uses `pytest` when the project has it and the
+standard library `unittest` runner otherwise, so a project with no third-party packages can still be
+verified. Rust support needs only `cargo`: a dependency-free crate is built, tested, analysed and
+mutated by the toolchain it already has, and generated scenarios become ordinary Cargo integration
+tests. TypeScript support needs only Node 22.6 or later: a project with no `node_modules` is
+syntax-checked, tested, analysed and mutated by the runtime it already has, and generated scenarios
+become ordinary `node:test` modules. JavaScript support needs only Node 18.17 or later: there is no
+compiler and no type check anywhere in the pipeline — the build is a syntax check with the runtime's
+own parser — and a project with no `node_modules` is checked, tested, analysed and mutated by the
+runtime it already has, with generated scenarios becoming ordinary `node:test` modules.
 
 ---
 
@@ -299,6 +308,36 @@ scenarios:
 TypeScript generated tests use only Node's standard library, so they run on Node 22.6 or later
 without a build step; `#{name}` becomes a TypeScript variable of the declared `type`.
 
+For a JavaScript project the fragments are plain JavaScript, the generated test is a `node:test`
+module written beside the project's own tests, and inputs are referenced as `#{name}` for the same
+reason: `${...}` is template-literal interpolation in JavaScript, so `#{...}` is used instead and
+cannot collide with it. The generated file uses the `.test.mjs` extension, so it is unambiguously an
+ES module whatever the project's `package.json` declares, and it carries no type annotations:
+
+```yaml
+language:
+  adapter: javascript
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      import { WithdrawalLedger } from "../src/ledger.js";
+      const ledger = new WithdrawalLedger();
+    steps:
+      - call: "ledger.withdraw(#{t1}, #{a1});"
+        inputs:
+          - {name: t1, type: bigint, domain: integer, values: ["85800000"]}
+          - {name: a1, type: bigint, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+    observation: "ledger.totalWithinLast24Hours(#{t1})"
+    invariant: "observation <= 100000n"
+```
+
+JavaScript generated tests use only Node's standard library, so they run on Node 18.17 or later
+without a build step; `#{name}` becomes a JavaScript variable, and `type` only selects `bigint`
+wrapping.
+
 ```bash
 mvn -Dtest=Cw_SC_ROLLING_OB_001_Test -Dcodewitness.seed=42 -Dcodewitness.case=37 test
 ```
@@ -316,7 +355,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | typescript
+  adapter: auto          # auto | java | python | rust | typescript | javascript
 
 verification:
   timeout: 15m           # per build or test command
@@ -417,6 +456,10 @@ codewitness/
 ├── codewitness-adapter-typescript/ TypeScript projects: Node syntax check and tsc, node:test with JUnit
 │                               parsing, heuristics, security, V8 coverage from LCOV, built-in source
 │                               mutation, dependency inventory; no third-party package required
+├── codewitness-adapter-javascript/ JavaScript projects: Node syntax check only (no compiler, no type
+│                               check), node:test with JUnit parsing, heuristics, security, V8
+│                               coverage from LCOV, built-in source mutation, dependency inventory;
+│                               no third-party package required
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -439,8 +482,9 @@ mvn -pl codewitness-core test   # one module
 ```
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
-plus Python 3, Cargo and Node for their fixtures, and network access the first time, because it builds
-real projects. An end-to-end test is skipped rather than failed when its toolchain is absent.
+plus Python 3, Cargo and Node for the Python, Rust, TypeScript and JavaScript fixtures, and network
+access the first time, because it builds real projects. An end-to-end test is skipped rather than
+failed when its toolchain is absent.
 
 ---
 
@@ -558,6 +602,66 @@ The honest limits of TypeScript support are:
   interpolation in TypeScript;
 - a generated test is written beside the project's own tests and its `setup` import is relative to that
   directory, which is why the convention is stated in the documentation;
+- the heuristic rule table is intentionally small and has a known false-positive profile.
+
+The JavaScript adapter is implemented and exercised end to end as well
+(`fixtures/javascript-withdrawal-ledger`):
+
+- detection of Node/JavaScript projects (adapter id `javascript`, language id `javascript`, build
+  system `node`): a `package.json` beside JavaScript sources, or an unambiguous Node test file such as
+  `*.test.js` or `*.spec.mjs`, with the conventional `src/` plus `tests/` layout. It deliberately
+  refuses a project that has a `tsconfig.json` or `tsconfig.base.json` or any
+  `.ts`/`.tsx`/`.mts`/`.cts` source, leaving it to the TypeScript adapter. `.jsx` is not a source or
+  test extension here either, because Node cannot execute JSX without a transform, so a project whose
+  sources or tests are all JSX is left unclaimed rather than run without its transform;
+- a build that is a syntax check only: `node --check` over every source and test file through a
+  generated helper script. JavaScript has no compiler and no type check anywhere in the pipeline, and
+  the build message says so;
+- existing tests through Node's built-in runner (`node --test --test-reporter=junit`), read from the
+  JUnit report the runner writes rather than from console output, with the raw report stored as an
+  artefact; Node 18.17 or later is required for that reporter;
+- heuristic correctness rules and a separate security rule set for JavaScript (`CW-JS-SEC-001..007`,
+  `CW-JS-REL-001..004`, `CW-JS-BUG-001..002`, `CW-JS-NUM-001..002`, `CW-JS-DATE-001` and
+  `CW-JS-TEST-001`). The TypeScript-only escape-hatch rules for `any`, non-null assertions and
+  `@ts-ignore` have no JavaScript equivalent and are deliberately absent;
+- coverage through V8 (`node --test --experimental-test-coverage --test-reporter=lcov`), read from
+  its LCOV export;
+- mutation testing through a bounded, built-in source mutator (provider id `javascript-text-mutation`,
+  tool id `javascript-text`; arithmetic, comparison boundaries, equality, boolean operators and
+  boolean constants) that flips one operator at a time and re-runs the suite, excluding mutants the
+  runtime cannot parse;
+- a dependency inventory from `package.json` (inventory only, no vulnerability database);
+- generated adversarial tests from declared scenarios: the fragments are plain JavaScript, the
+  generated tests are ordinary `node:test` modules written with the `.test.mjs` extension, a failing
+  case throws the same `CODEWITNESS_COUNTEREXAMPLE|…` protocol line, and a counterexample carries the
+  exact inputs plus a replayable `node --test` command.
+
+The honest limits of JavaScript support are:
+
+- JavaScript has no compiler and no type check, here or anywhere else in the pipeline: the build
+  verifies syntax with the runtime's own parser and nothing more. CodeWitness never claims a type
+  check happened;
+- generated scenario tests are always written as `.test.mjs`, so they are always ES modules whatever
+  the project's `package.json` `"type"` says. In a CommonJS project a scenario fragment's `import`
+  must therefore use the form Node's ESM/CJS interop supports: a named import works when the CommonJS
+  module exposes its exports statically (`exports.Foo = …` or `module.exports = { Foo }`), and
+  otherwise the default-import form is needed. The build check and the project's own tests still
+  follow the project's module type — `node --check` and `node --test` both honour `package.json`
+  `"type"`;
+- tests run through Node's built-in runner, so a project whose tests are written for Jest or Vitest is
+  detected and reported, but those runners are not installed or invoked;
+- `.jsx` needs a transform the runtime does not perform, so it is not a source or test extension for
+  this adapter: a `.jsx` test is never collected as if it had run, and a project whose sources or
+  tests are all JSX is left unclaimed rather than reported as passing;
+- mutation uses a deliberately small operator set rather than Stryker, and only operators surrounded
+  by whitespace are considered, so an unformatted expression may be skipped;
+- coverage is V8 coverage, so only the files the tests actually loaded appear in the report: a source
+  file no test imports is not counted as 0%, it is absent, and the report says so;
+- scenarios reference inputs as `#{name}` rather than `${name}` because `${...}` is template-literal
+  interpolation in JavaScript, and generated fragments carry no type annotations: `type` only selects
+  `bigint` wrapping;
+- a generated test is written beside the project's own tests and its `setup` import is relative to
+  that directory, which is why the convention is stated in the documentation;
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
 Implemented but limited, and reported as such:

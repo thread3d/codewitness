@@ -90,7 +90,7 @@ abstract class EndToEndSupport {
     /** Skips the test when no Node executable is available, instead of failing spuriously. */
     static void assumeNodeAvailable() {
         Assumptions.assumeTrue(findNode() != null,
-                "no node executable on PATH: TypeScript end-to-end verification cannot run");
+                "no node executable on PATH: JavaScript and TypeScript end-to-end verification cannot run");
     }
 
     /** @return the Node executable on {@code PATH}, or {@code null}. */

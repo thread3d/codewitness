@@ -8,6 +8,7 @@ import dev.codewitness.core.spi.LanguageAdapterRegistry;
 import dev.codewitness.core.spi.ProgressListener;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.java.JavaAdapterBundle;
+import dev.codewitness.javascript.JavaScriptAdapterBundle;
 import dev.codewitness.python.PythonAdapterBundle;
 import dev.codewitness.rust.RustAdapterBundle;
 import dev.codewitness.typescript.TypeScriptAdapterBundle;
@@ -32,6 +33,10 @@ final class CliSupport {
         JavaAdapterBundle.register(languages, providers, true);
         PythonAdapterBundle.register(languages, providers, true);
         RustAdapterBundle.register(languages, providers, true);
+        // JavaScript is registered before TypeScript: a project with TypeScript sources is claimed by the
+        // TypeScript adapter, and the JavaScript detector defers to it, but registration order makes the
+        // intent explicit.
+        JavaScriptAdapterBundle.register(languages, providers, true);
         TypeScriptAdapterBundle.register(languages, providers, true);
         languages.discover();
         return new VerificationEngine(languages, providers);

@@ -12,8 +12,9 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ./demo.sh             # or follow the steps below
 ```
 
-The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust and TypeScript sections at the end
-need Python 3, Cargo and Node 22.6+ respectively, and nothing else.
+The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, TypeScript and JavaScript sections
+at the end need Python 3, Cargo and a Node runtime (22.6+ for TypeScript, 18.17+ for JavaScript)
+respectively, and nothing else.
 
 ## 1. What is in the project?
 
@@ -303,3 +304,37 @@ The scenario fragments are TypeScript (inputs are referenced as `#{name}`), the 
 the recorded seed and case. Coverage comes from Node's own V8 instrumentation, read from its LCOV
 export. Mutation runs through the adapter's built-in source mutator, so no mutation framework has to
 be installed. Node 22.6 or later is required; no package and no build step is.
+
+## 11. The same thing for JavaScript
+
+The JavaScript fixture is the same ledger again, this time as a plain JavaScript module with amounts
+as `bigint` minor units and no type annotations anywhere. It runs offline because it has no packages,
+and nothing is type checked, because JavaScript has no compiler: the build is a syntax check with the
+runtime's own parser.
+
+```bash
+./codewitness verify fixtures/javascript-withdrawal-ledger \
+    --requirements fixtures/javascript-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit      FAILED
+  ✓ R-002    Fees are applied to the rec…  VERIFIED
+  ✗ R-003    Negative amounts are reject…  FAILED
+  ? R-004    Rounding of computed totals   UNVERIFIED
+
+Tests
+  2 executed, 2 passed, 0 failed, 0 skipped
+```
+
+R-001 fails with two withdrawals either side of midnight and R-003 fails because a negative amount is
+accepted; both counterexamples carry the exact `bigint` inputs and a replayable `node --test`
+command.
+
+The scenario fragments are plain JavaScript (inputs are referenced as `#{name}`), the generated tests
+are `node:test` modules written with the `.test.mjs` extension so they are always ES modules, and the
+replay command is a `node --test <saved generated test>` invocation with the recorded seed and case.
+Coverage comes from Node's own V8 instrumentation, read from its LCOV export. Mutation runs through
+the adapter's built-in source mutator, so no mutation framework has to be installed. Node 18.17 or
+later is required for the JUnit reporter the test phase reads; no package and no build step is.

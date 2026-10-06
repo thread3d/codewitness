@@ -67,11 +67,11 @@ cannot, so container mode is most useful with a pre-populated image.
 
 The image must contain the toolchain for the language under verification: a JDK image for Java (the
 default), an image with Python 3 plus pytest and coverage.py if you want those phases for a Python
-project, an image with the Rust toolchain for a Rust project, or an image with Node 22.6+ for a
-TypeScript project. The local-process sandbox needs no image and uses the interpreter or toolchain the
-project already has. A run whose `sandbox.allow_network` is false also sets `CARGO_NET_OFFLINE` for
-Cargo and the package-manager offline flags for Node, so a build that would need to download something
-fails loudly instead of reaching the network.
+project, an image with the Rust toolchain for a Rust project, or an image with a Node runtime for a
+TypeScript project (22.6+) or a JavaScript project (18.17+). The local-process sandbox needs no image
+and uses the interpreter or toolchain the project already has. A run whose `sandbox.allow_network` is
+false also sets `CARGO_NET_OFFLINE` for Cargo and the package-manager offline flags for Node, so a
+build that would need to download something fails loudly instead of reaching the network.
 
 ## Recommendations
 

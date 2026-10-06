@@ -55,6 +55,9 @@ Each arrow is a place where a verification tool usually starts lying. CodeWitnes
 │ TypeScript adapter                                            │
 │ node · node:test · tsc · V8 (LCOV) · bounded source mutation  │
 ├──────────────────────────────────────────────────────────────┤
+│ JavaScript adapter                                            │
+│ node · node:test · V8 (LCOV) · bounded source mutation        │
+├──────────────────────────────────────────────────────────────┤
 │ External tools: javac · Maven · Gradle · JUnit · PIT ·        │
 │ JaCoCo · python · pytest · coverage.py · cargo · rustc ·      │
 │ node · tsc                                                    │
@@ -70,6 +73,7 @@ Enforced by module boundaries, not by convention:
 | `codewitness-adapter-python` | core | Python, pytest/unittest, coverage.py, AST mutation |
 | `codewitness-adapter-rust` | core | Rust, Cargo, libtest, rustc diagnostics, cargo-llvm-cov, source mutation |
 | `codewitness-adapter-typescript` | core | TypeScript, Node, node:test, tsc diagnostics, V8/LCOV coverage, source mutation |
+| `codewitness-adapter-javascript` | core | JavaScript, Node, node:test, V8/LCOV coverage, source mutation |
 | `codewitness-storage` | core | SQLite persistence |
 | `codewitness-report` | core, Jackson | JSON and HTML rendering |
 | `codewitness-cli` | all of the above | argument parsing and wiring |
@@ -86,25 +90,31 @@ Language-specific code lives in the adapter modules; the Java vocabulary appears
 
 1. **inspect** — language, build system, modules, source and test directories, test frameworks,
    build wrapper, runtime version (the language's project detector: `JavaProjectDetector`,
-   `PythonProjectDetector`, `RustProjectDetector`, `TypeScriptProjectDetector`).
+   `PythonProjectDetector`, `RustProjectDetector`, `TypeScriptProjectDetector`,
+   `JavaScriptProjectDetector`).
 2. **workspace** — the project is copied into the run directory, excluding build output, VCS metadata
    and previous run data, with executable bits restored on `mvnw`/`gradlew`.
 3. **build** — `test-compile`/`testClasses` for Java, a syntax compile of every source file for
    Python, `cargo build --all-targets` for Rust, `tsc --noEmit` (or a Node type-stripping syntax check
-   when no compiler is installed) for TypeScript. Diagnostics are parsed from the tool's output. A
-   failure ends verification here, as `BLOCKED`.
+   when no compiler is installed) for TypeScript, and `node --check` over every source and test file
+   for JavaScript — a syntax check only, since JavaScript has no compiler and no type check anywhere
+   in the pipeline. Diagnostics are parsed from the tool's output. A failure ends verification here,
+   as `BLOCKED`.
 4. **tests** — stale reports are deleted, the suite is run, and results are parsed from the raw XML
    reports, not from console output. Rust has no XML report, so results are parsed from libtest's
    line protocol instead; the pairing of Cargo's two output streams is documented in the adapter.
-   TypeScript runs Node's own test runner, whose JUnit report is read in the same spirit.
+   TypeScript runs Node's own test runner, whose JUnit report is read in the same spirit; JavaScript
+   does the same with `node --test --test-reporter=junit`, with no compile step before it.
 5. **static analysis** — compiler diagnostics plus the adapter's heuristic rule table.
 6. **security** — the same rule table, filtered to security rules, reported separately.
-7. **dependencies** — inventory only (see the limitations in the README).
+7. **dependencies** — inventory only, from the project's manifests (including `package.json` for the
+   Node adapters); see the limitations in the README.
 8. **coverage** — the adapter's coverage provider (JaCoCo for Java, coverage.py for Python,
-   cargo-llvm-cov for Rust, V8 through LCOV for TypeScript), with the Java agent attached
-   automatically when no report exists.
+   cargo-llvm-cov for Rust, V8 through LCOV for TypeScript and JavaScript), with the Java agent
+   attached automatically when no report exists.
 9. **mutation** — the adapter's mutation tester (PIT for Java, a bounded AST mutator for Python, a
-   bounded source-operator mutator for Rust and TypeScript), with stale reports deleted first.
+   bounded source-operator mutator for Rust, TypeScript and JavaScript), with stale reports deleted
+   first.
 10. **obligation planning** — scenarios declared by the user, properties derived from requirement
     text, or an explicit "nothing can be attempted here" obligation.
 11. **strategies** — per requirement: existing tests, static analysis, generated tests, mutation,
@@ -183,10 +193,10 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
 
 - a source or test file belongs to a requirement when the requirement's id appears in it, or when the
   requirement declares `paths:`/`tests:` explicitly. The extensions that count as source come from the
-  adapter (`sourceExtensions`), so the same rule works for `.java` files, Python modules, Rust files
-  and TypeScript files;
+  adapter (`sourceExtensions`), so the same rule works for `.java` files, Python modules, Rust files,
+  TypeScript files and JavaScript files;
 - a mutation location is mapped to its source file path, whether the tool reports a Java class name,
-  a Python file, a Rust file or a TypeScript file;
+  a Python file, a Rust file, a TypeScript file or a JavaScript file;
 - anything unmapped stays unmapped and the report says so. CodeWitness never silently attributes a
   passing test to a requirement it does not mention.
 
@@ -196,14 +206,15 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
 `analyze`, `capabilities`) in a new module, add a `META-INF/services` entry, and register any tool
 providers. The engine needs no change: it selects an adapter by asking each one whether it supports
 the project, and never switches on a language string. `codewitness-adapter-python`,
-`codewitness-adapter-rust` and `codewitness-adapter-typescript` are the worked examples: each reuses
-the whole pipeline and adds only detection, tool providers and a generator.
+`codewitness-adapter-rust`, `codewitness-adapter-typescript` and `codewitness-adapter-javascript` are
+the worked examples: each reuses the whole pipeline and adds only detection, tool providers and a
+generator.
 
 **Another tool.** Implement one of the interfaces in `VerificationTools` (`Compiler`, `TestRunner`,
 `StaticAnalyzer`, `CoverageProvider`, `MutationTester`, `SecurityAnalyzer`, `DependencyAnalyzer`,
 `TestGenerator`, `GeneratedTestExecutor`) and register it in the composition root
-(`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle` and `TypeScriptAdapterBundle` are the
-examples). Registration is
+(`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`, `TypeScriptAdapterBundle` and
+`JavaScriptAdapterBundle` are the examples). Registration is
 data, not code paths. A `TestRunner` or `GeneratedTestExecutor` may also implement the optional
 replay-command methods, which is how a language supplies a reproducible command without the core
 knowing how tests are invoked.
@@ -222,10 +233,9 @@ report, and the local sandbox is explicitly documented as a resource-safety boun
 security boundary.
 
 A run records everything needed to reproduce it: project identifier, source revision, CodeWitness
-version, runtime version (Java, Python, Rust or Node), build tool and version, configuration
-fingerprint, tool
-versions, language model identifier, requirements hash, isolation level, timestamps, and every
-command. Run data is kept
+version, runtime version (Java, Python, Rust, or Node for TypeScript and JavaScript), build tool and
+version, configuration fingerprint, tool versions, language model identifier, requirements hash,
+isolation level, timestamps, and every command. Run data is kept
 under `<project>/.codewitness/runs/<run-id>/`, with generated sources and raw reports copied into the
 artifact store so a counterexample can be reviewed and replayed after the run.
 
@@ -241,14 +251,16 @@ reports live in the artifact store on disk, not in the database.
 
 - **Unit tests** pin the verdict rules, the parsers, the configuration, the sandbox, the workspace
   copier, the analyzers' rule tables and the generated-test rendering (including compiling a generated
-  Java test to prove it is valid Java, and rendering a Python scenario into a runnable module).
+  Java test to prove it is valid Java, rendering a Python scenario into a runnable module, and
+  rendering a JavaScript scenario into a plain `node:test` module).
 - **Integration tests** drive each adapter against small projects and parse synthetic tool reports,
-  including the DOCTYPE-carrying JaCoCo and PIT formats, pytest's JUnit XML and coverage.py's JSON.
+  including the DOCTYPE-carrying JaCoCo and PIT formats, pytest's JUnit XML, coverage.py's JSON and
+  Node's JUnit report.
 - **End-to-end tests** (`-Pe2e`) run `codewitness verify` against the fixture projects and assert the
-  verdicts, the counterexample contents and the exit codes. The Java, Python, Rust and TypeScript
-  fixtures are all covered; the Python one uses only the standard library, the Rust one has no
-  dependencies and the TypeScript one has no packages, so each needs an interpreter, a toolchain or a
-  Node runtime and nothing else.
+  verdicts, the counterexample contents and the exit codes. The Java, Python, Rust, TypeScript and
+  JavaScript fixtures are all covered; the Python one uses only the standard library, the Rust one has
+  no dependencies and the TypeScript and JavaScript ones have no packages, so each needs an
+  interpreter, a toolchain or a Node runtime and nothing else.
 - **Fixtures** are projects with known defects — off-by-one boundaries, null handling, concurrency,
   security, weak tests, and a requirement that cannot be verified at all — used to prove that
   CodeWitness distinguishes them, in more than one language.

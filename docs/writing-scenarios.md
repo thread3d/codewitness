@@ -7,9 +7,11 @@ scheduling, execution, and reproducible counterexamples.
 
 Scenarios live in `codewitness.yaml` under `scenarios:`. The fragments (`setup`, `call`,
 `observation`, `invariant`) are written in the **project's own language**: Java for a Java project,
-Python for a Python project, Rust for a Rust project. Everything else — modes, inputs, ranges, seeds,
-the counterexample protocol — is identical. The examples below are Java; the Python and Rust forms are
-shown in [Python projects](#python-projects) and [Rust projects](#rust-projects).
+Python for a Python project, Rust for a Rust project, TypeScript for a TypeScript project, plain
+JavaScript for a JavaScript project. Everything else — modes, inputs, ranges, seeds, the
+counterexample protocol — is identical. The examples below are Java; the Python, Rust, TypeScript and
+JavaScript forms are shown in [Python projects](#python-projects), [Rust projects](#rust-projects),
+[TypeScript projects](#typescript-projects) and [JavaScript projects](#javascript-projects).
 
 ```yaml
 scenarios:
@@ -71,8 +73,8 @@ Each step declares the inputs it searches over:
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`. TypeScript uses `#{name}` instead; see the TypeScript section. |
-| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, or a TypeScript type such as `bigint` or `number`. |
+| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a TypeScript type such as `bigint` or `number`, or `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value). |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -323,6 +325,77 @@ steps:
   - call: "const accepted = ledger.withdraw(#{amount}, 0n); if (accepted) { throw new Error(\"expected rejection\"); }"
     description: an amount above the limit must be rejected
 ```
+
+## JavaScript projects
+
+For a JavaScript project the same scenario is written in plain JavaScript, with no type annotations.
+The generated test is an ordinary `node:test` module written beside the project's own tests, so a
+relative import in `setup` resolves from that directory, and `#{name}` becomes a JavaScript variable:
+
+```yaml
+language:
+  adapter: javascript
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      import { WithdrawalLedger } from "../src/ledger.js";
+      const ledger = new WithdrawalLedger();
+    steps:
+      - call: "ledger.withdraw(#{t1}, #{a1});"
+        inputs:
+          - {name: t1, type: bigint, domain: integer, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: bigint, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+    observation: "ledger.totalWithinLast24Hours(#{t1})"
+    invariant: "observation <= 100000n"
+    cases: 200
+    seed: 42
+```
+
+Notes specific to JavaScript:
+
+- inputs are referenced as `#{name}`, **not** `${name}`: `${...}` is template-literal interpolation in
+  JavaScript, so `#{...}` is used instead and cannot collide with it. A `${...}` inside a fragment is
+  left exactly as written;
+- an `import` line in `setup` is hoisted to the top of the generated module, because an import cannot
+  appear inside a function; everything else in `setup` runs inside each case;
+- the generated file is always written with the `.test.mjs` extension, so it is an ES module whatever
+  the project's `package.json` `"type"` says, and it needs no dependency beyond the Node standard
+  library. **In a CommonJS project this matters for `setup`:** the fragment's `import` must use the
+  form Node's ESM/CJS interop supports. A named import works when the CommonJS module exposes its
+  exports statically (`exports.Foo = …` or `module.exports = { Foo }`); otherwise import the module's
+  default and read the member from it. The build check and the project's own tests still follow the
+  project's module type, because `node --check` and `node --test` both honour `package.json`
+  `"type"` — only the generated scenario test is unconditionally ESM;
+- the fragments are plain JavaScript **statements**, so each `call` ends in `;` (CodeWitness adds one
+  if you leave it out); a step, `observation` or `invariant` is spliced in as written and is never
+  type-annotated;
+- `type` only selects `bigint` wrapping: an input declared `type: bigint` is generated as a
+  `BigInt(...)`, and every other input is a plain JavaScript value. `domain` chooses how values are
+  drawn. Money is usually `bigint` minor units, as the JavaScript fixture does; for anything else use
+  `domain: raw` and write the value as JavaScript;
+- generated modules run with `node --test` on Node 18.17 or later. Node 18.17 is the first release
+  whose JUnit reporter CodeWitness reads;
+- generated tests are written into the project's first test directory while they run and are removed
+  afterwards unless `report.keep_generated_tests` is set; a copy is always kept in the run's artefact
+  store;
+- `mode: concurrent` runs eight async workers released together by a barrier and then checks the
+  invariant once, which exercises interleavings across `await` points; it is not true parallelism;
+- an unexpected exception in a step becomes a counterexample whose observed result is its message.
+
+JavaScript rejection is expressed the same way, in JavaScript:
+
+```yaml
+steps:
+  - call: "const accepted = ledger.withdraw(#{amount}, 0n); if (accepted) { throw new Error(\"expected rejection\"); }"
+    description: an amount above the limit must be rejected
+```
+
+There is no type check anywhere in a JavaScript verification: the build is a syntax check with Node's
+own parser and nothing more. A project that has a `tsconfig.json` or any `.ts`/`.tsx`/`.mts`/`.cts`
+source is deliberately left to the TypeScript adapter, which can actually type check it.
 
 ## Practical advice
 

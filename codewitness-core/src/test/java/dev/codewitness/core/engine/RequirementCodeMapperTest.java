@@ -224,4 +224,23 @@ class RequirementCodeMapperTest {
         assertEquals(List.of("ledger"), mapper.testClassesFor("R-001"));
         assertEquals(Optional.of("R-001"), mapper.requirementForTestClass("ledger"));
     }
+
+    @Test
+    @DisplayName("a JavaScript test file maps to the suite name Node reports for it")
+    void javaScriptTestFileMapsToSuiteName(@TempDir Path root) throws IOException {
+        ProjectInfo javaScriptProject = ProjectInfo.builder(ProjectRef.of(root))
+                .sourceExtensions(java.util.Set.of("js", "mjs", "cjs"))
+                .addModule(new ModuleInfo("app", root, "module",
+                        List.of(root.resolve("src")), List.of(root.resolve("tests")), null))
+                .build();
+        // The .test.mjs name is what the JavaScript adapter's generated tests and hand-written ES
+        // module tests use; Node reports the suite as the stem without extension or marker.
+        write(root.resolve("tests/ledger.test.mjs"), "// covers R-001\ntest('x', () => {});\n");
+
+        RequirementCodeMapper mapper = RequirementCodeMapper.build(javaScriptProject,
+                requirements(Requirement.builder("R-001", "text").build()));
+
+        assertEquals(List.of("ledger"), mapper.testClassesFor("R-001"));
+        assertEquals(Optional.of("R-001"), mapper.requirementForTestClass("ledger"));
+    }
 }
