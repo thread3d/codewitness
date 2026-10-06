@@ -57,21 +57,26 @@ public final class JavaLanguageAdapter implements LanguageAdapter {
 
         BuildToolLauncher launcher = new BuildToolLauncher(context.runner());
         JavaBuildSystem buildSystem = BuildOutputParser.forProject(info);
-        if (buildSystem != null) {
-            String version = launcher.version(launcher.resolve(info, info.buildRoot()), info.buildRoot(),
-                    java.time.Duration.ofSeconds(60));
-            return ProjectInfo.builder(project)
-                    .language(info.language())
-                    .buildSystem(info.buildSystem())
-                    .buildRoot(info.buildRoot())
-                    .javaVersion(info.javaVersion().orElse(null))
-                    .attributes(info.attributes())
-                    .modules(info.modules())
-                    .buildWrapper(info.buildWrapper().orElse(null))
-                    .attribute("buildToolVersion", version)
-                    .build();
+        if (buildSystem == null) {
+            return info;
         }
-        return info;
+        // The build tool version is probed here rather than in the detector because it needs a process
+        // run. Everything else discovered so far must be carried over unchanged: rebuilding the
+        // ProjectInfo without the test frameworks silently loses them from every report.
+        String version = launcher.version(launcher.resolve(info, info.buildRoot()), info.buildRoot(),
+                java.time.Duration.ofSeconds(60));
+        ProjectInfo.Builder complete = ProjectInfo.builder(project)
+                .language(info.language())
+                .buildSystem(info.buildSystem())
+                .buildRoot(info.buildRoot())
+                .javaVersion(info.javaVersion().orElse(null))
+                .attributes(info.attributes())
+                .modules(info.modules())
+                .buildWrapper(info.buildWrapper().orElse(null))
+                .attribute("buildToolVersion", version);
+        info.testFrameworks().forEach(complete::addTestFramework);
+        info.detectedDescriptors().forEach(complete::addDetectedDescriptor);
+        return complete.build();
     }
 
     @Override

@@ -102,6 +102,8 @@ public final class InspectCommand implements Callable<Integer> {
 
         System.out.println();
         System.out.println("Workspace used for inspection: " + workspace.root());
+        // Inspection only reads the copy; leaving it behind would accumulate for no benefit.
+        deleteRecursively(runDirectory);
         return 0;
     }
 
@@ -136,6 +138,20 @@ public final class InspectCommand implements Callable<Integer> {
         }
         if (!Files.isRegularFile(projectRef.root().resolve("requirements.md"))) {
             System.out.println("note             no requirements.md found at the project root");
+        }
+    }
+
+    /** Removes the temporary inspection workspace. Best effort: inspection must not fail on cleanup. */
+    private static void deleteRecursively(Path directory) {
+        if (!Files.isDirectory(directory)) {
+            return;
+        }
+        try (var walk = Files.walk(directory)) {
+            for (Path path : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        } catch (Exception ignored) {
+            // an inspector that cannot tidy up is still a useful inspector
         }
     }
 
