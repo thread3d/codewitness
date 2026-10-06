@@ -380,6 +380,18 @@ Where CodeWitness cannot verify something, it says `UNVERIFIED` and explains why
 
 ---
 
+## Licence
+
+Apache License 2.0 — see [`LICENSE`](LICENSE).
+
+Copyright 2026 thread3d. You may use, modify and redistribute this work, including
+commercially, provided you keep the copyright and licence notices and state significant changes;
+the licence also grants an express patent licence and comes without warranty.
+
+That choice was made for a tool that gets wired into build pipelines: the patent grant matters more
+here than the brevity of MIT, and it is compatible with everything CodeWitness depends on (SnakeYAML,
+Jackson, picocli, sqlite-jdbc and slf4j under Apache-2.0/MIT; JUnit under the EPL-2.0, test scope only).
+
 ## Documentation
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the layered architecture, the evidence chain and why the

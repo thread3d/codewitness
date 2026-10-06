@@ -12,6 +12,24 @@
   <name>CodeWitness</name>
   <description>Independent verification engine for AI-generated software</description>
 
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <id>thread3d</id>
+      <name>thread3d</name>
+      <roles>
+        <role>maintainer</role>
+      </roles>
+    </developer>
+  </developers>
+
   <modules>
     <module>codewitness-core</module>
     <module>codewitness-storage</module>
