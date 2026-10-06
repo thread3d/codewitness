@@ -48,12 +48,12 @@ Each arrow is a place where a verification tool usually starts lying. CodeWitnes
 ├──────────────────────────────────────────────────────────────┤
 │ Language adapter API   LanguageAdapter · VerificationTools    │
 ├────────────────┬───────────────────────┬─────────────────────┤
-│ Java adapter   │ Python adapter        │ (TypeScript, Rust …  │
-│ Maven · Gradle │ pytest · unittest ·   │  in future)          │
-│ JUnit · PIT    │ coverage.py · ast     │                      │
+│ Java adapter   │ Python adapter        │ Rust adapter         │
+│ Maven · Gradle │ pytest · unittest ·   │ Cargo · libtest ·    │
+│ JUnit · PIT    │ coverage.py · ast     │ cargo-llvm-cov · src │
 ├────────────────┴───────────────────────┴─────────────────────┤
 │ External tools: javac · Maven · Gradle · JUnit · PIT ·        │
-│ JaCoCo · python · pytest · coverage.py                        │
+│ JaCoCo · python · pytest · coverage.py · cargo · rustc        │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -64,6 +64,7 @@ Enforced by module boundaries, not by convention:
 | `codewitness-core` | SnakeYAML | the whole model, the engine, the SPIs |
 | `codewitness-adapter-java` | core | Java, Maven, Gradle, JUnit, PIT, JaCoCo |
 | `codewitness-adapter-python` | core | Python, pytest/unittest, coverage.py, AST mutation |
+| `codewitness-adapter-rust` | core | Rust, Cargo, libtest, rustc diagnostics, cargo-llvm-cov, source mutation |
 | `codewitness-storage` | core | SQLite persistence |
 | `codewitness-report` | core, Jackson | JSON and HTML rendering |
 | `codewitness-cli` | all of the above | argument parsing and wiring |
@@ -80,21 +81,22 @@ Language-specific code lives in the adapter modules; the Java vocabulary appears
 
 1. **inspect** — language, build system, modules, source and test directories, test frameworks,
    build wrapper, runtime version (the language's project detector: `JavaProjectDetector`,
-   `PythonProjectDetector`).
+   `PythonProjectDetector`, `RustProjectDetector`).
 2. **workspace** — the project is copied into the run directory, excluding build output, VCS metadata
    and previous run data, with executable bits restored on `mvnw`/`gradlew`.
 3. **build** — `test-compile`/`testClasses` for Java, a syntax compile of every source file for
-   Python. Diagnostics are parsed from the tool's output. A failure ends verification here, as
-   `BLOCKED`.
+   Python, `cargo build --all-targets` for Rust. Diagnostics are parsed from the tool's output. A
+   failure ends verification here, as `BLOCKED`.
 4. **tests** — stale reports are deleted, the suite is run, and results are parsed from the raw XML
-   reports, not from console output.
+   reports, not from console output. Rust has no XML report, so results are parsed from libtest's
+   line protocol instead; the pairing of Cargo's two output streams is documented in the adapter.
 5. **static analysis** — compiler diagnostics plus the adapter's heuristic rule table.
 6. **security** — the same rule table, filtered to security rules, reported separately.
 7. **dependencies** — inventory only (see the limitations in the README).
-8. **coverage** — the adapter's coverage provider (JaCoCo for Java, coverage.py for Python), with the
-   Java agent attached automatically when no report exists.
-9. **mutation** — the adapter's mutation tester (PIT for Java, a bounded AST mutator for Python), with
-   stale reports deleted first.
+8. **coverage** — the adapter's coverage provider (JaCoCo for Java, coverage.py for Python,
+   cargo-llvm-cov for Rust), with the Java agent attached automatically when no report exists.
+9. **mutation** — the adapter's mutation tester (PIT for Java, a bounded AST mutator for Python, a
+   bounded source-operator mutator for Rust), with stale reports deleted first.
 10. **obligation planning** — scenarios declared by the user, properties derived from requirement
     text, or an explicit "nothing can be attempted here" obligation.
 11. **strategies** — per requirement: existing tests, static analysis, generated tests, mutation,
@@ -173,9 +175,10 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
 
 - a source or test file belongs to a requirement when the requirement's id appears in it, or when the
   requirement declares `paths:`/`tests:` explicitly. The extensions that count as source come from the
-  adapter (`sourceExtensions`), so the same rule works for `.java` files and Python modules;
-- a mutation location is mapped to its source file path, whether the tool reports a Java class name
-  or a Python file;
+  adapter (`sourceExtensions`), so the same rule works for `.java` files, Python modules and Rust
+  files;
+- a mutation location is mapped to its source file path, whether the tool reports a Java class name,
+  a Python file or a Rust file;
 - anything unmapped stays unmapped and the report says so. CodeWitness never silently attributes a
   passing test to a requirement it does not mention.
 
@@ -184,16 +187,17 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
 **Another language.** Implement `LanguageAdapter` (`supports`, `inspect`, `build`, `runTests`,
 `analyze`, `capabilities`) in a new module, add a `META-INF/services` entry, and register any tool
 providers. The engine needs no change: it selects an adapter by asking each one whether it supports
-the project, and never switches on a language string. `codewitness-adapter-python` is the worked
-example: it reuses the whole pipeline and adds only detection, tool providers and a generator.
+the project, and never switches on a language string. `codewitness-adapter-python` and
+`codewitness-adapter-rust` are the worked examples: each reuses the whole pipeline and adds only
+detection, tool providers and a generator.
 
 **Another tool.** Implement one of the interfaces in `VerificationTools` (`Compiler`, `TestRunner`,
 `StaticAnalyzer`, `CoverageProvider`, `MutationTester`, `SecurityAnalyzer`, `DependencyAnalyzer`,
 `TestGenerator`, `GeneratedTestExecutor`) and register it in the composition root
-(`JavaAdapterBundle` and `PythonAdapterBundle` are the examples). Registration is data, not code
-paths. A `TestRunner` or `GeneratedTestExecutor` may also implement the optional replay-command
-methods, which is how a language supplies a reproducible command without the core knowing how tests
-are invoked.
+(`JavaAdapterBundle`, `PythonAdapterBundle` and `RustAdapterBundle` are the examples). Registration is
+data, not code paths. A `TestRunner` or `GeneratedTestExecutor` may also implement the optional
+replay-command methods, which is how a language supplies a reproducible command without the core
+knowing how tests are invoked.
 
 **Another verification strategy.** Implement `VerificationStrategy`. It receives the context, the
 requirement and its obligations, and returns evidence plus per-obligation outcomes. It cannot assign
@@ -231,8 +235,9 @@ reports live in the artifact store on disk, not in the database.
 - **Integration tests** drive each adapter against small projects and parse synthetic tool reports,
   including the DOCTYPE-carrying JaCoCo and PIT formats, pytest's JUnit XML and coverage.py's JSON.
 - **End-to-end tests** (`-Pe2e`) run `codewitness verify` against the fixture projects and assert the
-  verdicts, the counterexample contents and the exit codes. Both the Java and the Python fixture are
-  covered; the Python one uses only the standard library, so it needs an interpreter and nothing else.
+  verdicts, the counterexample contents and the exit codes. The Java, Python and Rust fixtures are all
+  covered; the Python one uses only the standard library and the Rust one has no dependencies, so each
+  needs an interpreter or a toolchain and nothing else.
 - **Fixtures** are projects with known defects — off-by-one boundaries, null handling, concurrency,
   security, weak tests, and a requirement that cannot be verified at all — used to prove that
   CodeWitness distinguishes them, in more than one language.

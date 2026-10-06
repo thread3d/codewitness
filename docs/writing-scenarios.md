@@ -7,9 +7,9 @@ scheduling, execution, and reproducible counterexamples.
 
 Scenarios live in `codewitness.yaml` under `scenarios:`. The fragments (`setup`, `call`,
 `observation`, `invariant`) are written in the **project's own language**: Java for a Java project,
-Python for a Python project. Everything else — modes, inputs, ranges, seeds, the counterexample
-protocol — is identical. The examples below are Java; the Python forms are shown in
-[Python projects](#python-projects).
+Python for a Python project, Rust for a Rust project. Everything else — modes, inputs, ranges, seeds,
+the counterexample protocol — is identical. The examples below are Java; the Python and Rust forms are
+shown in [Python projects](#python-projects) and [Rust projects](#rust-projects).
 
 ```yaml
 scenarios:
@@ -208,6 +208,62 @@ Python rejection is expressed the same way, in Python:
 steps:
   - call: "try:\n    ledger.withdraw(amount)\nexcept ValueError:\n    pass\n"
     description: an amount above the limit must be rejected by raising ValueError
+```
+
+## Rust projects
+
+For a Rust project the same scenario is written in Rust. The generated test is an ordinary Cargo
+integration test under `tests/`, so it calls the crate by its **crate name** (the package name with
+hyphens replaced by underscores), and `${name}` becomes a Rust variable:
+
+```yaml
+language:
+  adapter: rust
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      let mut ledger = withdrawal_ledger::WithdrawalLedger::new();
+    steps:
+      - call: "ledger.withdraw(${t1}, ${a1});"
+        inputs:
+          - {name: t1, type: i64, domain: integer, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: i64, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+    observation: "ledger.total_within_last_24_hours(${t1})"
+    invariant: "observation <= 100000"
+    cases: 200
+    seed: 42
+```
+
+Notes specific to Rust:
+
+- the fragments are Rust **statements**, so each `call` ends in `;` (CodeWitness adds one if you leave
+  it out); `setup` declares the subject with `let` and the step list mutates it as your API requires;
+- `type` is a Rust type such as `i64`, `u32`, `f64`, `bool`, `String` or `Option<i64>`. When it is a
+  standard primitive CodeWitness annotates the generated variable with it and casts drawn values to
+  it; for any other type, use `domain: raw` and write the value as Rust code;
+- Rust has no standard decimal type, so `domain: decimal` generates an `f64`. Model money with integer
+  minor units (as the Rust fixture does) rather than a binary float;
+- anything printed in a counterexample must implement `Debug`: the generated test renders the
+  observation and each input with `format!("{:?}", …)`;
+- generated tests live in the workspace's `tests/` directory while they run and are removed afterwards
+  unless `report.keep_generated_tests` is set; a copy is always kept in the run's artefact store;
+- `mode: concurrent` uses `std::thread::scope` and a barrier. Scoped threads borrow the subject, so a
+  concurrent scenario must give the threads shared access — put the subject behind
+  `std::sync::Mutex` (or another interior-mutability type) in `setup`;
+- an unexpected panic in a step is converted into a counterexample whose observed result is the panic
+  message, so "must reject by panicking" can be expressed with `#[should_panic]`-style logic inside a
+  step only if you catch it yourself; otherwise treat a panic as a failure.
+
+Rust rejection is expressed the same way, in Rust. A step that returns a `Result` is easiest to write
+explicitly:
+
+```yaml
+steps:
+  - call: "let rejected = ledger.withdraw(${amount}, 0).is_err(); assert!(rejected, \"expected rejection\");"
+    description: an amount above the limit must be rejected with Err
 ```
 
 ## Practical advice

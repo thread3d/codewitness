@@ -9,6 +9,8 @@ change has to respect.
 - Maven 3.9+ (or use `./mvnw`, which pins 3.9.16), on `PATH`, or `MAVEN_HOME`/`M2_HOME` set
 - Python 3.9+ on `PATH` for the Python adapter and its end-to-end fixture (only the standard library
   is needed; pytest and coverage.py are used when present)
+- Cargo on `PATH` for the Rust adapter and its end-to-end fixture (no third-party crate is needed;
+  `cargo-llvm-cov` is used for coverage when present)
 - Network access for the first build (dependencies) and for the end-to-end tests
 
 ## Build and test
@@ -62,8 +64,9 @@ implementation), plus `requirements.md` and `codewitness.yaml`.
 
 To add one:
 
-1. Copy the structure of `fixtures/withdrawal-ledger` (Java, Maven, JUnit 5) or
-   `fixtures/python-withdrawal-ledger` (Python, `pyproject.toml`, `unittest`/pytest). Keep at least
+1. Copy the structure of `fixtures/withdrawal-ledger` (Java, Maven, JUnit 5),
+   `fixtures/python-withdrawal-ledger` (Python, `pyproject.toml`, `unittest`/pytest) or
+   `fixtures/rust-withdrawal-ledger` (Rust, `Cargo.toml`, libtest). Keep at least
    one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
    adapter's "Java 17+" claim stays exercised against real bytecode.
 2. Introduce **one** defect, and state it in a comment at the top of the class — the comment is part
@@ -84,7 +87,8 @@ To add one:
    `build()`, `runTests()`, `analyze()` and `capabilities()`. Detection belongs in its own
    inspectable class, like `JavaProjectDetector`.
 3. Implement the tool providers you need from `VerificationTools` and register them where the CLI
-   wires everything (`JavaAdapterBundle` and `PythonAdapterBundle` are the worked examples). If your
+   wires everything (`JavaAdapterBundle`, `PythonAdapterBundle` and `RustAdapterBundle` are the worked
+   examples). If your
    tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
    counterexample carries a command that actually runs.
 4. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the
@@ -142,7 +146,8 @@ outcomes. You cannot assign a verdict; the engine does that from your evidence. 
 - [ ] `mvn -Pe2e test` passes.
 - [ ] `./demo.sh` still finds the four defects in `fixtures/withdrawal-ledger`, and
       `codewitness verify fixtures/python-withdrawal-ledger` still reports R-001 and R-003 as `FAILED`
-      and R-002 as `VERIFIED`.
+      and R-002 as `VERIFIED`, and `codewitness verify fixtures/rust-withdrawal-ledger` still reports
+      R-001 and R-003 as `FAILED`, R-002 as `VERIFIED` and R-004 as `UNVERIFIED`.
 - [ ] No `.codewitness` run data, build output or generated test sources are committed.
 - [ ] The README's "honest status" section still describes what the tool actually does.
 - [ ] Any new limitation is stated in the README and, where it affects a run, in the report's

@@ -58,8 +58,7 @@ abstract class EndToEndSupport {
     }
 
     /** @return the first Python interpreter that exists, preferring an active virtual environment. */
-    static String findPython() {
-        String virtualEnv = System.getenv("VIRTUAL_ENV");
+    static String findPython() {        String virtualEnv = System.getenv("VIRTUAL_ENV");
         if (virtualEnv != null && !virtualEnv.isBlank()) {
             for (String relative : List.of("bin/python", "Scripts/python.exe")) {
                 Path candidate = Path.of(virtualEnv, relative);
@@ -75,6 +74,17 @@ abstract class EndToEndSupport {
             }
         }
         return null;
+    }
+
+    /** Skips the test when no Cargo executable is available, instead of failing spuriously. */
+    static void assumeCargoAvailable() {
+        Assumptions.assumeTrue(findCargo() != null,
+                "no cargo executable on PATH: Rust end-to-end verification cannot run");
+    }
+
+    /** @return the Cargo executable on {@code PATH}, or {@code null}. */
+    static String findCargo() {
+        return findExecutable("cargo");
     }
 
     /** @return an executable found on {@code PATH}, or {@code null}. */

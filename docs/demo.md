@@ -232,3 +232,34 @@ The scenario fragments are Python, the generated tests are `unittest` cases, and
 replay command runs the saved generated module with the recorded seed and case. R-002 reaches
 `VERIFIED` through an executed generated test; R-004 declares no scenario and stays `UNVERIFIED`.
 Mutation runs through the standard library `ast` module, so no mutation framework has to be installed.
+
+## 9. The same thing for Rust
+
+The Rust fixture is the same ledger again, this time as a Cargo library with amounts in integer minor
+units. It builds offline because it has no dependencies:
+
+```bash
+./codewitness verify fixtures/rust-withdrawal-ledger \
+    --requirements fixtures/rust-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit      FAILED
+  ✓ R-002    Fees are applied to the rec…  VERIFIED
+  ✗ R-003    Negative amounts are reject…  FAILED
+  ? R-004    Rounding of computed totals   UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}  actual: 140000
+  CE-002  R-003  inputs: {amount=-10000}                                 actual: 40000
+
+Mutation testing
+  12 mutants, 5 killed, 7 survived, 0 no coverage, score 41.7%
+```
+
+The scenario fragments are Rust, the generated tests are standard-library Cargo integration tests
+under `tests/`, and the replay command is a `cargo test --test <generated target>` invocation with the
+recorded seed and case. Coverage is reported as "not measured" because `cargo-llvm-cov` is not
+installed in this environment — which is the honest result, not a silent zero. Mutation runs through
+the adapter's built-in source mutator, so `cargo-mutants` does not have to be installed either.

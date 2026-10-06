@@ -36,6 +36,7 @@
     <module>codewitness-report</module>
     <module>codewitness-adapter-java</module>
     <module>codewitness-adapter-python</module>
+    <module>codewitness-adapter-rust</module>
     <module>codewitness-cli</module>
   </modules>
 
@@ -110,6 +111,11 @@
       <dependency>
         <groupId>dev.codewitness</groupId>
         <artifactId>codewitness-adapter-python</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-adapter-rust</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

@@ -135,6 +135,7 @@ public final class RequirementCodeMapper {
      * source root and the extension dropped. Python reports a dotted module path, so the file is
      * relativized against the project root instead: {@code tests/test_ledger.py} becomes
      * {@code tests.test_ledger}, which is exactly what pytest and unittest put in their reports.
+     * Other languages report a test target name, which is the file name without its extension.
      */
     private static String toClassName(Path file, List<Path> roots, Path projectRoot) {
         String fileName = file.getFileName().toString();
@@ -151,12 +152,17 @@ public final class RequirementCodeMapper {
         }
         for (Path root : roots) {
             if (root != null && file.startsWith(root)) {
-                String relative = root.relativize(file).toString();
-                return relative.replace(java.io.File.separatorChar, '.').replace('/', '.')
-                        .replaceAll("\\.java$", "");
+                String relative = root.relativize(file).toString().replace(java.io.File.separatorChar, '.')
+                        .replace('/', '.');
+                // Java keeps the package path (com.example.FooTest); a test target name such as a Rust
+                // integration test binary is just the file stem. stripExtension covers both, because a
+                // Java class is its own file stem and a package separator is not a file extension.
+                return stripExtension(relative);
             }
         }
-        return extension.equals("java") ? stripExtension(fileName) : null;
+        // Only source files reach this method, so dropping the extension of a bare file name is the
+        // same rule as above applied without a root to relativize against.
+        return stripExtension(fileName);
     }
 
     private static String stripExtension(String value) {

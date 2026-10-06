@@ -9,6 +9,10 @@ build/
 *.class
 *.log
 
+# Rust fixtures are libraries built directly from the working tree during development; Cargo
+# regenerates a lock file that matches the toolchain in use, so it is not committed.
+fixtures/**/Cargo.lock
+
 # CodeWitness run data produced inside the repository
 .codewitness/
 **/.codewitness/

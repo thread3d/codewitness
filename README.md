@@ -58,9 +58,17 @@ or a Python project:
 codewitness verify ./my-python-project --requirements requirements.md
 ```
 
-The language is detected; `language.adapter: java` or `language.adapter: python` forces it. Python
+or a Rust project:
+
+```bash
+codewitness verify ./my-rust-crate --requirements requirements.md
+```
+
+The language is detected; `language.adapter: java`, `python` or `rust` forces it. Python
 support needs only an interpreter: it uses `pytest` when the project has it and the standard library
-`unittest` runner otherwise, so a project with no third-party packages can still be verified.
+`unittest` runner otherwise, so a project with no third-party packages can still be verified. Rust
+support needs only `cargo`: a dependency-free crate is built, tested, analysed and mutated by the
+toolchain it already has, and generated scenarios become ordinary Cargo integration tests.
 
 ---
 
@@ -228,6 +236,31 @@ against one shared subject and then checks the invariant. Every failing case rep
 plus the seed and case index, which is what makes a counterexample reproducible. Python generated
 tests are standard-library `unittest` cases, so they run with or without pytest.
 
+For a Rust project the fragments are Rust statements, the generated test is a Cargo integration test
+under `tests/`, and `${name}` becomes a Rust variable:
+
+```yaml
+language:
+  adapter: rust
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      let mut ledger = withdrawal_ledger::WithdrawalLedger::new();
+    steps:
+      - call: "ledger.withdraw(${t1}, ${a1});"
+        inputs:
+          - {name: t1, type: i64, domain: integer, values: ["85800000"]}
+          - {name: a1, type: i64, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+    observation: "ledger.total_within_last_24_hours(${t1})"
+    invariant: "observation <= 100000"
+```
+
+Rust generated tests use only the standard library, so they compile on any stable toolchain; a value
+recorded in a counterexample must implement `Debug`.
+
 ```bash
 mvn -Dtest=Cw_SC_ROLLING_OB_001_Test -Dcodewitness.seed=42 -Dcodewitness.case=37 test
 ```
@@ -245,7 +278,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python
+  adapter: auto          # auto | java | python | rust
 
 verification:
   timeout: 15m           # per build or test command
@@ -340,6 +373,9 @@ codewitness/
 ├── codewitness-adapter-java/  Java 17+ projects (module targets 25), Maven and Gradle, JUnit 5, PIT, JaCoCo
 ├── codewitness-adapter-python/ Python 3 projects: syntax build, pytest/unittest, heuristics, security,
 │                              coverage.py, AST mutation, dependency inventory; no third-party package required
+├── codewitness-adapter-rust/   Rust projects: Cargo build and libtest, rustc diagnostics, heuristics,
+│                               security, cargo-llvm-cov, built-in source mutation, dependency inventory;
+│                               no third-party crate required
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -361,8 +397,9 @@ mvn -Pe2e test                  # plus the end-to-end tests that verify the fixt
 mvn -pl codewitness-core test   # one module
 ```
 
-`mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured) and
-network access the first time, because it builds real projects.
+`mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
+plus Python 3 and Cargo for their fixtures, and network access the first time, because it builds real
+projects. An end-to-end test is skipped rather than failed when its toolchain is absent.
 
 ---
 
@@ -411,6 +448,37 @@ Python support is new, and the honest limits are:
   installs anything;
 - the heuristic rule table is intentionally small and has a known false-positive profile, exactly
   like the Java one.
+
+The Rust adapter is implemented and exercised end to end as well (`fixtures/rust-withdrawal-ledger`):
+
+- detection of Cargo projects (`Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`) and the
+  conventional `src/` and `tests/` layout, with a hyphenated package name normalised to the crate
+  identifier Rust code uses;
+- a build through `cargo build --all-targets` — the library, binaries, examples and tests — whose
+  rustc diagnostics are parsed from rustc's own output, so a compile error is `BLOCKED` and never a
+  code defect;
+- existing tests through `cargo test`, parsed from libtest's line protocol because Cargo has no JUnit
+  XML report, with the raw output stored as an artefact so the observation can be checked;
+- heuristic correctness rules and a separate security rule set for Rust;
+- coverage through `cargo-llvm-cov` when it is installed, and an honest "not measured" when it is not;
+- mutation testing through a bounded, built-in source mutator (arithmetic, comparison boundaries,
+  boolean operators and boolean constants) that flips one operator at a time and re-runs the suite;
+- a dependency inventory from the Cargo manifests (inventory only, no vulnerability database);
+- generated adversarial tests from declared scenarios: the fragments are Rust, the generated tests
+  are standard-library Cargo integration tests, and a counterexample carries the exact inputs plus a
+  replayable `cargo test` command.
+
+The honest limits of Rust support are:
+
+- Cargo has no machine-readable test report, so tests are read from libtest's line protocol rather
+  than from a report file; the protocol is stable, but it is a protocol rather than a document;
+- mutation uses a deliberately small operator set rather than `cargo-mutants`, and only operators
+  surrounded by whitespace are considered, so an unformatted expression may be skipped;
+- coverage needs `cargo-llvm-cov` to be installed, and only its aggregate JSON totals are read;
+  per-file coverage is not reported;
+- a generated test calls the crate by name (`my_crate::Thing`) and any value recorded in a
+  counterexample must implement `Debug`; the scenario documentation states both;
+- the heuristic rule table is intentionally small and has a known false-positive profile.
 
 Implemented but limited, and reported as such:
 

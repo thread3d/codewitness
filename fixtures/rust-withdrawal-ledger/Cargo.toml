@@ -1,0 +1,12 @@
+[package]
+name = "withdrawal-ledger"
+version = "0.1.0"
+edition = "2021"
+description = "CodeWitness Rust fixture: a ledger with deliberately introduced defects."
+publish = false
+
+[dependencies]
+
+[lib]
+name = "withdrawal_ledger"
+path = "src/lib.rs"
