@@ -61,16 +61,17 @@ docker run --rm --network=none --cap-drop=ALL --security-opt=no-new-privileges \
 ```
 
 The container sees only the project mount, has no network, no capabilities and no host credentials.
-The Maven, Gradle, Python and Cargo caches inside the container start empty, which is the honest
+The Maven, Gradle, Python, Cargo and Node caches inside the container start empty, which is the honest
 trade-off of isolation: the first run has to download what it needs, and with `--network=none` it
 cannot, so container mode is most useful with a pre-populated image.
 
 The image must contain the toolchain for the language under verification: a JDK image for Java (the
 default), an image with Python 3 plus pytest and coverage.py if you want those phases for a Python
-project, or an image with the Rust toolchain if you want them for a Rust project. The local-process
-sandbox needs no image and uses the interpreter or toolchain the project already has. A run whose
-`sandbox.allow_network` is false also sets `CARGO_NET_OFFLINE` for Cargo, so a Rust build that would
-need to download a crate fails loudly instead of reaching the network.
+project, an image with the Rust toolchain for a Rust project, or an image with Node 22.6+ for a
+TypeScript project. The local-process sandbox needs no image and uses the interpreter or toolchain the
+project already has. A run whose `sandbox.allow_network` is false also sets `CARGO_NET_OFFLINE` for
+Cargo and the package-manager offline flags for Node, so a build that would need to download something
+fails loudly instead of reaching the network.
 
 ## Recommendations
 

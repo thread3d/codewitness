@@ -12,6 +12,9 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ./demo.sh             # or follow the steps below
 ```
 
+The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust and TypeScript sections at the end
+need Python 3, Cargo and Node 22.6+ respectively, and nothing else.
+
 ## 1. What is in the project?
 
 `codewitness inspect` looks at the project without executing anything:
@@ -263,3 +266,40 @@ under `tests/`, and the replay command is a `cargo test --test <generated target
 recorded seed and case. Coverage is reported as "not measured" because `cargo-llvm-cov` is not
 installed in this environment — which is the honest result, not a silent zero. Mutation runs through
 the adapter's built-in source mutator, so `cargo-mutants` does not have to be installed either.
+
+## 10. The same thing for TypeScript
+
+The TypeScript fixture is the same ledger again, this time as a Node module with amounts as `bigint`
+minor units. It runs offline because it has no packages:
+
+```bash
+./codewitness verify fixtures/typescript-withdrawal-ledger \
+    --requirements fixtures/typescript-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit      FAILED
+  ✓ R-002    Fees are applied to the rec…  VERIFIED
+  ✗ R-003    Negative amounts are reject…  FAILED
+  ? R-004    Rounding of computed totals   UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}  actual: 140000
+  CE-002  R-003  inputs: {amount=-10000}                                 actual: 40000
+
+Tests
+  2 executed, 2 passed, 0 failed, 0 skipped
+
+Coverage
+  line 97.3% (73/75), branch 88.9% (8/9)
+
+Mutation testing
+  12 mutants, 5 killed, 7 survived, 0 no coverage, score 41.7%
+```
+
+The scenario fragments are TypeScript (inputs are referenced as `#{name}`), the generated tests are
+`node:test` modules, and the replay command is a `node --test <saved generated test>` invocation with
+the recorded seed and case. Coverage comes from Node's own V8 instrumentation, read from its LCOV
+export. Mutation runs through the adapter's built-in source mutator, so no mutation framework has to
+be installed. Node 22.6 or later is required; no package and no build step is.

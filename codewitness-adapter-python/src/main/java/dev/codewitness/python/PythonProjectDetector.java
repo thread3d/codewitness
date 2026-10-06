@@ -249,7 +249,7 @@ public final class PythonProjectDetector {
         try (Stream<Path> walk = Files.walk(root)) {
             walk.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().endsWith(".py"))
-                    .filter(path -> !isExcluded(path))
+                    .filter(path -> !isExcluded(root, path))
                     .sorted()
                     .forEach(files::add);
         } catch (IOException _) {
@@ -258,12 +258,25 @@ public final class PythonProjectDetector {
         return files;
     }
 
-    /** @return {@code true} when any path element is a cache, virtual environment or VCS directory. */
-    static boolean isExcluded(Path path) {
+    /**
+     * @return {@code true} when a path element <em>below the walked root</em> is a cache, virtual
+     *     environment or VCS directory.
+     *
+     * <p>The check is relative to the root rather than absolute on purpose. A run's isolated workspace
+     * lives under the project's {@code .codewitness} directory, so an absolute check would reject every
+     * file in the workspace and silently find no source at all.
+     */
+    static boolean isExcluded(Path root, Path path) {
+        Path relative;
+        try {
+            relative = root.toAbsolutePath().normalize().relativize(path.toAbsolutePath().normalize());
+        } catch (IllegalArgumentException _) {
+            relative = path;
+        }
         Set<String> excluded = Set.of("__pycache__", ".venv", "venv", ".tox", ".nox", ".git",
                 ".pytest_cache", ".mypy_cache", ".ruff_cache", ".eggs", "node_modules", "build", "dist",
                 ".codewitness");
-        for (Path element : path) {
+        for (Path element : relative) {
             if (excluded.contains(element.toString()) || element.toString().endsWith(".egg-info")) {
                 return true;
             }

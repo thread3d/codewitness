@@ -13,6 +13,12 @@ build/
 # regenerates a lock file that matches the toolchain in use, so it is not committed.
 fixtures/**/Cargo.lock
 
+# Node dependencies and build output. The TypeScript fixture needs none of these to be verified,
+# but a developer who runs `npm install` in it should not commit the result.
+node_modules/
+fixtures/**/dist/
+fixtures/**/*.tsbuildinfo
+
 # CodeWitness run data produced inside the repository
 .codewitness/
 **/.codewitness/

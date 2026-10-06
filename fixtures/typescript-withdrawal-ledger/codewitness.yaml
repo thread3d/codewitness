@@ -1,0 +1,136 @@
+# CodeWitness configuration for the TypeScript withdrawal-ledger fixture.
+#
+# This file declares how each requirement can be *executed* against the code. CodeWitness supplies
+# boundary enumeration, seeded random search, execution and reproducible counterexamples; the
+# TypeScript fragments below are the oracle, and they are attributed to the user, not to CodeWitness.
+#
+# Nothing here needs a third-party package: the generated tests are ordinary node:test modules using
+# only the standard library, so they run on the Node runtime the project already has. A generated test
+# is written beside the project's own tests, so the import below is relative to `tests/`.
+#
+# An input is referenced as `#{name}`. The other adapters use `${name}`; in TypeScript `${...}` is
+# template-literal interpolation, so `#{...}` is used instead and cannot be confused with it.
+
+project:
+  name: typescript-withdrawal-ledger
+
+language:
+  adapter: typescript
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+  max_mutation_time: 5m
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: true
+  tool: typescript-text
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: false
+
+scenarios:
+  # R-001: two withdrawals an hour and ten minutes apart, across midnight, must still respect the
+  # rolling limit. Amounts and instants are integer minor units, so no floating point is involved.
+  - id: SC-ROLLING
+    requirement: R-001
+    description: Two withdrawals across midnight, one hour apart
+    mode: sequence
+    setup: |
+      import { WithdrawalLedger } from "../src/ledger.ts";
+      const ledger = new WithdrawalLedger();
+    steps:
+      - call: "ledger.withdraw(#{t1}, #{a1});"
+        description: first withdrawal at 23:50
+        inputs:
+          - name: t1
+            type: bigint
+            domain: integer
+            values: ["85800000"]
+            range: {min: 0, max: 172800000}
+          - name: a1
+            type: bigint
+            domain: integer
+            values: ["70000"]
+            range: {min: 10000, max: 90000}
+      - call: "ledger.withdraw(#{t2}, #{a2});"
+        description: second withdrawal at 01:00 the next day
+        inputs:
+          - name: t2
+            type: bigint
+            domain: integer
+            values: ["90000000"]
+          - name: a2
+            type: bigint
+            domain: integer
+            values: ["70000"]
+    observation: "ledger.totalWithinLast24Hours(#{t2})"
+    invariant: "observation <= 100000n"
+    cases: 200
+    seed: 42
+
+  # R-002: a fee must change the recorded total. The invariant is checked after every step, so the
+  # whole experiment is expressed as one step: record 100, apply 0.50, then read the total.
+  - id: SC-FEE
+    requirement: R-002
+    description: Applying a fee must increase the recorded total
+    mode: single
+    setup: |
+      import { WithdrawalLedger } from "../src/ledger.ts";
+      const ledger = new WithdrawalLedger();
+    steps:
+      - call: "ledger.withdraw(0n, 10000n); ledger.applyFee(50n);"
+        description: record a withdrawal of 100 and apply a fee of 0.50
+    observation: "ledger.totalWithinLast24Hours(3600000n)"
+    invariant: "observation === 10050n"
+    cases: 1
+    seed: 1
+
+  # R-003: negative amounts must be rejected and must not reduce the recorded total.
+  - id: SC-NEGATIVE
+    requirement: R-003
+    description: Negative amounts must be rejected
+    mode: single
+    setup: |
+      import { WithdrawalLedger } from "../src/ledger.ts";
+      const ledger = new WithdrawalLedger();
+    steps:
+      - call: "ledger.withdraw(0n, 50000n);"
+        description: record a withdrawal of 500
+      - call: "ledger.withdraw(3600000n, #{amount});"
+        description: attempt a negative withdrawal
+        inputs:
+          - name: amount
+            type: bigint
+            domain: integer
+            values: ["-10000"]
+            range: {min: -10000, max: -1}
+    observation: "ledger.totalWithinLast24Hours(3600000n)"
+    invariant: "observation >= 50000n"
+    cases: 1
+    seed: 1

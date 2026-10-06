@@ -79,8 +79,11 @@ public record Scenario(
     /**
      * A searchable input of a scenario step.
      *
-     * @param name       identifier used as {@code ${name}} inside Java fragments
-     * @param type       fully qualified Java type, or a primitive such as {@code long}
+     * @param name       identifier used inside the scenario's fragments: {@code ${name}} for the Java,
+     *     Python and Rust generators, and {@code #{name}} for TypeScript, where {@code ${...}} would be
+     *     template-literal interpolation
+     * @param type       fully qualified Java type for Java, a TypeScript type for TypeScript, or a
+     *     primitive such as {@code long} / {@code i64} / {@code bigint}
      * @param domain     how values are drawn
      * @param values     explicit values used for boundary cases
      * @param min        inclusive lower bound for random search, or {@code null}

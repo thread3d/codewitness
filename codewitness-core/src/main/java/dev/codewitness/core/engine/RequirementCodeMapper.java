@@ -150,6 +150,12 @@ public final class RequirementCodeMapper {
                     .replace('/', '.');
             return stripExtension(relative);
         }
+        if (extension.equals("ts") || extension.equals("tsx") || extension.equals("mts") || extension.equals("cts")) {
+            // Node's test runner reports a test file by path and its cases by display name, so the
+            // stable identifier is the file's own name: the extension and the test/spec marker are
+            // dropped, which is what TypeScriptTestReportParser produces for the same file.
+            return stripTestMarker(stripExtension(fileName));
+        }
         for (Path root : roots) {
             if (root != null && file.startsWith(root)) {
                 String relative = root.relativize(file).toString().replace(java.io.File.separatorChar, '.')
@@ -168,6 +174,17 @@ public final class RequirementCodeMapper {
     private static String stripExtension(String value) {
         int dot = value.lastIndexOf('.');
         return dot < 0 ? value : value.substring(0, dot);
+    }
+
+    /** Drops a trailing {@code .test} or {@code .spec} marker from a JavaScript test file stem. */
+    private static String stripTestMarker(String value) {
+        if (value.endsWith(".test")) {
+            return value.substring(0, value.length() - ".test".length());
+        }
+        if (value.endsWith(".spec")) {
+            return value.substring(0, value.length() - ".spec".length());
+        }
+        return value;
     }
 
     /** @return test classes that mention the requirement. */

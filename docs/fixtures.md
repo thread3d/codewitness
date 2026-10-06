@@ -13,6 +13,7 @@ fixture and prints the outcome.
 | `withdrawal-ledger` | four defects: rolling window, discarded `BigDecimal`, negative amounts, race | `FAILED` | 4 `FAILED`, 1 `UNVERIFIED` | Several independent defects in one project, each mapped to its own requirement, each with a reproducible counterexample; and an honest `UNVERIFIED` for a requirement nobody can execute. |
 | `python-withdrawal-ledger` | Python: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language the core knows nothing about: detection, syntax build, tests, scenarios, counterexamples and AST mutation, using only the standard library. |
 | `rust-withdrawal-ledger` | Rust: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language with a build step: Cargo detection and build, libtest parsing, scenario-generated integration tests, counterexamples and bounded source mutation, with no third-party crate. |
+| `typescript-withdrawal-ledger` | TypeScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language executed by Node's type stripper: detection, syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
 | `security-vulnerability` | hardcoded credential, SQL built by concatenation | `FAILED` | 2 `FAILED` | Static security rules produce counterexamples with file, line and rule id, without any test running. |
@@ -109,6 +110,39 @@ The fixture needs a Rust toolchain and nothing else: it has no dependencies, so 
 offline. Coverage is reported as "not measured" unless `cargo-llvm-cov` is installed, which is itself
 the honest result the adapter is designed to produce.
 
+### `typescript-withdrawal-ledger`
+
+The TypeScript counterpart of the reference fixture: a Node module whose limit is applied per calendar
+day instead of over a rolling 24-hour window (R-001) and which accepts a negative withdrawal and
+reduces the recorded total (R-003). Amounts are `bigint` minor units and instants are epoch
+milliseconds, so the arithmetic is exact and the fixture needs no package. The project's own tests
+pass, which is the point.
+
+```text
+Requirements
+  ✗ R-001  Rolling withdrawal limit              FAILED
+  ✓ R-002  Fees are applied to the recorded total VERIFIED
+  ✗ R-003  Negative amounts are rejected         FAILED
+  ? R-004  Rounding of computed totals           UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}  actual: 140000
+  CE-002  R-003  inputs: {amount=-10000}                                 actual: 40000
+
+Tests:            2 executed, 2 passed
+Coverage:         line 97.3% (73/75), branch 88.9% (8/9)   (V8, via LCOV)
+Mutation testing: 12 mutants, 5 killed, 7 survived         (built-in source mutator)
+```
+
+R-001 and R-003 fail through generated `node:test` modules; R-002 is discharged by an executed
+generated test, which is the only path to `VERIFIED`; R-004 declares no scenario and stays
+`UNVERIFIED`. Each counterexample carries the exact inputs and a replay command that runs the saved
+generated test with the recorded seed and case.
+
+The fixture needs Node 22.6 or later and nothing else: it has no packages, so it is syntax-checked,
+tested, covered and mutated by the runtime it already has. Its scenario fragments reference inputs as
+`#{name}` rather than `${name}`, because `${...}` is template-literal interpolation in TypeScript.
+
 ### `off-by-one-boundary`
 
 ```text
@@ -202,6 +236,7 @@ Each fixture is a standalone project and can also be verified one at a time:
 codewitness verify fixtures/withdrawal-ledger --requirements fixtures/withdrawal-ledger/requirements.md
 codewitness verify fixtures/python-withdrawal-ledger --requirements fixtures/python-withdrawal-ledger/requirements.md
 codewitness verify fixtures/rust-withdrawal-ledger --requirements fixtures/rust-withdrawal-ledger/requirements.md
+codewitness verify fixtures/typescript-withdrawal-ledger --requirements fixtures/typescript-withdrawal-ledger/requirements.md
 codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 

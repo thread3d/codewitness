@@ -11,6 +11,8 @@ change has to respect.
   is needed; pytest and coverage.py are used when present)
 - Cargo on `PATH` for the Rust adapter and its end-to-end fixture (no third-party crate is needed;
   `cargo-llvm-cov` is used for coverage when present)
+- Node 22.6 or newer on `PATH` for the TypeScript adapter and its end-to-end fixture (no package is
+  needed; a project-local `tsc` is used for type checking when present)
 - Network access for the first build (dependencies) and for the end-to-end tests
 
 ## Build and test
@@ -87,8 +89,8 @@ To add one:
    `build()`, `runTests()`, `analyze()` and `capabilities()`. Detection belongs in its own
    inspectable class, like `JavaProjectDetector`.
 3. Implement the tool providers you need from `VerificationTools` and register them where the CLI
-   wires everything (`JavaAdapterBundle`, `PythonAdapterBundle` and `RustAdapterBundle` are the worked
-   examples). If your
+   wires everything (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle` and
+   `TypeScriptAdapterBundle` are the worked examples). If your
    tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
    counterexample carries a command that actually runs.
 4. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the

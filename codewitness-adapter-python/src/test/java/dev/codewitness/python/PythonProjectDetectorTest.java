@@ -92,4 +92,16 @@ class PythonProjectDetectorTest {
         assertEquals(1, files.size());
         assertTrue(files.getFirst().toString().endsWith("ledger.py"));
     }
+
+    @Test
+    @DisplayName("a workspace under .codewitness is not excluded by its own run directory")
+    void excludesRelativeToTheWalkedRoot(@TempDir Path root) throws IOException {
+        Path workspace = root.resolve(".codewitness/runs/CW-TEST/workspace");
+        PythonTestContexts.write(workspace, "ledger.py", "VALUE = 1\n");
+        PythonTestContexts.write(workspace, "__pycache__/ledger.cpython-311.py", "");
+
+        // The run workspace legitimately lives under .codewitness; an absolute exclusion check would
+        // reject every file in it, leaving analysis and mutation silently with nothing to do.
+        assertEquals(1, PythonProjectDetector.pythonFiles(workspace).size());
+    }
 }

@@ -71,8 +71,8 @@ Each step declares the inputs it searches over:
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`. |
-| `type` | The Java type of the generated variable, for example `java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`. |
+| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`. TypeScript uses `#{name}` instead; see the TypeScript section. |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, or a TypeScript type such as `bigint` or `number`. |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -264,6 +264,64 @@ explicitly:
 steps:
   - call: "let rejected = ledger.withdraw(${amount}, 0).is_err(); assert!(rejected, \"expected rejection\");"
     description: an amount above the limit must be rejected with Err
+```
+
+## TypeScript projects
+
+For a TypeScript project the same scenario is written in TypeScript. The generated test is a
+`node:test` module written beside the project's own tests, so a relative import in `setup` resolves
+from that directory, and `#{name}` becomes a TypeScript variable:
+
+```yaml
+language:
+  adapter: typescript
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      import { WithdrawalLedger } from "../src/ledger.ts";
+      const ledger = new WithdrawalLedger();
+    steps:
+      - call: "ledger.withdraw(#{t1}, #{a1});"
+        inputs:
+          - {name: t1, type: bigint, domain: integer, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: bigint, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+    observation: "ledger.totalWithinLast24Hours(#{t1})"
+    invariant: "observation <= 100000n"
+    cases: 200
+    seed: 42
+```
+
+Notes specific to TypeScript:
+
+- inputs are referenced as `#{name}`, **not** `${name}`: `${...}` is template-literal interpolation in
+  TypeScript, so `#{...}` is used instead and cannot collide with it. A `${...}` inside a fragment is
+  left exactly as written;
+- an `import` line in `setup` is hoisted to the top of the generated module, because an import cannot
+  appear inside a function; everything else in `setup` runs inside each case;
+- `type` is a TypeScript type the generator can produce: `number`, `bigint`, `string` or `boolean`.
+  Money is usually `bigint` minor units, as the TypeScript fixture does. For anything else use
+  `domain: raw` and write the value as TypeScript;
+- the fragments are TypeScript **statements**, so each `call` ends in `;` (CodeWitness adds one if you
+  leave it out);
+- generated modules use only Node's standard library, so they run with `node --test` on Node 22.6 or
+  later by stripping type annotations. Only erasable TypeScript can run this way: `enum`, `namespace`
+  with a runtime value and parameter properties need a compiler, and `.tsx` files cannot be executed;
+- generated tests are written into the project's first test directory while they run and are removed
+  afterwards unless `report.keep_generated_tests` is set; a copy is always kept in the run's artefact
+  store;
+- `mode: concurrent` runs eight async workers released together by a barrier and then checks the
+  invariant once, which exercises interleavings across `await` points; it is not true parallelism;
+- an unexpected exception in a step becomes a counterexample whose observed result is its message.
+
+TypeScript rejection is expressed the same way, in TypeScript:
+
+```yaml
+steps:
+  - call: "const accepted = ledger.withdraw(#{amount}, 0n); if (accepted) { throw new Error(\"expected rejection\"); }"
+    description: an amount above the limit must be rejected
 ```
 
 ## Practical advice

@@ -64,11 +64,20 @@ or a Rust project:
 codewitness verify ./my-rust-crate --requirements requirements.md
 ```
 
-The language is detected; `language.adapter: java`, `python` or `rust` forces it. Python
+or a TypeScript project:
+
+```bash
+codewitness verify ./my-typescript-project --requirements requirements.md
+```
+
+The language is detected; `language.adapter: java`, `python`, `rust` or `typescript` forces it. Python
 support needs only an interpreter: it uses `pytest` when the project has it and the standard library
 `unittest` runner otherwise, so a project with no third-party packages can still be verified. Rust
 support needs only `cargo`: a dependency-free crate is built, tested, analysed and mutated by the
-toolchain it already has, and generated scenarios become ordinary Cargo integration tests.
+toolchain it already has, and generated scenarios become ordinary Cargo integration tests. TypeScript
+support needs only Node 22.6 or later: a project with no `node_modules` is syntax-checked, tested,
+analysed and mutated by the runtime it already has, and generated scenarios become ordinary
+`node:test` modules.
 
 ---
 
@@ -261,6 +270,35 @@ scenarios:
 Rust generated tests use only the standard library, so they compile on any stable toolchain; a value
 recorded in a counterexample must implement `Debug`.
 
+For a TypeScript project the fragments are TypeScript statements, the generated test is a `node:test`
+module written beside the project's own tests, and inputs are referenced as `#{name}` rather than
+`${name}`: `${...}` is template-literal interpolation in TypeScript, so `#{...}` is used instead and
+cannot collide with it. An `import` line in `setup` is hoisted to the top of the module, because an
+import cannot appear inside a function:
+
+```yaml
+language:
+  adapter: typescript
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      import { WithdrawalLedger } from "../src/ledger.ts";
+      const ledger = new WithdrawalLedger();
+    steps:
+      - call: "ledger.withdraw(#{t1}, #{a1});"
+        inputs:
+          - {name: t1, type: bigint, domain: integer, values: ["85800000"]}
+          - {name: a1, type: bigint, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+    observation: "ledger.totalWithinLast24Hours(#{t1})"
+    invariant: "observation <= 100000n"
+```
+
+TypeScript generated tests use only Node's standard library, so they run on Node 22.6 or later
+without a build step; `#{name}` becomes a TypeScript variable of the declared `type`.
+
 ```bash
 mvn -Dtest=Cw_SC_ROLLING_OB_001_Test -Dcodewitness.seed=42 -Dcodewitness.case=37 test
 ```
@@ -278,7 +316,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust
+  adapter: auto          # auto | java | python | rust | typescript
 
 verification:
   timeout: 15m           # per build or test command
@@ -376,6 +414,9 @@ codewitness/
 ├── codewitness-adapter-rust/   Rust projects: Cargo build and libtest, rustc diagnostics, heuristics,
 │                               security, cargo-llvm-cov, built-in source mutation, dependency inventory;
 │                               no third-party crate required
+├── codewitness-adapter-typescript/ TypeScript projects: Node syntax check and tsc, node:test with JUnit
+│                               parsing, heuristics, security, V8 coverage from LCOV, built-in source
+│                               mutation, dependency inventory; no third-party package required
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -398,8 +439,8 @@ mvn -pl codewitness-core test   # one module
 ```
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
-plus Python 3 and Cargo for their fixtures, and network access the first time, because it builds real
-projects. An end-to-end test is skipped rather than failed when its toolchain is absent.
+plus Python 3, Cargo and Node for their fixtures, and network access the first time, because it builds
+real projects. An end-to-end test is skipped rather than failed when its toolchain is absent.
 
 ---
 
@@ -478,6 +519,45 @@ The honest limits of Rust support are:
   per-file coverage is not reported;
 - a generated test calls the crate by name (`my_crate::Thing`) and any value recorded in a
   counterexample must implement `Debug`; the scenario documentation states both;
+- the heuristic rule table is intentionally small and has a known false-positive profile.
+
+The TypeScript adapter is implemented and exercised end to end as well
+(`fixtures/typescript-withdrawal-ledger`):
+
+- detection of Node/TypeScript projects (`package.json`, `tsconfig.json` and their lock files) and the
+  conventional `src/` plus `tests/` layout, with the pinned package manager (npm, pnpm, yarn or bun)
+  recorded rather than assumed;
+- a build with the project's own `tsc --noEmit` when a compiler is installed and a `tsconfig.json`
+  exists, and otherwise a syntax check using the runtime's own type stripper — the same parser that will
+  execute the files — with the difference stated in the report because the syntax check does not check
+  types;
+- existing tests through Node's built-in runner (`node --test`), read from the JUnit report the runner
+  writes rather than from console output, with the raw report stored as an artefact;
+- heuristic correctness rules and a separate security rule set for TypeScript;
+- coverage through V8 (`node --test --experimental-test-coverage`), read from its LCOV export;
+- mutation testing through a bounded, built-in source mutator (arithmetic, comparison boundaries,
+  equality, boolean operators and boolean constants) that flips one operator at a time and re-runs the
+  suite, excluding mutants the runtime cannot parse;
+- a dependency inventory from `package.json` (inventory only, no vulnerability database);
+- generated adversarial tests from declared scenarios: the fragments are TypeScript, the generated tests
+  are `node:test` modules, and a counterexample carries the exact inputs plus a replayable `node --test`
+  command.
+
+The honest limits of TypeScript support are:
+
+- TypeScript is executed by Node's type stripper, so only erasable syntax is supported: `enum`,
+  `namespace` with a runtime value and parameter properties cannot be run (and `.tsx` cannot be checked
+  or executed) without a compiler; the adapter reports that rather than pretending otherwise;
+- tests run through Node's built-in runner, so a project whose tests are written for Jest or Vitest is
+  detected and reported, but those runners are not installed or invoked;
+- mutation uses a deliberately small operator set rather than Stryker, and only operators surrounded by
+  whitespace are considered, so an unformatted expression may be skipped;
+- coverage is V8 coverage, so only the files the tests actually loaded appear in the report: a source
+  file no test imports is not counted as 0%, it is absent, and the report says so;
+- scenarios reference inputs as `#{name}` rather than `${name}` because `${...}` is template-literal
+  interpolation in TypeScript;
+- a generated test is written beside the project's own tests and its `setup` import is relative to that
+  directory, which is why the convention is stated in the documentation;
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
 Implemented but limited, and reported as such:

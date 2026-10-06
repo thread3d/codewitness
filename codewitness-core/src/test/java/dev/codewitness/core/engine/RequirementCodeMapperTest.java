@@ -205,4 +205,23 @@ class RequirementCodeMapperTest {
         assertTrue(mapper.testClassesFor("R-001").contains("com.example.BothTest"));
         assertTrue(mapper.testClassesFor("R-002").contains("com.example.BothTest"));
     }
+
+    @Test
+    @DisplayName("a TypeScript test file maps to the suite name Node reports for it")
+    void typeScriptTestFileMapsToSuiteName(@TempDir Path root) throws IOException {
+        ProjectInfo typeScriptProject = ProjectInfo.builder(ProjectRef.of(root))
+                .sourceExtensions(java.util.Set.of("ts", "tsx", "mts", "cts"))
+                .addModule(new ModuleInfo("app", root, "module",
+                        List.of(root.resolve("src")), List.of(root.resolve("tests")), null))
+                .build();
+        write(root.resolve("tests/ledger.test.ts"), "// covers R-001\ntest('x', () => {});\n");
+
+        RequirementCodeMapper mapper = RequirementCodeMapper.build(typeScriptProject,
+                requirements(Requirement.builder("R-001", "text").build()));
+
+        // Node reports the suite as the file stem without its extension or its .test marker, so the
+        // two rules have to agree for an executed test to be attributed to its requirement.
+        assertEquals(List.of("ledger"), mapper.testClassesFor("R-001"));
+        assertEquals(Optional.of("R-001"), mapper.requirementForTestClass("ledger"));
+    }
 }

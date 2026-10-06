@@ -94,4 +94,16 @@ class RustProjectDetectorTest {
 
         assertEquals(1, RustProjectDetector.rustFiles(root).size());
     }
+
+    @Test
+    @DisplayName("a workspace under .codewitness is not excluded by its own run directory")
+    void excludesRelativeToTheWalkedRoot(@TempDir Path root) throws IOException {
+        Path workspace = root.resolve(".codewitness/runs/CW-TEST/workspace");
+        RustTestContexts.write(workspace, "src/lib.rs", "pub fn value() -> i64 { 1 }\n");
+        RustTestContexts.write(workspace, "target/debug/generated.rs", "pub fn generated() {}\n");
+
+        // The run workspace legitimately lives under .codewitness; an absolute exclusion check would
+        // reject every file in it, leaving analysis and mutation silently with nothing to do.
+        assertEquals(1, RustProjectDetector.rustFiles(workspace).size());
+    }
 }

@@ -195,7 +195,7 @@ public final class RustProjectDetector {
         try (Stream<Path> walk = Files.walk(root)) {
             walk.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().endsWith(".rs"))
-                    .filter(path -> !isExcluded(path))
+                    .filter(path -> !isExcluded(root, path))
                     .sorted()
                     .forEach(files::add);
         } catch (IOException _) {
@@ -204,10 +204,23 @@ public final class RustProjectDetector {
         return files;
     }
 
-    /** @return {@code true} when any path element is build output, a cache or a VCS directory. */
-    static boolean isExcluded(Path path) {
+    /**
+     * @return {@code true} when a path element <em>below the walked root</em> is build output, a cache
+     *     or a VCS directory.
+     *
+     * <p>The check is relative to the root rather than absolute on purpose. A run's isolated workspace
+     * lives under the project's {@code .codewitness} directory, so an absolute check would reject every
+     * file in the workspace and silently find no source at all.
+     */
+    static boolean isExcluded(Path root, Path path) {
+        Path relative;
+        try {
+            relative = root.toAbsolutePath().normalize().relativize(path.toAbsolutePath().normalize());
+        } catch (IllegalArgumentException _) {
+            relative = path;
+        }
         Set<String> excluded = Set.of("target", ".git", ".codewitness", "node_modules", "vendor", ".cargo");
-        for (Path element : path) {
+        for (Path element : relative) {
             if (excluded.contains(element.toString().toLowerCase(Locale.ROOT))) {
                 return true;
             }

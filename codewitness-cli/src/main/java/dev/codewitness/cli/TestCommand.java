@@ -19,6 +19,7 @@ import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.java.JavaAdapterBundle;
 import dev.codewitness.python.PythonAdapterBundle;
 import dev.codewitness.rust.RustAdapterBundle;
+import dev.codewitness.typescript.TypeScriptAdapterBundle;
 
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -61,6 +62,7 @@ public final class TestCommand implements Callable<Integer> {
         JavaAdapterBundle.register(languages, providers, true);
         PythonAdapterBundle.register(languages, providers, true);
         RustAdapterBundle.register(languages, providers, true);
+        TypeScriptAdapterBundle.register(languages, providers, true);
 
         LanguageAdapter adapter = languages.select(projectRef, config.language().adapter()).orElse(null);
         if (adapter == null) {

@@ -14,6 +14,8 @@ public record LanguageId(String id) {
     public static final LanguageId JAVA = new LanguageId("java");
     public static final LanguageId PYTHON = new LanguageId("python");
     public static final LanguageId RUST = new LanguageId("rust");
+    /** TypeScript and TypeScript-flavoured JavaScript, executed with Node. */
+    public static final LanguageId TYPESCRIPT = new LanguageId("typescript");
     public static final LanguageId UNKNOWN = new LanguageId("unknown");
 
     public LanguageId {

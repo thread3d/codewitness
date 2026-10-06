@@ -87,6 +87,17 @@ abstract class EndToEndSupport {
         return findExecutable("cargo");
     }
 
+    /** Skips the test when no Node executable is available, instead of failing spuriously. */
+    static void assumeNodeAvailable() {
+        Assumptions.assumeTrue(findNode() != null,
+                "no node executable on PATH: TypeScript end-to-end verification cannot run");
+    }
+
+    /** @return the Node executable on {@code PATH}, or {@code null}. */
+    static String findNode() {
+        return findExecutable("node");
+    }
+
     /** @return an executable found on {@code PATH}, or {@code null}. */
     static String findExecutable(String name) {
         String path = System.getenv("PATH");

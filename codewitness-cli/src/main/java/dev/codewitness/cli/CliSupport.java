@@ -10,6 +10,7 @@ import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.java.JavaAdapterBundle;
 import dev.codewitness.python.PythonAdapterBundle;
 import dev.codewitness.rust.RustAdapterBundle;
+import dev.codewitness.typescript.TypeScriptAdapterBundle;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,6 +32,7 @@ final class CliSupport {
         JavaAdapterBundle.register(languages, providers, true);
         PythonAdapterBundle.register(languages, providers, true);
         RustAdapterBundle.register(languages, providers, true);
+        TypeScriptAdapterBundle.register(languages, providers, true);
         languages.discover();
         return new VerificationEngine(languages, providers);
     }
