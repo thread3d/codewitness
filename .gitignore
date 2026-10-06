@@ -1,5 +1,10 @@
+# Build output. These patterns must not swallow a source package that happens to be called
+# "build" or "target": this repository itself has a dev.codewitness.java.build package, and
+# ignoring it silently left those sources out of the repository.
 target/
 build/
+!**/src/**/build/
+!**/src/**/target/
 .gradle/
 *.class
 *.log
