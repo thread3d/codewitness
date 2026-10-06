@@ -14,6 +14,8 @@ public record LanguageId(String id) {
     public static final LanguageId JAVA = new LanguageId("java");
     public static final LanguageId PYTHON = new LanguageId("python");
     public static final LanguageId RUST = new LanguageId("rust");
+    /** Go, built and tested with the {@code go} tool itself. */
+    public static final LanguageId GO = new LanguageId("go");
     /** JavaScript, executed with Node; no compiler and no type check. */
     public static final LanguageId JAVASCRIPT = new LanguageId("javascript");
     /** TypeScript, executed with Node and optionally type checked with {@code tsc}. */

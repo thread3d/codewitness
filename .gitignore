@@ -13,6 +13,11 @@ build/
 # regenerates a lock file that matches the toolchain in use, so it is not committed.
 fixtures/**/Cargo.lock
 
+# Go fixtures are dependency free, and the Go tool writes no lock file; keep build output and any
+# local module cache out of the tree if a developer runs go in a fixture by hand.
+fixtures/**/go.sum
+fixtures/**/vendor/
+
 # Node dependencies and build output. The TypeScript fixture needs none of these to be verified,
 # but a developer who runs `npm install` in it should not commit the result.
 node_modules/

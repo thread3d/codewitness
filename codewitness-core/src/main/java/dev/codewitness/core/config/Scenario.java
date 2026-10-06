@@ -80,10 +80,10 @@ public record Scenario(
      * A searchable input of a scenario step.
      *
      * @param name       identifier used inside the scenario's fragments: {@code ${name}} for the Java,
-     *     Python and Rust generators, and {@code #{name}} for the JavaScript and TypeScript generators,
-     *     where {@code ${...}} would be template-literal interpolation
+     *     Python, Rust and Go generators, and {@code #{name}} for the JavaScript and TypeScript
+     *     generators, where {@code ${...}} would be template-literal interpolation
      * @param type       fully qualified Java type for Java, a JavaScript/TypeScript type for the Node
-     *     generators, or a primitive such as {@code long} / {@code i64} / {@code bigint}
+     *     generators, or a primitive such as {@code long} / {@code i64} / {@code int64} / {@code bigint}
      * @param domain     how values are drawn
      * @param values     explicit values used for boundary cases
      * @param min        inclusive lower bound for random search, or {@code null}

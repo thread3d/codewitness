@@ -13,6 +13,7 @@ fixture and prints the outcome.
 | `withdrawal-ledger` | four defects: rolling window, discarded `BigDecimal`, negative amounts, race | `FAILED` | 4 `FAILED`, 1 `UNVERIFIED` | Several independent defects in one project, each mapped to its own requirement, each with a reproducible counterexample; and an honest `UNVERIFIED` for a requirement nobody can execute. |
 | `python-withdrawal-ledger` | Python: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language the core knows nothing about: detection, syntax build, tests, scenarios, counterexamples and AST mutation, using only the standard library. |
 | `rust-withdrawal-ledger` | Rust: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language with a build step: Cargo detection and build, libtest parsing, scenario-generated integration tests, counterexamples and bounded source mutation, with no third-party crate. |
+| `go-withdrawal-ledger` | Go: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for Go: module detection, `go build`, `go test -json` parsing, scenario-generated `_test.go` files in the package under test, counterexamples, built-in coverprofile coverage and bounded source mutation, with no third-party module. |
 | `typescript-withdrawal-ledger` | TypeScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language executed by Node's type stripper: detection, syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
 | `javascript-withdrawal-ledger` | JavaScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for plain JavaScript, with no compiler and no type check anywhere: detection, `node --check` syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
@@ -110,6 +111,31 @@ generated test target with the recorded seed and case.
 The fixture needs a Rust toolchain and nothing else: it has no dependencies, so it builds and tests
 offline. Coverage is reported as "not measured" unless `cargo-llvm-cov` is installed, which is itself
 the honest result the adapter is designed to produce.
+
+### `go-withdrawal-ledger`
+
+The Go counterpart of the reference fixture: a Go module whose limit is applied per calendar day
+instead of over a rolling 24-hour window (R-001) and which accepts a negative withdrawal and reduces
+the recorded total (R-003). Amounts are integer minor units and instants are epoch milliseconds, so
+the fixture needs no decimal package. The project's own tests pass, which is the point.
+
+```text
+Requirements
+  ✗ R-001  Rolling withdrawal limit               FAILED
+  ✓ R-002  Fees are applied to the recorded total VERIFIED
+  ✗ R-003  Negative amounts are rejected          FAILED
+  ? R-004  Rounding of computed totals            UNVERIFIED
+```
+
+R-001 and R-003 fail through generated `_test.go` files placed in the package under test; R-002 is
+discharged by an executed generated test, which is the only path to `VERIFIED`; R-004 declares no
+scenario and stays `UNVERIFIED`. Each counterexample carries the exact inputs, the seed and case
+index, and a replay command that runs the saved generated test with that seed and case.
+
+The fixture needs the `go` tool and nothing else: it has no dependencies, so it builds and tests
+offline. Coverage comes from the built-in `go test -coverprofile`, so it is available without
+installing anything; the profile carries statements only, and branch coverage is reported as
+unavailable rather than guessed.
 
 ### `typescript-withdrawal-ledger`
 
@@ -274,6 +300,7 @@ Each fixture is a standalone project and can also be verified one at a time:
 codewitness verify fixtures/withdrawal-ledger --requirements fixtures/withdrawal-ledger/requirements.md
 codewitness verify fixtures/python-withdrawal-ledger --requirements fixtures/python-withdrawal-ledger/requirements.md
 codewitness verify fixtures/rust-withdrawal-ledger --requirements fixtures/rust-withdrawal-ledger/requirements.md
+codewitness verify fixtures/go-withdrawal-ledger --requirements fixtures/go-withdrawal-ledger/requirements.md
 codewitness verify fixtures/typescript-withdrawal-ledger --requirements fixtures/typescript-withdrawal-ledger/requirements.md
 codewitness verify fixtures/javascript-withdrawal-ledger --requirements fixtures/javascript-withdrawal-ledger/requirements.md
 codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml

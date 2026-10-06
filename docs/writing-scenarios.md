@@ -7,11 +7,12 @@ scheduling, execution, and reproducible counterexamples.
 
 Scenarios live in `codewitness.yaml` under `scenarios:`. The fragments (`setup`, `call`,
 `observation`, `invariant`) are written in the **project's own language**: Java for a Java project,
-Python for a Python project, Rust for a Rust project, TypeScript for a TypeScript project, plain
-JavaScript for a JavaScript project. Everything else — modes, inputs, ranges, seeds, the
-counterexample protocol — is identical. The examples below are Java; the Python, Rust, TypeScript and
-JavaScript forms are shown in [Python projects](#python-projects), [Rust projects](#rust-projects),
-[TypeScript projects](#typescript-projects) and [JavaScript projects](#javascript-projects).
+Python for a Python project, Rust for a Rust project, Go for a Go module, TypeScript for a TypeScript
+project, plain JavaScript for a JavaScript project. Everything else — modes, inputs, ranges, seeds, the
+counterexample protocol — is identical. The examples below are Java; the Python, Rust, Go, TypeScript
+and JavaScript forms are shown in [Python projects](#python-projects), [Rust projects](#rust-projects),
+[Go projects](#go-projects), [TypeScript projects](#typescript-projects) and
+[JavaScript projects](#javascript-projects).
 
 ```yaml
 scenarios:
@@ -74,7 +75,7 @@ Each step declares the inputs it searches over:
 | Field | Meaning |
 | --- | --- |
 | `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
-| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a TypeScript type such as `bigint` or `number`, or `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value). |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, or `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value). |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -266,6 +267,66 @@ explicitly:
 steps:
   - call: "let rejected = ledger.withdraw(${amount}, 0).is_err(); assert!(rejected, \"expected rejection\");"
     description: an amount above the limit must be rejected with Err
+```
+
+## Go projects
+
+For a Go module the same scenario is written in Go. The generated test is an ordinary `_test.go` file
+placed **in the package under test**, so it needs no import, may call exported and unexported
+identifiers alike, and `${name}` becomes a Go variable:
+
+```yaml
+language:
+  adapter: go
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      l := New()
+    steps:
+      - call: "l.Withdraw(${t1}, ${a1})"
+        inputs:
+          - {name: t1, type: int64, domain: integer, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: int64, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+    observation: "l.TotalWithinLast24Hours(${t1})"
+    invariant: "observation <= 100000"
+    cases: 200
+    seed: 42
+```
+
+Notes specific to Go:
+
+- the fragments are Go **statements**; a `call` does not need a trailing semicolon, and a returned
+  value may be discarded by calling the function as a statement (as the fixture does with `Withdraw`);
+- `type` is a Go type such as `int64`, `int`, `float64`, `bool` or `string`. When it is a standard
+  primitive CodeWitness annotates the generated variable with it and casts drawn values to it; for any
+  other type, use `domain: raw` and write the value as Go code;
+- Go rejects unused local variables. Every generated **input** is blanked with `_ = name`, but a
+  variable your `setup` declares must be used by a step or an observation, or the generated file will
+  not compile;
+- a step that panics is converted into a counterexample whose observed result is the panic message, so
+  a rejection that Go expresses by panicking can be asserted; an invariant violation reports through
+  `t.Errorf` and does not abort the other cases;
+- the generated file imports a fixed set of standard packages (`fmt`, `math`, `os`, `regexp`, `sort`,
+  `strconv`, `strings`, `sync`, `time`, `errors`) and blank-references each one, so an unused import
+  never breaks the build; a fragment that needs another package cannot use it;
+- `domain: decimal` generates a `float64`. Model money with integer minor units (as the Go fixture
+  does) rather than a binary float;
+- generated tests are written into the package directory while they run and are removed afterwards
+  unless `report.keep_generated_tests` is set; a copy is always kept in the run's artefact store;
+- `mode: concurrent` starts eight goroutines behind a channel barrier and then checks the invariant.
+  Go has no scoped threads, so a concurrent scenario must share the subject safely (a `sync.Mutex` in
+  `setup`, for example) if the API is not already safe.
+
+Go rejection is expressed the same way, in Go. A step that returns a boolean is easiest to assert
+inline:
+
+```yaml
+steps:
+  - call: "if l.Withdraw(0, ${amount}) { panic(\"expected rejection\") }"
+    description: an amount above the limit must be rejected
 ```
 
 ## TypeScript projects

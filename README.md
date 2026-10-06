@@ -64,6 +64,12 @@ or a Rust project:
 codewitness verify ./my-rust-crate --requirements requirements.md
 ```
 
+or a Go module:
+
+```bash
+codewitness verify ./my-go-module --requirements requirements.md
+```
+
 or a TypeScript project:
 
 ```bash
@@ -76,12 +82,15 @@ or a JavaScript project:
 codewitness verify ./my-javascript-project --requirements requirements.md
 ```
 
-The language is detected; `language.adapter: java`, `python`, `rust`, `typescript` or `javascript`
-forces it. Python support needs only an interpreter: it uses `pytest` when the project has it and the
-standard library `unittest` runner otherwise, so a project with no third-party packages can still be
-verified. Rust support needs only `cargo`: a dependency-free crate is built, tested, analysed and
-mutated by the toolchain it already has, and generated scenarios become ordinary Cargo integration
-tests. TypeScript support needs only Node 22.6 or later: a project with no `node_modules` is
+The language is detected; `language.adapter: java`, `python`, `rust`, `go`, `typescript` or
+`javascript` forces it. Python support needs only an interpreter: it uses `pytest` when the project
+has it and the standard library `unittest` runner otherwise, so a project with no third-party
+packages can still be verified. Rust support needs only `cargo`: a dependency-free crate is built,
+tested, analysed and mutated by the toolchain it already has, and generated scenarios become ordinary
+Cargo integration tests. Go support needs only the `go` tool: a dependency-free module is built,
+tested, analysed and mutated by the toolchain it already has, coverage comes from
+`go test -coverprofile`, and generated scenarios become ordinary `_test.go` files in the package
+under test. TypeScript support needs only Node 22.6 or later: a project with no `node_modules` is
 syntax-checked, tested, analysed and mutated by the runtime it already has, and generated scenarios
 become ordinary `node:test` modules. JavaScript support needs only Node 18.17 or later: there is no
 compiler and no type check anywhere in the pipeline — the build is a syntax check with the runtime's
@@ -279,6 +288,35 @@ scenarios:
 Rust generated tests use only the standard library, so they compile on any stable toolchain; a value
 recorded in a counterexample must implement `Debug`.
 
+For a Go module the fragments are Go statements, the generated test is a `_test.go` file written into
+the package under test (so it uses only the standard library and needs no import), and `${name}`
+becomes a Go variable. Go rejects unused local variables, so every generated input is blanked with
+`_ = name`; the standard packages a fragment might use (`fmt`, `math`, `os`, `regexp`, `sort`,
+`strconv`, `strings`, `sync`, `time`, `errors`) are imported and blank-referenced so an unused one
+never breaks the build:
+
+```yaml
+language:
+  adapter: go
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      l := New()
+    steps:
+      - call: "l.Withdraw(${t1}, ${a1})"
+        inputs:
+          - {name: t1, type: int64, domain: integer, values: ["85800000"]}
+          - {name: a1, type: int64, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+    observation: "l.TotalWithinLast24Hours(${t1})"
+    invariant: "observation <= 100000"
+```
+
+Go generated tests use only the standard library and call the package's exported API from within the
+same package; a scenario fragment is responsible for using whatever it declares.
+
 For a TypeScript project the fragments are TypeScript statements, the generated test is a `node:test`
 module written beside the project's own tests, and inputs are referenced as `#{name}` rather than
 `${name}`: `${...}` is template-literal interpolation in TypeScript, so `#{...}` is used instead and
@@ -355,7 +393,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | typescript | javascript
+  adapter: auto          # auto | java | python | rust | go | typescript | javascript
 
 verification:
   timeout: 15m           # per build or test command
@@ -453,6 +491,9 @@ codewitness/
 ├── codewitness-adapter-rust/   Rust projects: Cargo build and libtest, rustc diagnostics, heuristics,
 │                               security, cargo-llvm-cov, built-in source mutation, dependency inventory;
 │                               no third-party crate required
+├── codewitness-adapter-go/     Go modules: go build and go test -json, go vet diagnostics, heuristics,
+│                               security, go test -coverprofile coverage, built-in source mutation,
+│                               module inventory; no third-party module required
 ├── codewitness-adapter-typescript/ TypeScript projects: Node syntax check and tsc, node:test with JUnit
 │                               parsing, heuristics, security, V8 coverage from LCOV, built-in source
 │                               mutation, dependency inventory; no third-party package required
@@ -482,9 +523,9 @@ mvn -pl codewitness-core test   # one module
 ```
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
-plus Python 3, Cargo and Node for the Python, Rust, TypeScript and JavaScript fixtures, and network
-access the first time, because it builds real projects. An end-to-end test is skipped rather than
-failed when its toolchain is absent.
+plus Python 3, Cargo, Go and Node for the Python, Rust, Go, TypeScript and JavaScript fixtures, and
+network access the first time, because it builds real projects. An end-to-end test is skipped rather
+than failed when its toolchain is absent.
 
 ---
 
@@ -563,6 +604,40 @@ The honest limits of Rust support are:
   per-file coverage is not reported;
 - a generated test calls the crate by name (`my_crate::Thing`) and any value recorded in a
   counterexample must implement `Debug`; the scenario documentation states both;
+- the heuristic rule table is intentionally small and has a known false-positive profile.
+
+The Go adapter is implemented and exercised end to end as well (`fixtures/go-withdrawal-ledger`):
+
+- detection of Go modules (`go.mod`, `go.sum`, `go.work`), the module path and declared language
+  version, and the package tree (Go has no separate test root: tests sit beside the code as
+  `*_test.go`, and only those files are treated as tests);
+- a build through `go build ./...` whose diagnostics are parsed from the toolchain's own
+  `file:line:column: message` output, so a compile error is `BLOCKED` and never a code defect;
+- existing tests through `go test -json`, read from Go's machine-readable event stream rather than
+  from console output, with `-count=1` so a remembered cache hit is never mistaken for an experiment;
+- static analysis runs `go vet ./...` and reads its diagnostics alongside the adapter's heuristic
+  correctness rule table, and a separate security rule set for Go;
+- coverage through the built-in `go test -coverprofile`, so statement coverage is available without
+  installing anything; branch coverage is not part of the profile and is reported as an empty
+  `0/0` rather than guessed;
+- mutation testing through a bounded, built-in source mutator (arithmetic, comparison boundaries,
+  boolean operators and boolean constants) that flips one operator at a time and re-runs the suite;
+- a dependency inventory from `go.mod` (inventory only, no vulnerability database);
+- generated adversarial tests from declared scenarios: the fragments are Go, the generated
+  `_test.go` files are placed in the package under test, and a counterexample carries the exact
+  inputs plus a replayable `go test` command.
+
+The honest limits of Go support are:
+
+- `go build ./...` does not compile test files; a package whose tests do not compile is reported by
+  the test phase as tests that did not execute, not by the build phase;
+- mutation uses a deliberately small operator set rather than a dedicated framework, and only
+  operators surrounded by whitespace are considered, so an unformatted expression may be skipped;
+- the coverage profile carries statements only: branch coverage is reported as an empty `0/0`, not
+  as a measured percentage;
+- a generated test is written into the package under test and may call both exported and unexported
+  identifiers, but it uses only the fixed standard-library import set listed above, and a fragment
+  that declares a local variable must use it (Go rejects an unused variable);
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
 The TypeScript adapter is implemented and exercised end to end as well

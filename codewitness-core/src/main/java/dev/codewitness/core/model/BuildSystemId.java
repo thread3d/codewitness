@@ -12,6 +12,8 @@ public record BuildSystemId(String id) {
     public static final BuildSystemId PYTHON = new BuildSystemId("python");
     /** Rust and Cargo, driven by {@code Cargo.toml} and {@code Cargo.lock}. */
     public static final BuildSystemId CARGO = new BuildSystemId("cargo");
+    /** Go modules, driven by {@code go.mod} and {@code go.sum}. */
+    public static final BuildSystemId GO = new BuildSystemId("go");
     /**
      * The Node package ecosystem, driven by {@code package.json}; the concrete package manager
      * (npm, pnpm, yarn or bun) is recorded in the project attributes rather than encoded here.

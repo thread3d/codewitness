@@ -91,7 +91,9 @@ public final class RequirementCodeMapper {
             return;
         }
         try (Stream<Path> walk = Files.walk(root)) {
-            List<Path> files = walk.filter(project::isSourceFile).toList();
+            List<Path> files = walk.filter(project::isSourceFile)
+                    .filter(file -> !testTree || isTestCandidate(file))
+                    .toList();
             for (Path file : files) {
                 String content;
                 try {
@@ -150,6 +152,12 @@ public final class RequirementCodeMapper {
                     .replace('/', '.');
             return stripExtension(relative);
         }
+        if (extension.equals("go")) {
+            // Go reports a test case under its package's module-qualified import path, which is what
+            // the Go test report parser records as the suite, so the mapping derives the same value
+            // from go.mod and the file's directory.
+            return goPackagePath(file, projectRoot, stripExtension(fileName));
+        }
         if (extension.equals("js") || extension.equals("mjs") || extension.equals("cjs")
                 || extension.equals("ts") || extension.equals("tsx") || extension.equals("mts") || extension.equals("cts")) {
             // Node's test runner reports a test file by path and its cases by display name, so the
@@ -175,6 +183,57 @@ public final class RequirementCodeMapper {
     private static String stripExtension(String value) {
         int dot = value.lastIndexOf('.');
         return dot < 0 ? value : value.substring(0, dot);
+    }
+
+    /**
+     * @return {@code true} when a file in a test tree is really a test file.
+     *
+     * <p>Most languages have a separate test root, so everything below it is a test. Go places tests
+     * beside the code as {@code *_test.go}, so a Go test tree is the package directory and only the
+     * {@code _test.go} files in it count; without this rule every source file would also be read as a
+     * test and its mention of a requirement would be attributed to the tests.
+     */
+    static boolean isTestCandidate(Path file) {
+        String name = file == null || file.getFileName() == null
+                ? "" : file.getFileName().toString().toLowerCase(Locale.ROOT);
+        return !name.endsWith(".go") || name.endsWith("_test.go");
+    }
+
+    /**
+     * @return the module-qualified import path of the package a Go file belongs to, derived from
+     *     {@code go.mod}, or {@code fallback} when the project is not a module.
+     */
+    static String goPackagePath(Path file, Path projectRoot, String fallback) {
+        if (file == null || projectRoot == null) {
+            return fallback;
+        }
+        String module = readGoModule(projectRoot.resolve("go.mod"));
+        Path parent = file.getParent();
+        if (module == null || parent == null || !parent.startsWith(projectRoot)) {
+            return module == null ? fallback : module;
+        }
+        String relative = projectRoot.relativize(parent).toString().replace(java.io.File.separatorChar, '/');
+        return relative.isEmpty() ? module : module + "/" + relative;
+    }
+
+    private static String readGoModule(Path manifest) {
+        if (manifest == null || !Files.isRegularFile(manifest)) {
+            return null;
+        }
+        try {
+            for (String line : Files.readAllLines(manifest, StandardCharsets.UTF_8)) {
+                String trimmed = line.strip();
+                if (trimmed.startsWith("module ")) {
+                    String value = trimmed.substring("module ".length()).strip().replace("\"", "").replace("'", "");
+                    if (!value.isEmpty()) {
+                        return value;
+                    }
+                }
+            }
+        } catch (IOException _) {
+            // an unreadable manifest yields the fallback, which the caller reports rather than guesses about
+        }
+        return null;
     }
 
     /** Drops a trailing {@code .test} or {@code .spec} marker from a JavaScript test file stem. */

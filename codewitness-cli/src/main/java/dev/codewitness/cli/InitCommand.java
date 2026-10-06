@@ -72,7 +72,7 @@ public final class InitCommand implements Callable<Integer> {
               name: change-me
 
             language:
-              adapter: auto          # auto | java | python | rust | javascript | typescript
+              adapter: auto          # auto | java | python | rust | go | javascript | typescript
 
             verification:
               timeout: 15m           # per build/test command

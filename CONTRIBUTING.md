@@ -11,6 +11,8 @@ change has to respect.
   is needed; pytest and coverage.py are used when present)
 - Cargo on `PATH` for the Rust adapter and its end-to-end fixture (no third-party crate is needed;
   `cargo-llvm-cov` is used for coverage when present)
+- Go 1.21 or newer on `PATH` for the Go adapter and its end-to-end fixture (no third-party module is
+  needed; coverage comes from `go test -coverprofile`, so nothing extra is installed)
 - Node 22.6 or newer on `PATH` for the TypeScript adapter and its end-to-end fixture (no package is
   needed; a project-local `tsc` is used for type checking when present)
 - Node 18.17 or newer on `PATH` for the JavaScript adapter and its end-to-end fixture (no package is
@@ -72,6 +74,7 @@ To add one:
 1. Copy the structure of `fixtures/withdrawal-ledger` (Java, Maven, JUnit 5),
    `fixtures/python-withdrawal-ledger` (Python, `pyproject.toml`, `unittest`/pytest),
    `fixtures/rust-withdrawal-ledger` (Rust, `Cargo.toml`, libtest),
+   `fixtures/go-withdrawal-ledger` (Go, `go.mod`, `go test`),
    `fixtures/typescript-withdrawal-ledger` (TypeScript, `tsconfig.json`, `node:test`) or
    `fixtures/javascript-withdrawal-ledger` (JavaScript, `package.json`, `node:test`). Keep at least
    one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
@@ -95,6 +98,7 @@ To add one:
    inspectable class, like `JavaProjectDetector`.
 3. Implement the tool providers you need from `VerificationTools` and register them where the CLI
    wires everything (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`,
+   `GoAdapterBundle`,
    `TypeScriptAdapterBundle` and `JavaScriptAdapterBundle` are the worked examples). If your
    tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
    counterexample carries a command that actually runs.
@@ -154,8 +158,9 @@ outcomes. You cannot assign a verdict; the engine does that from your evidence. 
 - [ ] `./demo.sh` still finds the four defects in `fixtures/withdrawal-ledger`, and
       `codewitness verify fixtures/python-withdrawal-ledger` still reports R-001 and R-003 as `FAILED`
       and R-002 as `VERIFIED`, and `codewitness verify fixtures/rust-withdrawal-ledger`,
-      `fixtures/typescript-withdrawal-ledger` and `fixtures/javascript-withdrawal-ledger` still report
-      R-001 and R-003 as `FAILED`, R-002 as `VERIFIED` and R-004 as `UNVERIFIED`.
+      `fixtures/go-withdrawal-ledger`, `fixtures/typescript-withdrawal-ledger` and
+      `fixtures/javascript-withdrawal-ledger` still report R-001 and R-003 as `FAILED`, R-002 as
+      `VERIFIED` and R-004 as `UNVERIFIED`.
 - [ ] No `.codewitness` run data, build output or generated test sources are committed.
 - [ ] The README's "honest status" section still describes what the tool actually does.
 - [ ] Any new limitation is stated in the README and, where it affects a run, in the report's

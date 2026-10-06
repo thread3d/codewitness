@@ -87,6 +87,17 @@ abstract class EndToEndSupport {
         return findExecutable("cargo");
     }
 
+    /** Skips the test when no {@code go} executable is available, instead of failing spuriously. */
+    static void assumeGoAvailable() {
+        Assumptions.assumeTrue(findGo() != null,
+                "no go executable on PATH: Go end-to-end verification cannot run");
+    }
+
+    /** @return the {@code go} executable on {@code PATH}, or {@code null}. */
+    static String findGo() {
+        return findExecutable("go");
+    }
+
     /** Skips the test when no Node executable is available, instead of failing spuriously. */
     static void assumeNodeAvailable() {
         Assumptions.assumeTrue(findNode() != null,
