@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>dev.codewitness</groupId>
+  <artifactId>codewitness-parent</artifactId>
+  <version>0.1.0</version>
+  <packaging>pom</packaging>
+
+  <name>CodeWitness</name>
+  <description>Independent verification engine for AI-generated software</description>
+
+  <modules>
+    <module>codewitness-core</module>
+    <module>codewitness-storage</module>
+    <module>codewitness-report</module>
+    <module>codewitness-adapter-java</module>
+    <module>codewitness-cli</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>17</maven.compiler.release>
+    <junit.version>5.10.2</junit.version>
+    <jackson.version>2.17.1</jackson.version>
+    <picocli.version>4.7.6</picocli.version>
+    <sqlite.version>3.45.3.0</sqlite.version>
+    <snakeyaml.version>2.2</snakeyaml.version>
+    <!-- End-to-end tests drive real Maven builds of fixture projects; they are opt-in so that the
+         default build stays fast and does not need the network. Run them with -Pe2e. -->
+    <excluded.groups>e2e</excluded.groups>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>${junit.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>${jackson.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>info.picocli</groupId>
+        <artifactId>picocli</artifactId>
+        <version>${picocli.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.xerial</groupId>
+        <artifactId>sqlite-jdbc</artifactId>
+        <version>${sqlite.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.yaml</groupId>
+        <artifactId>snakeyaml</artifactId>
+        <version>${snakeyaml.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-storage</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-report</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-adapter-java</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.13.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.2.5</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>3.4.1</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-shade-plugin</artifactId>
+          <version>3.5.2</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <excludedGroups>${excluded.groups}</excludedGroups>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>e2e</id>
+      <properties>
+        <!-- Surefire treats an unset/blank group filter as "exclude nothing". -->
+        <excluded.groups></excluded.groups>
+      </properties>
+    </profile>
+  </profiles>
+</project>

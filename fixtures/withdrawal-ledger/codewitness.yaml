@@ -1,0 +1,149 @@
+# CodeWitness configuration for the withdrawal-ledger fixture.
+#
+# This file is part of the demonstration: it declares how each requirement can be *executed*
+# against the code. CodeWitness supplies boundary enumeration, seeded random search, execution and
+# reproducible counterexamples; the Java fragments below are the oracle, and they are attributed to
+# the user, not to CodeWitness.
+
+project:
+  name: withdrawal-ledger
+
+language:
+  adapter: java
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+  max_mutation_time: 5m
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: true
+  tool: pitest
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [javac, heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: true    # Maven may need to fetch plugins into the local repository
+
+scenarios:
+  # R-001: two withdrawals an hour apart, across midnight, must still respect the limit.
+  - id: SC-ROLLING
+    requirement: R-001
+    description: Two withdrawals across midnight, one hour apart
+    mode: sequence
+    setup: "com.example.account.WithdrawalLedger ledger = new com.example.account.WithdrawalLedger();"
+    steps:
+      - call: "ledger.withdraw(java.time.Instant.ofEpochMilli(${t1}), ${a1})"
+        description: first withdrawal at 23:50
+        inputs:
+          - name: t1
+            type: long
+            domain: long
+            values: ["85800000"]
+            range: {min: 0, max: 172800000}
+          - name: a1
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["700"]
+            range: {min: 100, max: 900, scale: 2}
+      - call: "ledger.withdraw(java.time.Instant.ofEpochMilli(${t2}), ${a2})"
+        description: second withdrawal at 01:00 the next day
+        inputs:
+          - name: t2
+            type: long
+            domain: long
+            values: ["90000000"]
+            range: {min: 0, max: 172800000}
+          - name: a2
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["700"]
+            range: {min: 100, max: 900, scale: 2}
+    observation: "ledger.totalWithinLast24Hours(java.time.Instant.ofEpochMilli(${t2}))"
+    invariant: "observation.compareTo(new java.math.BigDecimal(\"1000\")) <= 0"
+    cases: 300
+    seed: 42
+
+  # R-002: a fee must change the recorded total. No searchable input: a fixed two-step experiment.
+  - id: SC-FEE
+    requirement: R-002
+    description: Applying a fee must increase the recorded total
+    mode: single
+    setup: "com.example.account.WithdrawalLedger ledger = new com.example.account.WithdrawalLedger();"
+    steps:
+      - call: "ledger.withdraw(java.time.Instant.ofEpochMilli(0L), new java.math.BigDecimal(\"100\"))"
+        description: record a withdrawal of 100
+      - call: "ledger.applyFee(new java.math.BigDecimal(\"0.50\"))"
+        description: apply a fee of 0.50
+    observation: "ledger.totalWithinLast24Hours(java.time.Instant.ofEpochMilli(3600000L))"
+    invariant: "observation.compareTo(new java.math.BigDecimal(\"100.50\")) == 0"
+    cases: 1
+    seed: 1
+
+  # R-003: negative amounts must be rejected and must not reduce the recorded total.
+  - id: SC-NEGATIVE
+    requirement: R-003
+    description: Negative amounts must be rejected
+    mode: single
+    setup: "com.example.account.WithdrawalLedger ledger = new com.example.account.WithdrawalLedger();"
+    steps:
+      - call: "ledger.withdraw(java.time.Instant.ofEpochMilli(0L), new java.math.BigDecimal(\"500\"))"
+        description: record a withdrawal of 500
+      - call: "ledger.withdraw(java.time.Instant.ofEpochMilli(3600000L), ${amount})"
+        description: attempt a non-positive withdrawal
+        inputs:
+          - name: amount
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["-100", "-0.01", "0"]
+            range: {min: -100, max: 100, scale: 2}
+    observation: "ledger.totalWithinLast24Hours(java.time.Instant.ofEpochMilli(3600000L))"
+    invariant: "observation.compareTo(new java.math.BigDecimal(\"500\")) >= 0"
+    cases: 60
+    seed: 7
+
+  # R-004: concurrent withdrawals must not overshoot the limit.
+  - id: SC-CONCURRENT
+    requirement: R-004
+    description: Eight concurrent withdrawals of 300 against a limit of 1000
+    mode: concurrent
+    setup: "com.example.account.WithdrawalLedger ledger = new com.example.account.WithdrawalLedger();"
+    steps:
+      - call: "ledger.withdrawConcurrently(${amount})"
+        description: concurrent withdrawal
+        inputs:
+          - name: amount
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["300"]
+            range: {min: 200, max: 300, scale: 0}
+    observation: "ledger.concurrentTotal()"
+    invariant: "observation.compareTo(new java.math.BigDecimal(\"1000\")) <= 0"
+    cases: 120
+    seed: 11
+
+  # R-005 deliberately has no scenario. CodeWitness must report it as UNVERIFIED rather than assume
+  # that "money arithmetic is exact" is satisfied.

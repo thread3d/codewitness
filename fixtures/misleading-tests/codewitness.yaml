@@ -1,0 +1,74 @@
+# CodeWitness configuration for the misleading-tests fixture.
+#
+# The code is correct for R-001, so the scenario below must pass and R-001 must reach VERIFIED. R-002
+# has deliberately no scenario: it depends on a policy document outside the repository, so the only
+# honest verdict is UNVERIFIED. Meanwhile the heuristics analyzer reports the no-assertion test as
+# CW-TEST-001, which is the fixture's point.
+
+project:
+  name: misleading-tests
+
+language:
+  adapter: java
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+
+tests:
+  enabled: true
+
+# The implementation is correct, so mutation testing would only report on the misleading tests, not
+# add requirement evidence; it is switched off to keep the run focused.
+mutation:
+  enabled: false
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [javac, heuristics]   # the heuristics analyzer is what reports CW-TEST-001
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: true    # Maven may need to fetch plugins into the local repository
+
+scenarios:
+  # R-001: the implementation is correct, so this scenario (including the boundary scores) passes.
+  # The oracle is written independently of the implementation: it states the whole band mapping.
+  - id: SC-GRADE
+    requirement: R-001
+    description: Every integer score maps to the documented letter grade
+    mode: sequence
+    setup: "com.example.grade.GradeCalculator calculator = new com.example.grade.GradeCalculator();"
+    steps:
+      - call: "calculator.letterGrade(${score})"
+        description: compute the letter grade for a score
+        inputs:
+          - name: score
+            type: int
+            domain: integer
+            values: ["0", "59", "60", "69", "70", "79", "80", "89", "90", "100"]
+            range: {min: 0, max: 100}
+    observation: "calculator.letterGrade(${score})"
+    invariant: "observation.equals(${score} >= 90 ? \"A\" : ${score} >= 80 ? \"B\" : ${score} >= 70 ? \"C\" : ${score} >= 60 ? \"D\" : \"F\")"
+    cases: 200
+    seed: 42
+
+  # R-002 deliberately has no scenario. CodeWitness must report it as UNVERIFIED rather than assume
+  # that "matches the official policy" is satisfied because the other requirement passed.

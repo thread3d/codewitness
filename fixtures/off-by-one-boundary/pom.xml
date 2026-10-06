@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- A CodeWitness test fixture. It is deliberately standalone: it is NOT a module of the
+       CodeWitness reactor, exactly like the projects CodeWitness is pointed at in the real world. -->
+  <groupId>com.example</groupId>
+  <artifactId>off-by-one-boundary</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+
+  <name>off-by-one-boundary</name>
+  <description>
+    Fixture project for CodeWitness: a daily spending account with a deliberately introduced
+    off-by-one boundary defect. A withdrawal of exactly the limit is rejected because the guard uses
+    ">= 0" where the requirement needs "> 0". The project's own tests only probe clearly-inside and
+    clearly-outside values, so they pass against the defective code.
+  </description>
+
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <junit.version>5.10.2</junit.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>

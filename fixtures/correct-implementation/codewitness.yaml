@@ -1,0 +1,88 @@
+# CodeWitness configuration for the correct-implementation fixture.
+#
+# The implementation is genuinely correct, so the declared scenario is expected to pass and R-001 is
+# expected to come out VERIFIED. Mutation testing is left off here because test strength is the subject
+# of the mutation-surviving fixture; it could not change this verdict either way, since surviving
+# mutants are reported as limitations rather than as unmet obligations.
+project:
+  name: correct-implementation
+
+language:
+  adapter: java
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: false
+  tool: pitest
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [javac, heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: true    # Maven may need to fetch plugins into the local repository
+
+scenarios:
+  # R-001: two withdrawals an hour apart, across midnight, must share one 24-hour budget. The boundary
+  # values pin the cases the requirement talks about (the empty window, one window length, exactly one
+  # window length apart); the range searches the same space with a seeded generator.
+  - id: SC-ROLLING
+    requirement: R-001
+    description: Two withdrawals an hour apart across midnight share one 24-hour budget
+    mode: sequence
+    setup: "com.example.limit.RollingWithdrawalLimit limit = new com.example.limit.RollingWithdrawalLimit();"
+    steps:
+      - call: "limit.withdraw(java.time.Instant.ofEpochMilli(${t1}), ${a1})"
+        description: first withdrawal at 23:30
+        inputs:
+          - name: t1
+            type: long
+            domain: long
+            values: ["0", "85800000", "86400000"]
+            range: {min: 0, max: 172800000}
+          - name: a1
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["600", "1000", "1000.01"]
+            range: {min: 100, max: 1500, scale: 2}
+      - call: "limit.withdraw(java.time.Instant.ofEpochMilli(${t2}), ${a2})"
+        description: second withdrawal one hour later, the next day
+        inputs:
+          - name: t2
+            type: long
+            domain: long
+            values: ["0", "90000000", "172800000"]
+            range: {min: 0, max: 172800000}
+          - name: a2
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["600", "1000", "1000.01"]
+            range: {min: 100, max: 1500, scale: 2}
+    observation: "limit.totalWithinWindow(java.time.Instant.ofEpochMilli(${t2}))"
+    invariant: "observation.compareTo(new java.math.BigDecimal(\"1000\")) <= 0"
+    cases: 200
+    seed: 42

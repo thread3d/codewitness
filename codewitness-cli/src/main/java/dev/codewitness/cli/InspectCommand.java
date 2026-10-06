@@ -1,0 +1,145 @@
+package dev.codewitness.cli;
+
+import dev.codewitness.core.config.ConfigLoader;
+import dev.codewitness.core.config.VerificationConfig;
+import dev.codewitness.core.exec.ExecutionSandbox;
+import dev.codewitness.core.exec.LocalProcessSandbox;
+import dev.codewitness.core.io.ArtifactStore;
+import dev.codewitness.core.io.WorkspaceManager;
+import dev.codewitness.core.model.Capability;
+import dev.codewitness.core.model.ProjectInfo;
+import dev.codewitness.core.model.ProjectRef;
+import dev.codewitness.core.model.RunId;
+import dev.codewitness.core.requirements.Requirement;
+import dev.codewitness.core.requirements.RequirementParser;
+import dev.codewitness.core.requirements.RequirementSet;
+import dev.codewitness.core.spi.LanguageAdapter;
+import dev.codewitness.core.spi.LanguageAdapterRegistry;
+import dev.codewitness.core.spi.VerificationProviderRegistry;
+import dev.codewitness.java.JavaAdapterBundle;
+
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
+import picocli.CommandLine.Parameters;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.Callable;
+
+/**
+ * {@code codewitness inspect <project>} - detection only.
+ *
+ * <p>Answers "what did CodeWitness see?" without executing anything, which makes it the first thing
+ * to run when a verification result looks surprising.
+ */
+@Command(name = "inspect", description = "Detect language, build system, modules, sources and tests.")
+public final class InspectCommand implements Callable<Integer> {
+
+    @Parameters(index = "0", paramLabel = "<project>", description = "Project directory to inspect.")
+    private String project;
+
+    @Option(names = "--config", paramLabel = "<file>", description = "Configuration file.")
+    private Path configFile;
+
+    @Option(names = "--requirements", paramLabel = "<file>", description = "Requirements file to summarise.")
+    private Path requirementsFile;
+
+    @Override
+    public Integer call() {
+        ProjectRef projectRef = CliSupport.projectRef(project);
+        ConfigLoader.Loaded loaded = CliSupport.loadConfig(projectRef.root(), configFile);
+        VerificationConfig config = loaded.config();
+
+        LanguageAdapterRegistry languages = new LanguageAdapterRegistry();
+        VerificationProviderRegistry providers = VerificationProviderRegistry.empty();
+        JavaAdapterBundle.register(languages, providers, true);
+
+        LanguageAdapter adapter = languages.select(projectRef, config.language().adapter()).orElse(null);
+        if (adapter == null) {
+            System.err.println("No language adapter supports " + projectRef.root());
+            System.err.println("Registered adapters: " + languages.ids());
+            return 2;
+        }
+
+        Path runDirectory = projectRef.root().resolve(".codewitness/inspect-" + RunId.generate());
+        ArtifactStore artifacts = new ArtifactStore(runDirectory);
+        WorkspaceManager.Workspace workspace = WorkspaceManager.prepare(projectRef, runDirectory,
+                WorkspaceManager.Mode.COPY);
+        ExecutionSandbox sandbox = new LocalProcessSandbox(List.of(workspace.root(), runDirectory));
+        var context = dev.codewitness.core.spi.VerificationContext.builder()
+                .runId("inspect")
+                .projectRef(projectRef)
+                .projectInfo(ProjectInfo.builder(projectRef).build())
+                .config(config)
+                .workspace(workspace)
+                .artifacts(artifacts)
+                .budget(new dev.codewitness.core.result.BudgetUsage.Tracker(config.toBudget()))
+                .sandbox(sandbox)
+                .evidenceLedger(new dev.codewitness.core.evidence.EvidenceLedger("inspect"))
+                .build();
+
+        ProjectInfo info = adapter.inspect(projectRef, context);
+        print(projectRef, info, adapter, providers, config);
+
+        if (requirementsFile != null) {
+            RequirementSet requirements = RequirementParser.parseFile(requirementsFile);
+            System.out.println();
+            System.out.println("Requirements (" + requirements.size() + ")");
+            for (Requirement requirement : requirements.requirements()) {
+                System.out.printf("  %-8s %s%n", requirement.id(), requirement.title());
+                if (!requirement.properties().isEmpty()) {
+                    System.out.println("           interpretation: "
+                            + dev.codewitness.core.requirements.HeuristicPropertyExtractor
+                                    .describe(requirement.properties()));
+                }
+                System.out.println("           obligations: " + requirement.obligations().size());
+            }
+            System.out.println();
+            System.out.println("Note: the natural language text of each requirement is authoritative; the");
+            System.out.println("      structured properties above are CodeWitness interpretations.");
+        }
+
+        System.out.println();
+        System.out.println("Workspace used for inspection: " + workspace.root());
+        return 0;
+    }
+
+    private void print(
+            ProjectRef projectRef,
+            ProjectInfo info,
+            LanguageAdapter adapter,
+            VerificationProviderRegistry providers,
+            VerificationConfig config) {
+        System.out.println("CODEWITNESS  inspect");
+        System.out.println("project          " + projectRef.name() + " (" + projectRef.identifier() + ")");
+        System.out.println("path             " + projectRef.root());
+        System.out.println("adapter          " + adapter.id());
+        System.out.println("language         " + info.language());
+        System.out.println("build system     " + info.buildSystem());
+        System.out.println("build root       " + info.buildRoot());
+        System.out.println("java version     " + info.javaVersion().orElse("undeclared"));
+        System.out.println("build wrapper    " + info.buildWrapper().map(Path::toString).orElse("none"));
+        System.out.println("test frameworks  "
+                + (info.testFrameworks().isEmpty() ? "none detected" : String.join(", ", info.testFrameworks())));
+        System.out.println("capabilities     " + describeCapabilities(adapter.capabilities()));
+        System.out.println("modules          " + info.modules().size());
+        for (var module : info.modules()) {
+            System.out.println("  - " + module.name() + " (" + module.packaging() + ") at " + module.path());
+            module.sourceDirs().forEach(dir -> System.out.println("      main: " + dir));
+            module.testSourceDirs().forEach(dir -> System.out.println("      test: " + dir));
+        }
+        System.out.println("scenarios        " + config.scenarios().size());
+        System.out.println("providers        " + providers.providerIds());
+        if (info.attributes().containsKey("detectionWarning")) {
+            System.out.println("WARNING          " + info.attributes().get("detectionWarning"));
+        }
+        if (!Files.isRegularFile(projectRef.root().resolve("requirements.md"))) {
+            System.out.println("note             no requirements.md found at the project root");
+        }
+    }
+
+    private static String describeCapabilities(java.util.Set<Capability> capabilities) {
+        return capabilities.stream().map(Enum::name).sorted().toList().toString();
+    }
+}

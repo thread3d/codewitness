@@ -1,0 +1,20 @@
+target/
+build/
+.gradle/
+*.class
+*.log
+
+# CodeWitness run data produced inside the repository
+.codewitness/
+**/.codewitness/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# macOS
+.DS_Store

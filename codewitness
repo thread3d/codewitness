@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# CodeWitness launcher.
+#
+# Runs the command line application from a built jar. Set CODEWITNESS_JAR to use a jar from
+# somewhere other than this checkout.
+
+set -eu
+
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+if [ -n "${CODEWITNESS_JAR:-}" ]; then
+  JAR="$CODEWITNESS_JAR"
+elif [ -f "$SELF_DIR/codewitness-cli/target/codewitness.jar" ]; then
+  JAR="$SELF_DIR/codewitness-cli/target/codewitness.jar"
+elif [ -f "$SELF_DIR/lib/codewitness.jar" ]; then
+  JAR="$SELF_DIR/lib/codewitness.jar"
+else
+  echo "codewitness: no jar found." >&2
+  echo "Build it first:  ./build.sh" >&2
+  echo "or set CODEWITNESS_JAR to an existing codewitness jar." >&2
+  exit 3
+fi
+
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+  JAVA="$JAVA_HOME/bin/java"
+else
+  JAVA=java
+fi
+
+exec "$JAVA" ${CODEWITNESS_JAVA_OPTS:-} -jar "$JAR" "$@"

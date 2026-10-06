@@ -1,0 +1,91 @@
+# CodeWitness configuration for the mutation-surviving fixture.
+#
+# Mutation testing is the point of this fixture: the implementation satisfies the declared scenarios,
+# but the project's own tests do not distinguish every mutated behaviour from the original. CodeWitness
+# must report the surviving mutant as a test-strength limitation and must still not fail the
+# requirement, because a weak test suite is not evidence that the code is wrong.
+project:
+  name: mutation-surviving
+
+language:
+  adapter: java
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+  max_mutation_time: 5m
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: true
+  tool: pitest
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [javac, heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: true    # Maven may need to fetch plugins into the local repository
+
+scenarios:
+  # R-001: the fee is charged exactly above the free limit, checked against an exact expectation.
+  - id: SC-FEE
+    requirement: R-001
+    description: The fee is charged exactly above the free limit of 1000
+    mode: single
+    setup: "com.example.fees.FeeSchedule schedule = new com.example.fees.FeeSchedule();"
+    steps:
+      - call: "schedule.feeFor(${amount})"
+        description: compute the fee for a withdrawal amount
+        inputs:
+          - name: amount
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["999.99", "1000", "1000.01"]
+            range: {min: 0, max: 2000, scale: 2}
+    observation: "schedule.feeFor(${amount})"
+    invariant: "observation.compareTo(${amount}.compareTo(new java.math.BigDecimal(\"1000\")) > 0 ? new java.math.BigDecimal(\"2.00\") : java.math.BigDecimal.ZERO) == 0"
+    cases: 1
+    seed: 42
+
+  # R-002: the rendering is declared only for positive fees, which is exactly the gap the project's
+  # own test suite leaves open. The zero-fee boundary is executed by the tests but never asserted, so a
+  # mutant of the boundary condition survives.
+  - id: SC-DESCRIBE
+    requirement: R-002
+    description: A positive fee is rendered as its plain decimal text
+    mode: single
+    setup: "com.example.fees.FeeSchedule schedule = new com.example.fees.FeeSchedule();"
+    steps:
+      - call: "schedule.describe(${fee})"
+        description: render a fee as text
+        inputs:
+          - name: fee
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["2.00", "5.00"]
+            range: {min: 1, max: 10, scale: 2}
+    observation: "schedule.describe(${fee})"
+    invariant: "observation.equals(${fee}.toPlainString())"
+    cases: 1
+    seed: 7

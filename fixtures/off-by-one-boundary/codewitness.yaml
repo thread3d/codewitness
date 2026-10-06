@@ -1,0 +1,92 @@
+# CodeWitness configuration for the off-by-one-boundary fixture.
+#
+# The fixture's defect is an off-by-one boundary error, so the interesting experiment is a search
+# *at* the boundary: the explicit values below pin 999.99, 1000.00 and 1000.01, and the seeded range
+# search probes the neighbourhood. CodeWitness supplies enumeration, seeded search and reproducible
+# counterexamples; the Java fragments are the user's oracle.
+
+project:
+  name: off-by-one-boundary
+
+language:
+  adapter: java
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+
+tests:
+  enabled: true
+
+# The defect is a control-flow boundary error, so mutation testing adds nothing to this fixture and
+# is switched off to keep the run focused.
+mutation:
+  enabled: false
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [javac, heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: true    # Maven may need to fetch plugins into the local repository
+
+scenarios:
+  # R-001: the boundary itself. The invariant says "if the amount is exactly the limit, the
+  # withdrawal must have been accepted"; the defective guard rejects it.
+  - id: SC-EXACT-LIMIT
+    requirement: R-001
+    description: Search the 1,000.00 boundary; a withdrawal of exactly the limit must be accepted
+    mode: sequence
+    setup: "com.example.boundary.DailyLimitAccount account = new com.example.boundary.DailyLimitAccount();"
+    steps:
+      - call: "account.withdraw(${amount})"
+        description: attempt a single withdrawal on a fresh account
+        inputs:
+          - name: amount
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["999.99", "1000", "1000.01"]
+            range: {min: 900, max: 1100, scale: 2}
+    observation: "account.total()"
+    invariant: "((${amount}).compareTo(new java.math.BigDecimal(\"1000.00\")) != 0) || observation.compareTo(new java.math.BigDecimal(\"1000.00\")) == 0"
+    cases: 300
+    seed: 42
+
+  # R-002: the genuinely satisfied requirement. Every amount exercised here is strictly below the
+  # limit, so the recorded total must equal the amount.
+  - id: SC-BELOW-LIMIT
+    requirement: R-002
+    description: Withdrawals strictly below the limit are accepted and recorded
+    mode: sequence
+    setup: "com.example.boundary.DailyLimitAccount account = new com.example.boundary.DailyLimitAccount();"
+    steps:
+      - call: "account.withdraw(${amount})"
+        description: withdraw an amount strictly below the limit
+        inputs:
+          - name: amount
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["0.01", "500", "999.99"]
+            range: {min: 1, max: 999, scale: 2}
+    observation: "account.total()"
+    invariant: "observation.compareTo(${amount}) == 0"
+    cases: 200
+    seed: 7

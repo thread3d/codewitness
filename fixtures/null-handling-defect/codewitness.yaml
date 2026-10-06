@@ -1,0 +1,90 @@
+# CodeWitness configuration for the null-handling-defect fixture.
+#
+# The requirement says null must be rejected explicitly; the entry point dereferences it first. The
+# scenario therefore has to *supply* null, which is what the "null" domain does: the generated case
+# passes a Java null for ${username}. CodeWitness reports the resulting counterexample with the null
+# input named, instead of letting the suite pass because it never tried it.
+
+project:
+  name: null-handling-defect
+
+language:
+  adapter: java
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+
+tests:
+  enabled: true
+
+# The defect is a missing null check, not a mutation-survivable subtlety; mutation adds nothing here.
+mutation:
+  enabled: false
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [javac, heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: true    # Maven may need to fetch plugins into the local repository
+
+scenarios:
+  # R-001: the null case. The null domain makes the generated case pass a Java null; a clean
+  # rejection leaves the registry empty, while the defect throws NullPointerException before the
+  # invariant is ever reached and the case is recorded as a counterexample.
+  - id: SC-NULL
+    requirement: R-001
+    description: Registering null must be rejected cleanly and must not throw NullPointerException
+    mode: single
+    setup: "com.example.registry.UsernameRegistry registry = new com.example.registry.UsernameRegistry();"
+    steps:
+      - call: "registry.register(${username})"
+        description: attempt to register a null username
+        inputs:
+          - name: username
+            type: java.lang.String
+            domain: "null"
+            values: ["null"]
+    observation: "registry.size()"
+    invariant: "observation == 0"
+    cases: 1
+    seed: 1
+
+  # R-002: the genuinely satisfied requirement. A fresh registry is used per case and exactly one
+  # non-blank username is registered, so the size must be 1.
+  - id: SC-VALID
+    requirement: R-002
+    description: A non-blank username is accepted and stored as a single entry
+    mode: sequence
+    setup: "com.example.registry.UsernameRegistry registry = new com.example.registry.UsernameRegistry();"
+    steps:
+      - call: "registry.register(${username})"
+        description: register a non-blank username
+        inputs:
+          - name: username
+            type: java.lang.String
+            domain: string
+            values: ["alice", "Bob", "user-1"]
+    observation: "registry.size()"
+    invariant: "observation == 1"
+    cases: 50
+    seed: 11

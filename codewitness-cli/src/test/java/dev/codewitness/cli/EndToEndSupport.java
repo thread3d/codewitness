@@ -1,0 +1,114 @@
+package dev.codewitness.cli;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import org.junit.jupiter.api.Assumptions;
+
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Stream;
+
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Shared helpers for the end-to-end tests: locating fixtures, finding runs and reading parts of the
+ * canonical report.
+ */
+abstract class EndToEndSupport {
+
+    /** @return the fixture directory, failing fast when the repository layout is not what we expect. */
+    static Path requireFixture(String name) {
+        Path fixture = repositoryRoot().resolve("fixtures").resolve(name);
+        Assumptions.assumeTrue(Files.isDirectory(fixture),
+                "fixture " + name + " is not present in this checkout");
+        return fixture;
+    }
+
+    /** @return the repository root, found by walking up from the working directory. */
+    static Path repositoryRoot() {
+        Path current = Path.of("").toAbsolutePath();
+        while (current != null) {
+            if (Files.isDirectory(current.resolve("fixtures")) && Files.isRegularFile(current.resolve("pom.xml"))) {
+                return current;
+            }
+            current = current.getParent();
+        }
+        return Path.of("").toAbsolutePath();
+    }
+
+    /** Skips the test when no Maven executable is available, instead of failing spuriously. */
+    static void assumeBuildToolAvailable() {
+        Assumptions.assumeTrue(findMaven() != null,
+                "no Maven executable on PATH, MAVEN_HOME or M2_HOME: end-to-end verification cannot run");
+    }
+
+    static String findMaven() {
+        for (String homeVariable : List.of("MAVEN_HOME", "M2_HOME")) {
+            String home = System.getenv(homeVariable);
+            if (home != null && !home.isBlank()) {
+                Path candidate = Path.of(home, "bin", "mvn");
+                if (Files.isExecutable(candidate)) {
+                    return candidate.toString();
+                }
+            }
+        }
+        String path = System.getenv("PATH");
+        if (path != null) {
+            for (String element : path.split(File.pathSeparator)) {
+                if (element.isBlank()) {
+                    continue;
+                }
+                Path candidate = Path.of(element, "mvn");
+                if (Files.isExecutable(candidate)) {
+                    return candidate.toString();
+                }
+            }
+        }
+        return null;
+    }
+
+    /** @return run directories, most recent first. */
+    static List<Path> runDirectories(Path output) {
+        Path runs = output.resolve("runs");
+        if (!Files.isDirectory(runs)) {
+            return List.of();
+        }
+        try (Stream<Path> stream = Files.list(runs)) {
+            List<Path> directories = new ArrayList<>(stream.filter(Files::isDirectory).toList());
+            directories.sort(Comparator.comparing((Path p) -> p.getFileName().toString()).reversed());
+            return directories;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    static JsonNode requirement(JsonNode report, String requirementId) {
+        for (JsonNode node : report.path("requirements")) {
+            if (requirementId.equals(node.path("id").asText())) {
+                return node;
+            }
+        }
+        throw new AssertionError("no verdict for " + requirementId + " in " + report.path("runId").asText());
+    }
+
+    static JsonNode counterexampleFor(JsonNode report, String requirementId) {
+        for (JsonNode node : report.path("counterexamples")) {
+            if (requirementId.equals(node.path("requirementId").asText())) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    static void assertReportLooksComplete(JsonNode report) {
+        assertNotNull(report.get("runId"), "the report must identify the run");
+        assertNotNull(report.get("environment"), "the report must record the environment");
+        assertTrue(report.path("environment").path("requirementsHash").asText().length() == 64,
+                "the requirements hash must be recorded for reproducibility");
+    }
+}
