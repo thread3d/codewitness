@@ -116,7 +116,7 @@ public final class RequirementCodeMapper {
                     unmappedTestFiles.add(file.getFileName().toString());
                 }
             }
-        } catch (IOException ignored) {
+        } catch (IOException _) {
             // an unreadable tree simply produces an empty mapping, which the report discloses
         }
     }

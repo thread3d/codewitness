@@ -106,7 +106,7 @@ public final class ArtifactStore {
                         createDirectories(target.getParent());
                         Files.copy(path, target, StandardCopyOption.REPLACE_EXISTING);
                     }
-                } catch (IOException ignored) {
+                } catch (IOException _) {
                     // artifacts are best-effort: a missing raw report must not fail a verification run
                 }
             });

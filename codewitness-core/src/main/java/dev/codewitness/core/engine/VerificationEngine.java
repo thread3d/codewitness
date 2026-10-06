@@ -320,7 +320,7 @@ public final class VerificationEngine {
                 List<VerificationTools.DependencyAnalyzer> analyzers = providers.dependencyAnalyzers(info);
                 DependencyReport report = analyzers.isEmpty()
                         ? DependencyReport.notAnalysed("none", "no dependency analyzer registered")
-                        : analyzers.get(0).analyseDependencies(context);
+                        : analyzers.getFirst().analyseDependencies(context);
                 state.dependencies(report);
                 Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.DEPENDENCY_SCAN)
                         .description("Dependency analysis: " + report.totalDependencies() + " dependencies, "
@@ -343,7 +343,7 @@ public final class VerificationEngine {
                 List<VerificationTools.CoverageProvider> coverageProviders = providers.coverageProviders(info);
                 CoverageReport coverage = coverageProviders.isEmpty()
                         ? CoverageReport.notMeasured("none", "no coverage provider registered")
-                        : coverageProviders.get(0).measure(context);
+                        : coverageProviders.getFirst().measure(context);
                 state.coverage(coverage);
                 Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.COVERAGE)
                         .description("Coverage: " + coverage.describe())
@@ -368,7 +368,7 @@ public final class VerificationEngine {
                 List<VerificationTools.MutationTester> testers = providers.mutationTesters(info);
                 MutationReport report = testers.isEmpty()
                         ? MutationReport.notMeasured("none", "no mutation tester registered")
-                        : testers.get(0).analyse(context);
+                        : testers.getFirst().analyse(context);
                 state.mutation(report);
                 Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.MUTATION_TEST)
                         .description("Mutation testing: " + report.describe())
@@ -534,12 +534,12 @@ public final class VerificationEngine {
 
     private Optional<dev.codewitness.core.spi.VerificationTools.Compiler> firstCompiler(VerificationContext context) {
         var compilers = providers.compilers(context.projectInfo());
-        return compilers.isEmpty() ? Optional.empty() : Optional.of(compilers.get(0));
+        return compilers.isEmpty() ? Optional.empty() : Optional.of(compilers.getFirst());
     }
 
     private Optional<dev.codewitness.core.spi.VerificationTools.TestRunner> firstTestRunner(VerificationContext context) {
         var runners = providers.testRunners(context.projectInfo());
-        return runners.isEmpty() ? Optional.empty() : Optional.of(runners.get(0));
+        return runners.isEmpty() ? Optional.empty() : Optional.of(runners.getFirst());
     }
 
     private LlmProvider llm(VerificationConfig config) {
@@ -609,7 +609,7 @@ public final class VerificationEngine {
         if (!relevant.isEmpty()) {
             limitations.add("Test strength: " + relevant.size() + " mutant(s) in the code covered by "
                     + requirement.id() + " survived the test suite (for example "
-                    + relevant.get(0).location() + " -> " + relevant.get(0).description()
+                    + relevant.getFirst().location() + " -> " + relevant.getFirst().description()
                     + "). Nobody checked those behaviours: surviving mutants are not a violation of the "
                     + "requirement, but they are a reason not to trust unexecuted assumptions about it.");
         }

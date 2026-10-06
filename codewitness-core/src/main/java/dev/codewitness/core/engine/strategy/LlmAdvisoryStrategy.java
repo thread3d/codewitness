@@ -133,7 +133,7 @@ public final class LlmAdvisoryStrategy implements VerificationStrategy {
                     sb.append(block);
                     budget -= block.length();
                 }
-            } catch (Exception ignored) {
+            } catch (Exception _) {
                 // source collection is best effort; the prompt simply carries less context
             }
         }

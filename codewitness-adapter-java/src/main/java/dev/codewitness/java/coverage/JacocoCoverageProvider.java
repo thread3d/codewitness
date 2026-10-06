@@ -30,7 +30,14 @@ import java.util.Map;
  */
 public final class JacocoCoverageProvider implements VerificationTools.CoverageProvider {
 
-    private static final String JACOCO_VERSION = "0.8.12";
+    /**
+     * Version of the JaCoCo Maven plugin injected into the project under verification.
+     *
+     * <p>0.8.14 is the first release with official Java 25 support (class file version 69); 0.8.15
+     * is the current stable release and also covers Java 26. Older builds fail to instrument Java 25
+     * bytecode, which would silently degrade coverage to "not measured".
+     */
+    private static final String JACOCO_VERSION = "0.8.15";
 
     private final BuildToolLauncher launcher;
 

@@ -113,7 +113,7 @@ public final class InitCommand implements Callable<Integer> {
 
             sandbox:
               mode: local-process    # local-process | docker
-              image: eclipse-temurin:17-jdk
+              image: eclipse-temurin:25-jdk
               allow_network: false
 
             # Scenarios are how CodeWitness executes a requirement against your code. The setup,

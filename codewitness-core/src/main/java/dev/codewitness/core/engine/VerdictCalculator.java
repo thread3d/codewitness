@@ -81,7 +81,7 @@ public final class VerdictCalculator {
         }
 
         if (!counterexamples.isEmpty()) {
-            Counterexample first = counterexamples.get(0);
+            Counterexample first = counterexamples.getFirst();
             return new RequirementVerdict(requirement.id(), RequirementStatus.FAILED,
                     "A counterexample reproduced by execution violates this requirement: " + first.summary()
                             + " (see " + first.id() + ")",
@@ -94,7 +94,7 @@ public final class VerdictCalculator {
                 .toList();
         if (!refuting.isEmpty()) {
             return new RequirementVerdict(requirement.id(), RequirementStatus.FAILED,
-                    "Deterministic evidence contradicts this requirement: " + refuting.get(0).description(),
+                    "Deterministic evidence contradicts this requirement: " + refuting.getFirst().description(),
                     evidenceIds, outcomes, unknownAspects, counterexampleIds, true);
         }
 
@@ -140,7 +140,7 @@ public final class VerdictCalculator {
             return new RequirementVerdict(requirement.id(), RequirementStatus.VERIFIED,
                     "Every planned obligation was discharged by executed experiments ("
                             + experiments.size() + " experiment evidence records, evidence "
-                            + experiments.get(0).id() + " onward).",
+                            + experiments.getFirst().id() + " onward).",
                     evidenceIds, outcomes, distinct(unknownAspects), counterexampleIds, deterministic);
         }
 

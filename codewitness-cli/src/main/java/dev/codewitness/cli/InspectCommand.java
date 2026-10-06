@@ -150,7 +150,7 @@ public final class InspectCommand implements Callable<Integer> {
             for (Path path : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
                 Files.deleteIfExists(path);
             }
-        } catch (Exception ignored) {
+        } catch (Exception _) {
             // an inspector that cannot tidy up is still a useful inspector
         }
     }

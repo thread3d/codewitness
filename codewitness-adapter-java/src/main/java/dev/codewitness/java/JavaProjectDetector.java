@@ -83,13 +83,13 @@ public final class JavaProjectDetector {
         modules.add(new ModuleInfo(project.name(), root, "source-tree",
                 existing(root.resolve("src/main/java")), existing(root.resolve("src/test/java")), null));
         builder.buildSystem(BuildSystemId.NONE)
-                .addModule(modules.get(0))
+                .addModule(modules.getFirst())
                 .attribute(ATTR_DETECTION_WARNING,
                         "no pom.xml or Gradle build file found; the project can be analysed but not built")
                 .attribute(ATTR_DESCRIPTOR, "none");
         detectTestFrameworks(root, builder, "");
         builder.attribute(ATTR_ROOT_PACKAGES, String.join(",", rootPackages(modules)));
-        builder.attribute(ATTR_HAS_TESTS, String.valueOf(!modules.get(0).testSourceDirs().isEmpty()));
+        builder.attribute(ATTR_HAS_TESTS, String.valueOf(!modules.getFirst().testSourceDirs().isEmpty()));
         return builder.build();
     }
 
@@ -300,7 +300,7 @@ public final class JavaProjectDetector {
                             packages.add(relative.substring(0, slash));
                         }
                     });
-                } catch (IOException ignored) {
+                } catch (IOException _) {
                     // package discovery is best effort
                 }
             }

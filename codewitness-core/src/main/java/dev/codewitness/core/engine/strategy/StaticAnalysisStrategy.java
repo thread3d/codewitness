@@ -113,7 +113,7 @@ public final class StaticAnalysisStrategy implements VerificationStrategy {
                     finding.severity() + " finding at " + finding.location(),
                     "rule " + (finding.ruleId() == null ? "(unnamed)" : finding.ruleId()),
                     finding.analyzer() + " " + finding.location(),
-                    evidence.isEmpty() ? null : evidence.get(0).id(),
+                    evidence.isEmpty() ? null : evidence.getFirst().id(),
                     null,
                     new Counterexample.ReproductionRecipe(
                             "Re-run the analyzer over the project",

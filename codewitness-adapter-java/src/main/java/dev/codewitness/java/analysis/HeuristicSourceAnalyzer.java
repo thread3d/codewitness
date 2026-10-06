@@ -139,7 +139,7 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
                         .filter(p -> !dev.codewitness.java.generate.JavaGeneratedTestRunner.isGeneratedSource(p))
                         .sorted()
                         .forEach(files::add);
-            } catch (IOException ignored) {
+            } catch (IOException _) {
                 // unreadable tree: nothing to analyse
             }
         }

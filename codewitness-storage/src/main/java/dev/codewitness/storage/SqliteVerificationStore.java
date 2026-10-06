@@ -441,7 +441,7 @@ public final class SqliteVerificationStore implements VerificationStore {
                 if (rows.isEmpty()) {
                     return Optional.empty();
                 }
-                return Optional.ofNullable(Json.string(rows.get(0), "report_json"));
+                return Optional.ofNullable(Json.string(rows.getFirst(), "report_json"));
             } catch (SQLException e) {
                 throw new StorageException("failed to read report JSON for run " + runId, e);
             }
@@ -528,7 +528,7 @@ public final class SqliteVerificationStore implements VerificationStore {
     private String existingCreatedAt(String runId) throws SQLException {
         List<Map<String, Object>> rows = query(
                 "SELECT created_at FROM verification_runs WHERE run_id = ?", runId);
-        return rows.isEmpty() ? null : Json.string(rows.get(0), "created_at");
+        return rows.isEmpty() ? null : Json.string(rows.getFirst(), "created_at");
     }
 
     private void deleteRun(String runId) throws SQLException {
@@ -972,7 +972,7 @@ public final class SqliteVerificationStore implements VerificationStore {
         if (runRows.isEmpty()) {
             return Optional.empty();
         }
-        Map<String, Object> runRow = runRows.get(0);
+        Map<String, Object> runRow = runRows.getFirst();
         Map<String, Object> projectRow = readProjectRow(runRow);
         ProjectRef projectRef = storedProjectRef(runRow, projectRow, runId);
         ProjectInfo projectInfo = storedProjectInfo(projectRow, projectRef);
@@ -1060,7 +1060,7 @@ public final class SqliteVerificationStore implements VerificationStore {
             return null;
         }
         List<Map<String, Object>> rows = query("SELECT * FROM projects WHERE project_id = ?", projectId);
-        return rows.isEmpty() ? null : rows.get(0);
+        return rows.isEmpty() ? null : rows.getFirst();
     }
 
     private TestResult readTests(String runId) throws SQLException {
@@ -1069,7 +1069,7 @@ public final class SqliteVerificationStore implements VerificationStore {
         if (rows.isEmpty()) {
             return TestResult.notExecuted("not stored");
         }
-        Map<String, Object> row = rows.get(0);
+        Map<String, Object> row = rows.getFirst();
         List<TestCaseResult> cases = new ArrayList<>();
         for (Map<String, Object> caseRow : query(
                 "SELECT * FROM test_cases WHERE run_id = ? ORDER BY ordinal", runId)) {
@@ -1810,7 +1810,7 @@ public final class SqliteVerificationStore implements VerificationStore {
         }
         try {
             connection.close();
-        } catch (SQLException ignored) {
+        } catch (SQLException _) {
             // The open failure that led here is the interesting one; a secondary close failure on a
             // half-initialised connection adds no information.
         }

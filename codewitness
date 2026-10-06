@@ -28,4 +28,7 @@ else
   JAVA=java
 fi
 
-exec "$JAVA" ${CODEWITNESS_JAVA_OPTS:-} -jar "$JAR" "$@"
+# --enable-native-access: the bundled SQLite driver loads a native library, which JDK 24+ reports as
+# restricted native access. Granted explicitly here so the CLI does not warn on every run, and so it
+# keeps working when that warning becomes an error.
+exec "$JAVA" --enable-native-access=ALL-UNNAMED ${CODEWITNESS_JAVA_OPTS:-} -jar "$JAR" "$@"

@@ -469,7 +469,7 @@ public final class ScenarioTestGenerator implements VerificationTools.TestGenera
     private static String literal(Scenario.Input input, String rawValue) {
         String value = rawValue;
         if (value == null) {
-            value = input.values().isEmpty() ? defaultLiteral(input) : input.values().get(0);
+            value = input.values().isEmpty() ? defaultLiteral(input) : input.values().getFirst();
         }
         return switch (input.domain()) {
             case DECIMAL -> "new java.math.BigDecimal(\"" + escape(value) + "\")";
@@ -510,7 +510,7 @@ public final class ScenarioTestGenerator implements VerificationTools.TestGenera
             case INSTANT_MILLIS -> "cwInstant(rnd, " + (min == null ? "0" : min) + "L, "
                     + (max == null ? "86400000" : max) + "L)";
             case NULL -> "null";
-            case RAW -> input.values().isEmpty() ? "null" : input.values().get(0);
+            case RAW -> input.values().isEmpty() ? "null" : input.values().getFirst();
         };
     }
 

@@ -169,7 +169,7 @@ public record VerificationConfig(
     /** Sandbox configuration. */
     public record Sandbox(String mode, String image, boolean allowNetwork, String containerWorkdir) {
         public static Sandbox defaults() {
-            return new Sandbox("local-process", "eclipse-temurin:17-jdk", false, "/work");
+            return new Sandbox("local-process", "eclipse-temurin:25-jdk", false, "/work");
         }
     }
 

@@ -111,7 +111,7 @@ public final class HeuristicPropertyExtractor {
             String raw = matcher.group(1).replaceAll("[,\\s]", "");
             try {
                 return new BigDecimal(raw);
-            } catch (NumberFormatException ignored) {
+            } catch (NumberFormatException _) {
                 // keep scanning
             }
         }

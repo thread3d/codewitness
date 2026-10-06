@@ -164,7 +164,7 @@ public final class ExistingTestsStrategy implements VerificationStrategy {
 
         if (failedMapped.isEmpty()) {
             outcomes.add(new ObligationOutcome(
-                    mappedClasses.get(0),
+                    mappedClasses.getFirst(),
                     dev.codewitness.core.requirements.RequirementStatus.PARTIALLY_VERIFIED,
                     "The mapped tests pass, which supports the requirement but does not falsify it.",
                     List.of(evidenceRecord.id()),

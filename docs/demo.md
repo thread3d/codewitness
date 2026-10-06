@@ -24,7 +24,7 @@ adapter          java
 language         java
 build system     maven
 build root       .../fixtures/withdrawal-ledger/.codewitness/runs/.../workspace
-java version     17
+java version     25
 build wrapper    none
 test frameworks  junit5
 capabilities     [BUILD, COVERAGE, DEPENDENCY_SCAN, GENERATED_TESTS, INSPECT, MUTATION,

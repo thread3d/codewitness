@@ -48,7 +48,7 @@ isolation it did not get.
 ```yaml
 sandbox:
   mode: docker
-  image: eclipse-temurin:17-jdk
+  image: eclipse-temurin:25-jdk
   container_workdir: /work
 ```
 

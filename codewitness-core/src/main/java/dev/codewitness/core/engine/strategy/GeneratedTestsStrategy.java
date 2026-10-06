@@ -122,7 +122,7 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
             return new StrategyOutcome(id(), requirement.id(), evidence, counterexamples, outcomes, notes);
         }
 
-        GeneratedTestExecution execution = executors.get(0).execute(context, generated);
+        GeneratedTestExecution execution = executors.getFirst().execute(context, generated);
         context.budget().recordIteration();
         context.budget().recordGeneratedTests(execution.executed().size());
 
@@ -243,14 +243,14 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
             if (fields.containsKey("seed")) {
                 try {
                     seed = Long.parseLong(fields.get("seed"));
-                } catch (NumberFormatException ignored) {
+                } catch (NumberFormatException _) {
                     // keep the declared seed
                 }
             }
             if (fields.containsKey("case")) {
                 try {
                     caseIndex = Integer.parseInt(fields.get("case"));
-                } catch (NumberFormatException ignored) {
+                } catch (NumberFormatException _) {
                     // keep the declared case index
                 }
             }
@@ -269,7 +269,7 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
         Counterexample counterexample = new Counterexample(
                 context.state().nextCounterexampleId(),
                 requirement.id(),
-                test.obligationIds().isEmpty() ? null : test.obligationIds().get(0),
+                test.obligationIds().isEmpty() ? null : test.obligationIds().getFirst(),
                 "Generated test " + testCase.displayName() + " violated " + requirement.id() + ": " + actual,
                 inputs,
                 expected,
@@ -325,7 +325,7 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
             if (caseIndex != null) {
                 command.add("CODEWITNESS_CASE=" + caseIndex);
             }
-            command.add(build.isEmpty() ? "./gradlew" : build.get(0));
+            command.add(build.isEmpty() ? "./gradlew" : build.getFirst());
             command.add("test");
             for (GeneratedTest test : tests) {
                 command.add("--tests");
@@ -333,7 +333,7 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
             }
             return command;
         }
-        command.add(build.isEmpty() ? "mvn" : build.get(0));
+        command.add(build.isEmpty() ? "mvn" : build.getFirst());
         command.add("-Dtest=" + tests.stream().map(GeneratedTest::simpleName)
                 .collect(java.util.stream.Collectors.joining(",")));
         if (seed != null) {

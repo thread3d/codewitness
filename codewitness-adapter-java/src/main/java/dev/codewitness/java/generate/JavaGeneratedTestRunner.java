@@ -146,7 +146,7 @@ public final class JavaGeneratedTestRunner implements VerificationTools.Generate
             for (Path path : written) {
                 try {
                     Files.deleteIfExists(path);
-                } catch (IOException ignored) {
+                } catch (IOException _) {
                     // leaving a generated file behind is untidy but not fatal
                 }
             }
@@ -168,7 +168,7 @@ public final class JavaGeneratedTestRunner implements VerificationTools.Generate
             try {
                 Files.createDirectories(candidate);
                 return candidate;
-            } catch (IOException ignored) {
+            } catch (IOException _) {
                 // try the next module
             }
         }
@@ -186,7 +186,7 @@ public final class JavaGeneratedTestRunner implements VerificationTools.Generate
                     }
                 }
             }
-        } catch (IOException ignored) {
+        } catch (IOException _) {
             // best effort cleanup
         }
     }

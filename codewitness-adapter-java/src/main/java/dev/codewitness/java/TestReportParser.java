@@ -52,7 +52,7 @@ public final class TestReportParser {
                                     && p.getFileName().toString().endsWith(".xml"))
                             .sorted()
                             .forEach(reports::add);
-                } catch (IOException ignored) {
+                } catch (IOException _) {
                     // an unreadable report directory simply yields no reports
                 }
             }
@@ -144,7 +144,7 @@ public final class TestReportParser {
         for (Path report : findReportFiles(project)) {
             try {
                 Files.deleteIfExists(report);
-            } catch (IOException ignored) {
+            } catch (IOException _) {
                 // best effort; a stale report would only add noise
             }
         }

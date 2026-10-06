@@ -5,8 +5,8 @@ change has to respect.
 
 ## Prerequisites
 
-- Java 17 or newer (the build targets release 17)
-- Maven 3.8+ (or use `./mvnw`), on `PATH`, or `MAVEN_HOME`/`M2_HOME` set
+- Java 25 or newer (the build targets release 25)
+- Maven 3.9+ (or use `./mvnw`, which pins 3.9.16), on `PATH`, or `MAVEN_HOME`/`M2_HOME` set
 - Network access for the first build (dependencies) and for the end-to-end tests
 
 ## Build and test
@@ -60,8 +60,9 @@ implementation), plus `requirements.md` and `codewitness.yaml`.
 
 To add one:
 
-1. Copy the structure of `fixtures/withdrawal-ledger`: standalone Maven project, Java 17, JUnit 5,
-   surefire 3.2.5.
+1. Copy the structure of `fixtures/withdrawal-ledger`: standalone Maven project, Java 25, JUnit 5,
+   surefire 3.2.5. Keep at least one fixture on an older release (currently `correct-implementation`
+   on Java 17) so the adapter's "Java 17+" claim stays exercised against real bytecode.
 2. Introduce **one** defect, and state it in a comment at the top of the class — the comment is part
    of the fixture's contract.
 3. Write requirements that describe the intended behaviour, not the defect.
@@ -107,7 +108,7 @@ outcomes. You cannot assign a verdict; the engine does that from your evidence. 
 
 ## Code style
 
-- Java 17, records for value types, immutable models with builders where a type has many optional
+- Java 25, records for value types, immutable models with builders where a type has many optional
   parts.
 - Javadoc on every public type and on every non-obvious method, explaining **why** where the reason
   matters. Comments that restate the code are noise; comments that explain a decision are the

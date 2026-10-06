@@ -20,7 +20,7 @@ CLAIM  ──▶  OBLIGATION  ──▶  EXPERIMENT  ──▶  OBSERVATION  ─
 ## Quick start
 
 ```bash
-# 1. Build (needs Java 17+ and Maven)
+# 1. Build (needs Java 25+ and Maven)
 ./build.sh
 
 # 2. See what CodeWitness finds in a project that contains deliberate defects
@@ -304,7 +304,7 @@ codewitness/
 │   ├── io/                    isolated workspace and artifact store
 │   ├── config/                codewitness.yaml
 │   └── llm/                   advisory provider abstraction and prompt fencing
-├── codewitness-adapter-java/  Java 17+, Maven and Gradle, JUnit 5, PIT, JaCoCo
+├── codewitness-adapter-java/  Java 17+ projects (module targets 25), Maven and Gradle, JUnit 5, PIT, JaCoCo
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -335,7 +335,7 @@ network access the first time, because it builds real projects.
 
 Implemented and exercised end to end:
 
-- detection of Java 17+ projects using Maven or Gradle, including multi-module layouts;
+- detection of Java 17+ projects, including Java 25, using Maven or Gradle, with multi-module layouts;
 - compilation and existing-test execution through the project's own build tool, with results parsed
   from raw Surefire/Failsafe/Gradle XML reports;
 - static analysis: compiler diagnostics (`-Xlint:all`) plus an auditable table of deterministic

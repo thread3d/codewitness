@@ -30,10 +30,15 @@ import java.util.Locale;
  */
 public final class PitMutationTester implements VerificationTools.MutationTester {
 
-    private static final String PIT_VERSION = "1.15.8";
+    /**
+     * Version of PIT injected into the project under verification. PIT gained Java 25 support in the
+     * 1.25.x line (issue #1439, closed 2026-02-02) with further Java 25 mutator fixes in 1.25.8;
+     * 1.30.0 is current. Older builds cannot mutate class file version 69.
+     */
+    private static final String PIT_VERSION = "1.30.0";
 
     /** Version of the PIT JUnit 5 plugin; without it PIT cannot run a JUnit 5 suite at all. */
-    private static final String PIT_JUNIT5_PLUGIN_VERSION = "1.2.2";
+    private static final String PIT_JUNIT5_PLUGIN_VERSION = "1.2.3";
 
     private final BuildToolLauncher launcher;
 
@@ -129,7 +134,7 @@ public final class PitMutationTester implements VerificationTools.MutationTester
         for (Path report : findReports(project)) {
             try {
                 Files.deleteIfExists(report);
-            } catch (IOException ignored) {
+            } catch (IOException _) {
                 // best effort
             }
         }

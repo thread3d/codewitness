@@ -48,29 +48,21 @@ final class Json {
     }
 
     private static void writeValue(StringBuilder out, Object value) {
-        if (value == null) {
-            out.append("null");
-        } else if (value instanceof String || value instanceof Character
-                || value instanceof Path || value instanceof Instant || value instanceof Enum<?>) {
-            writeString(out, String.valueOf(value));
-        } else if (value instanceof Boolean bool) {
-            out.append(bool.booleanValue());
-        } else if (value instanceof Number number) {
-            writeNumber(out, number);
-        } else if (value instanceof Map<?, ?> map) {
-            writeObject(out, map);
-        } else if (value instanceof Collection<?> collection) {
-            writeArray(out, collection);
-        } else if (value instanceof Object[] array) {
-            writeArray(out, Arrays.asList(array));
-        } else if (value instanceof int[] array) {
-            writeArray(out, box(array));
-        } else if (value instanceof long[] array) {
-            writeArray(out, box(array));
-        } else if (value instanceof double[] array) {
-            writeArray(out, box(array));
-        } else {
-            writeString(out, String.valueOf(value));
+        // A pattern switch makes the dispatch table explicit; the unnamed patterns mark the types
+        // that are simply stringified, without inventing binding names nobody reads.
+        switch (value) {
+            case null -> out.append("null");
+            case String _, Character _, Path _, Instant _, Enum<?> _ ->
+                    writeString(out, String.valueOf(value));
+            case Boolean bool -> out.append(bool.booleanValue());
+            case Number number -> writeNumber(out, number);
+            case Map<?, ?> map -> writeObject(out, map);
+            case Collection<?> collection -> writeArray(out, collection);
+            case Object[] array -> writeArray(out, Arrays.asList(array));
+            case int[] array -> writeArray(out, box(array));
+            case long[] array -> writeArray(out, box(array));
+            case double[] array -> writeArray(out, box(array));
+            default -> writeString(out, String.valueOf(value));
         }
     }
 
@@ -473,7 +465,7 @@ final class Json {
             } catch (NumberFormatException e) {
                 try {
                     return Double.valueOf(token);
-                } catch (NumberFormatException ignored) {
+                } catch (NumberFormatException _) {
                     throw new IllegalArgumentException("invalid number '" + token + "' at offset " + start, e);
                 }
             }

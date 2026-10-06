@@ -75,8 +75,8 @@ public final class ReproduceCommand implements Callable<Integer> {
             System.out.println("Run them from the project directory. Add --run to execute the first one now.");
             return 0;
         }
-        restoreGeneratedTest(root, base.resolve("runs").resolve(runId), testClassName(commands.get(0)));
-        return runCommand(root, commands.get(0));
+        restoreGeneratedTest(root, base.resolve("runs").resolve(runId), testClassName(commands.getFirst()));
+        return runCommand(root, commands.getFirst());
     }
 
     private static int runCommand(Path projectRoot, String command) {

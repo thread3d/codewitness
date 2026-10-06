@@ -173,6 +173,41 @@ class JavaProjectDetectorTest {
     }
 
     @Test
+    void detectsJava25ProjectsInBothBuildSystems() throws IOException {
+        Path mavenRoot = tmp.resolve("maven25");
+        write(mavenRoot, "pom.xml", """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project xmlns="http://maven.apache.org/POM/4.0.0">
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>com.example</groupId>
+                  <artifactId>modern</artifactId>
+                  <version>1.0.0</version>
+                  <properties>
+                    <maven.compiler.release>25</maven.compiler.release>
+                  </properties>
+                </project>
+                """);
+        Files.createDirectories(mavenRoot.resolve("src/main/java"));
+
+        assertEquals(Optional.of("25"), JavaProjectDetector.inspect(ProjectRef.of(mavenRoot)).javaVersion(),
+                "a two-digit Maven release must survive detection");
+
+        // Gradle expresses the same thing differently, and through the other supported spelling.
+        Path gradleRoot = tmp.resolve("gradle25");
+        write(gradleRoot, "build.gradle", """
+                plugins { id 'java' }
+                java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+                """);
+        Files.createDirectories(gradleRoot.resolve("src/main/java"));
+
+        ProjectInfo gradle = JavaProjectDetector.inspect(ProjectRef.of(gradleRoot));
+        assertEquals(Optional.of("25"), gradle.javaVersion(),
+                "JavaLanguageVersion.of(25) must survive detection");
+        assertEquals("25", gradle.modules().get(0).javaVersion(),
+                "the module inherits the detected Java version");
+    }
+
+    @Test
     void detectsAPlainSourceTreeWithoutABuildDescriptor() throws IOException {
         Path root = tmp.resolve("plain");
         Files.createDirectories(root.resolve("src/main/java/com/example"));

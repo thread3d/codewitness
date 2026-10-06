@@ -17,6 +17,9 @@
   </description>
 
   <properties>
+    <!-- Deliberately left at 17. Six of the seven fixtures target Java 25; this one stays on
+         Java 17 so that the adapter's claim to handle "Java 17+" projects keeps being exercised
+         against real bytecode rather than only against synthetic poms in unit tests. -->
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <junit.version>5.10.2</junit.version>
