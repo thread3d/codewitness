@@ -86,11 +86,27 @@ or a JavaScript project:
 ./codewitness verify ./my-javascript-project --requirements requirements.md
 ```
 
-The language is detected; `language.adapter: java`, `python`, `rust`, `go`, `typescript` or
-`javascript` only *prefers* that adapter. It is not forced: `LanguageAdapterRegistry.select` uses the
-named adapter when it exists and actually claims the project, and otherwise falls back to
-auto-detection — an unknown id is silently ignored rather than reported. Python support needs only an
-interpreter: it uses `pytest` when the project has it and the standard library `unittest` runner
+The language is detected. A project may be written in more than one: a Java service with a TypeScript
+frontend is two verifiable projects in one tree, and `LanguageAdapterRegistry.selectAll` runs **every**
+adapter that claims part of it, so neither side is silently absent from the report. The report then says
+`polyglot` and lists each language it verified under `languages`, so the verdicts cannot be read as if the
+whole tree were one language. Phases that belong to a language run once per language, and a language whose
+build fails blocks only the requirements written in it — a sibling that compiled is still verifiable.
+
+`language.adapter: java`, `python`, `rust`, `go`, `typescript` or `javascript` *narrows* the run to that one
+adapter instead of being merged with the automatic choice. It is not forced: the named adapter is used when
+it exists and actually claims the project, and otherwise the run falls back to auto-detection — an unknown
+id is silently ignored rather than reported.
+
+A language present in the tree that **no** adapter understands is reported as an explicit limitation naming
+the file that gave it away, rather than being left out: running every adapter that claims a project cannot
+help with a language nothing covers, and a report that stays quiet about it is worse than one that says so.
+The check is a heuristic over well-known project descriptors — `Gemfile`, `composer.json`, `*.csproj` and the
+like — and it skips dependency, build-output and sample-project directories (`node_modules`, `target`,
+`vendor`, `fixtures`, `testdata`), because naming a repository's own test inputs would be noise in a list
+that is only useful while it is read.
+
+Python support needs only an interpreter: it uses `pytest` when the project has it and the standard library `unittest` runner
 otherwise, so a project with no third-party packages can still be verified. Rust support needs only
 `cargo`: a dependency-free crate is built, tested, analysed and mutated by the toolchain it already
 has, and generated scenarios become ordinary Cargo integration tests. Go support needs only the `go`
@@ -532,9 +548,12 @@ codewitness/
 Language support lives entirely in the adapters: adding a language means adding a module that
 implements `dev.codewitness.core.spi.LanguageAdapter` and registering its providers — not editing the
 engine. A few platform defaults do remain in core — the `LanguageId` and `BuildSystemId` constants
-(`JAVA`, `MAVEN`, `CARGO`, `GO`, `NODE` and the rest), `PackageCoordinate.parseMaven` for advisory
-lookups, and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
-vocabulary and platform defaults, not language logic, and the engine never switches on a language.
+(`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`, `TYPESCRIPT`, `POLYGLOT` and the rest), the typed
+`PackageCoordinate` an advisory lookup needs, the `UncoveredLanguages` naming table, and the
+excluded-directory and build-wrapper names in `WorkspaceManager` — but they are vocabulary and platform
+defaults, not language logic, and the engine never switches on a language. `UncoveredLanguages` is the one
+place worth watching: it only ever adds a sentence to the report's limitations, and must never grow into
+something that schedules a phase or influences a verdict.
 
 ---
 
@@ -587,8 +606,10 @@ The Python adapter is implemented and exercised end to end as well (`fixtures/py
 - coverage through `coverage.py`, reported as not measured when it is absent;
 - mutation testing through the standard library `ast` module, with a bounded operator set, a mutant
   cap and a wall-clock budget;
-- a dependency inventory from the project's manifests (inventory only; advisories are not checked for
-  this ecosystem yet, since the manifest does not always carry a resolved version);
+- a dependency inventory from the project's manifests, resolved from `poetry.lock` or from requirements
+  pinned with `==` when either exists, and from the declared names and version *ranges* otherwise; when
+  nothing pins a version the report says the advisory scan cannot query these distributions rather than
+  implying they are clean;
 - generated adversarial tests from declared scenarios: the fragments are Python, the generated tests
   are `unittest` cases, and a counterexample carries the exact inputs plus a replayable command.
 
@@ -615,8 +636,10 @@ The Rust adapter is implemented and exercised end to end as well (`fixtures/rust
 - coverage through `cargo-llvm-cov` when it is installed, and an honest "not measured" when it is not;
 - mutation testing through a bounded, built-in source mutator (arithmetic, comparison boundaries,
   boolean operators and boolean constants) that flips one operator at a time and re-runs the suite;
-- a dependency inventory from the Cargo manifests (inventory only; advisories are not checked for this
-  ecosystem yet);
+- a dependency inventory from `Cargo.lock` when it exists — every crate the lock file resolves, including
+  transitive ones, and so queryable — and from the declared crate names and version ranges otherwise; only
+  a lock file carries the resolved version an advisory is a statement about, and the report says which of
+  the two it read;
 - generated adversarial tests from declared scenarios: the fragments are Rust, the generated tests
   are standard-library Cargo integration tests, and a counterexample carries the exact inputs plus a
   replayable `cargo test` command.
@@ -649,8 +672,10 @@ The Go adapter is implemented and exercised end to end as well (`fixtures/go-wit
   `0/0` rather than guessed;
 - mutation testing through a bounded, built-in source mutator (arithmetic, comparison boundaries,
   boolean operators and boolean constants) that flips one operator at a time and re-runs the suite;
-- a dependency inventory from `go.mod` (inventory only; advisories are not checked for this ecosystem
-  yet);
+- a dependency inventory from `go.mod`, carrying the version each `require` directive selects, which is
+  what makes the Go dependencies queryable at all; `go.sum` is deliberately not used, because it keeps
+  every version ever downloaded rather than the one the build selects, and asking about those would report
+  advisories against versions the build no longer uses;
 - generated adversarial tests from declared scenarios: the fragments are Go, the generated
   `_test.go` files are placed in the package under test, and a counterexample carries the exact
   inputs plus a replayable `go test` command.
@@ -687,8 +712,8 @@ The TypeScript adapter is implemented and exercised end to end as well
 - mutation testing through a bounded, built-in source mutator (arithmetic, comparison boundaries,
   equality, boolean operators and boolean constants) that flips one operator at a time and re-runs the
   suite, excluding mutants the runtime cannot parse;
-- a dependency inventory from `package.json` (inventory only; advisories are not checked for this
-  ecosystem yet);
+- a dependency inventory from `package-lock.json` when it exists — every package the install would ship,
+  including transitive ones — and from the declared names and version ranges otherwise;
 - generated adversarial tests from declared scenarios: the fragments are TypeScript, the generated tests
   are `node:test` modules, and a counterexample carries the exact inputs plus a replayable `node --test`
   command.
@@ -737,8 +762,8 @@ The JavaScript adapter is implemented and exercised end to end as well
   tool id `javascript-text`; arithmetic, comparison boundaries, equality, boolean operators and
   boolean constants) that flips one operator at a time and re-runs the suite, excluding mutants the
   runtime cannot parse;
-- a dependency inventory from `package.json` (inventory only; advisories are not checked for this
-  ecosystem yet);
+- a dependency inventory from `package-lock.json` when it exists — every package the install would ship,
+  including transitive ones — and from the declared names and version ranges otherwise;
 - generated adversarial tests from declared scenarios: the fragments are plain JavaScript, the
   generated tests are ordinary `node:test` modules written with the `.test.mjs` extension, a failing
   case throws the same `CODEWITNESS_COUNTEREXAMPLE|…` protocol line, and a counterexample carries the
@@ -774,15 +799,19 @@ The honest limits of JavaScript support are:
 
 Implemented but limited, and reported as such:
 
-- **Dependency advisories** are checked only when you turn the scan on, and only for ecosystems whose
-  inventory carries a resolved version (currently Maven). When it is on, CodeWitness asks OSV which of
-  the resolved dependencies are affected and records the answer, the service it asked and when; when it
-  is off, the report says the dependencies were *not checked* rather than reporting zero
-  vulnerabilities. An advisory at `fail_on` severity or above **fails** the requirements whose own
-  module resolves the vulnerable artifact — the attribution is deliberately narrow, so a requirement in
-  `module-a` is not refuted by a dependency that only `module-b` pulls in. An advisory whose severity the
-  source did not state refutes nothing, and an empty result is not a claim that a dependency is
-  unaffected.
+- **Dependency advisories** are checked only when you turn the scan on. It covers every ecosystem the
+  adapters can inventory at a resolved version: Maven (from `dependency:list`), npm and PyPI and
+  crates.io (from `package-lock.json`, `poetry.lock` and `Cargo.lock`, or from requirements pinned with
+  `==`) and Go (from the versions `go.mod` selects). A dependency an inventory reports without a
+  resolved version cannot be asked about, so the report says the scan could not query it rather than
+  implying it is clean. When the scan is on, CodeWitness asks OSV which of the resolved dependencies are
+  affected and records the answer, the service it asked and when; when it is off, the report says the
+  dependencies were *not checked* rather than reporting zero vulnerabilities. An advisory at `fail_on`
+  severity or above **fails** the requirements whose own module resolves the vulnerable artifact — the
+  attribution is deliberately narrow, so a requirement in `module-a` is not refuted by a dependency that
+  only `module-b` pulls in, and each module's dependencies are keyed by their language so a same-named
+  module in another language cannot be charged with them. An advisory whose severity the source did not
+  state refutes nothing, and an empty result is not a claim that a dependency is unaffected.
 - **Gradle** support (detection, commands, report parsing) is implemented and unit tested, but the
   end-to-end demonstration in this repository was exercised with Maven only; no Gradle
   distribution was available in the environment it was built in.

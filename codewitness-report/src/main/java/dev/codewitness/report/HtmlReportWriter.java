@@ -191,8 +191,13 @@ public final class HtmlReportWriter {
                 .append("<dt>Revision</dt><dd>").append(esc(revision(report))).append("</dd>\n")
                 .append("<dt>Generated</dt><dd>").append(esc(generatedAt(report).toString())).append("</dd>\n")
                 .append("<dt>Overall status</dt><dd>").append(badge(report.overallStatus())).append(" ")
-                .append(esc(report.describe())).append("</dd>\n")
-                .append("<dt>Environment</dt><dd>")
+                .append(esc(report.describe())).append("</dd>\n");
+        // Which languages were verified. A reader of a polyglot report has to be able to tell, at a glance,
+        // what the verdicts below are actually about.
+        for (VerificationReport.LanguageSummary language : report.languages()) {
+            html.append("<dt>Language</dt><dd>").append(esc(language.describe())).append("</dd>\n");
+        }
+        html.append("<dt>Environment</dt><dd>")
                 .append(esc(environment != null ? environment.isolationLevel() : "unknown"))
                 .append(" isolation</dd>\n")
                 .append("</dl>\n</header>\n");

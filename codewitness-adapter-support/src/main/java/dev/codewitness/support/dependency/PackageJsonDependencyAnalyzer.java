@@ -2,6 +2,7 @@ package dev.codewitness.support.dependency;
 
 import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.LanguageId;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
@@ -11,24 +12,32 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Inventories a Node project's declared dependencies from {@code package.json}.
+ * Inventories a Node project's dependencies, resolved from {@code package-lock.json} when it exists and
+ * declared from {@code package.json} otherwise.
  *
- * <p>This is an inventory, not a vulnerability scan. It reads the dependency tables the manifest
- * declares and reports the package names; it never claims a project is free of vulnerable
- * dependencies, because it does not consult a vulnerability database, and the report says exactly that.
+ * <p>This is an inventory, not a vulnerability scan. It never claims a project is free of vulnerable
+ * dependencies; whether any of them has a known advisory is a separate question, recorded by the
+ * advisory scan, and the report says exactly that.
  *
- * <p>The manifest is not parsed with a general JSON parser because the adapter depends on the core
- * only. The extractor is deliberately narrow: it reads each dependency table's own brace-balanced body,
- * so a package named in a script, an {@code engines} constraint or another nested object cannot be
- * mistaken for a dependency. A manifest that exists but cannot be read is reported as not analysed
- * rather than as an empty inventory.
+ * <p>The distinction between the two sources is not cosmetic. A manifest declares version
+ * <em>ranges</em>, so an inventory built from it can name a dependency but cannot be asked whether a
+ * named version is affected by anything - and an unaskable inventory must not be presented as a clean
+ * one. A lock file resolves the graph, so when one is present the inventory carries versions and no
+ * longer covers only the packages someone wrote down: it covers everything the install would ship.
+ * {@code totalDependencies} therefore counts resolved packages, and the report's note says which source
+ * was read.
+ *
+ * <p>{@code package.json} is read with a narrow brace-balanced extractor rather than a JSON parser: it
+ * reads each dependency table's own body, so a package named in a script, an {@code engines} constraint
+ * or another nested object cannot be mistaken for a dependency. {@code package-lock.json} is read with a
+ * real parser, because its objects nest and each nested object has its own {@code version} field. A
+ * manifest that exists but cannot be read is reported as not analysed rather than as an empty inventory.
  */
 public final class PackageJsonDependencyAnalyzer implements VerificationTools.DependencyAnalyzer {
 
@@ -51,6 +60,16 @@ public final class PackageJsonDependencyAnalyzer implements VerificationTools.De
 
     private static final Pattern KEY = Pattern.compile("\"([^\"\\\\]+)\"\\s*:");
 
+    /** What the inventory covers when a lock file was read. */
+    static final String LOCK_NOTE = "inventory only: every package the project's package-lock.json "
+            + "resolves, including transitive ones; whether any of them has a known advisory is recorded "
+            + "by the advisory scan, which is a separate question from which dependencies exist";
+
+    /** What the inventory covers when only the manifest could be read. */
+    static final String MANIFEST_NOTE = "inventory only: the package names package.json declares, with the "
+            + "version ranges it declares them at; no lock file was found, so no resolved version is known "
+            + "and the advisory scan cannot query these dependencies";
+
     @Override
     public String id() {
         return "package-json-dependencies";
@@ -68,20 +87,60 @@ public final class PackageJsonDependencyAnalyzer implements VerificationTools.De
             return DependencyReport.notAnalysed("package-json",
                     "no package.json was found, so no dependency manifest could be read");
         }
+        return resolved(context);
+    }
+
+    /**
+     * Reads the lock file when there is one, and falls back to the manifest's declared names when there
+     * is not.
+     *
+     * <p>The two are not merged. A lock file already contains everything the manifest declares, and
+     * adding the manifest's names on top would report a dependency twice - once resolved, once not -
+     * which would then be counted twice in the coverage the scan claims.
+     */
+    private DependencyReport resolved(VerificationContext context) {
+        Path lock = context.projectRoot().resolve("package-lock.json");
+        if (Files.isRegularFile(lock)) {
+            try {
+                List<PackageCoordinate> coordinates = NodeLockFile.parse(Files.readString(lock, StandardCharsets.UTF_8));
+                if (!coordinates.isEmpty()) {
+                    String module = moduleName(context);
+                    Map<String, List<String>> byModule =
+                            Map.of(module, coordinates.stream().map(PackageCoordinate::display).toList());
+                    return DependencyReport.inventory("package-lock", LOCK_NOTE, coordinates, byModule);
+                }
+                // A lock file that parsed but recorded no package is indistinguishable from an empty
+                // install; saying so is better than silently reporting the manifest's ranges as if they
+                // had been resolved.
+                return DependencyReport.notAnalysed("package-lock",
+                        "package-lock.json exists but records no resolved package, so the dependencies "
+                                + "could not be inventoried");
+            } catch (IOException e) {
+                return DependencyReport.notAnalysed("package-lock",
+                        "package-lock.json exists but could not be read: " + e);
+            }
+        }
+        Path manifest = context.projectRoot().resolve("package.json");
         String content;
         try {
             content = Files.readString(manifest, StandardCharsets.UTF_8);
         } catch (IOException e) {
-            // A manifest that exists but cannot be read is not an empty dependency set: reporting an
-            // empty inventory here would be indistinguishable from "this project has no dependencies".
             return DependencyReport.notAnalysed("package-json",
                     "package.json exists but could not be read: " + e);
         }
-        List<String> direct = List.copyOf(new LinkedHashSet<>(parse(content)));
-        return new DependencyReport(true, "package-json",
-                "inventory only: CodeWitness does not consult a vulnerability database, so it cannot claim "
-                        + "these dependencies are free of known vulnerabilities",
-                direct.size(), direct, List.of());
+        return DependencyReport.inventory("package-json", MANIFEST_NOTE,
+                parse(content).stream().map(name -> PackageCoordinate.npm(name, "")).toList(),
+                Map.of(moduleName(context), parse(content)));
+    }
+
+    /** @return the name the report should attribute this project's dependencies to. */
+    private static String moduleName(VerificationContext context) {
+        ProjectInfo info = context.projectInfo();
+        if (!info.modules().isEmpty()) {
+            return info.modules().getFirst().name();
+        }
+        return context.projectRoot().getFileName() == null
+                ? "package" : context.projectRoot().getFileName().toString();
     }
 
     /** @return the package names declared in the manifest's dependency tables. */

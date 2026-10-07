@@ -19,19 +19,25 @@ import dev.codewitness.core.exec.ProcessSpec;
 import dev.codewitness.core.io.ArtifactStore;
 import dev.codewitness.core.io.WorkspaceManager;
 import dev.codewitness.core.llm.LlmProvider;
+import dev.codewitness.core.model.AdvisoryScan;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
+import dev.codewitness.core.model.CompilerDiagnostic;
 import dev.codewitness.core.model.CoverageReport;
 import dev.codewitness.core.model.DependencyReport;
+import dev.codewitness.core.model.DependencyVulnerability;
 import dev.codewitness.core.model.DiagnosticSeverity;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.FindingCategory;
+import dev.codewitness.core.model.LanguageId;
 import dev.codewitness.core.model.MutationReport;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.RunId;
 import dev.codewitness.core.model.Severity;
 import dev.codewitness.core.model.SurvivingMutant;
+import dev.codewitness.core.model.TestCaseResult;
 import dev.codewitness.core.model.TestResult;
 import dev.codewitness.core.requirements.ObligationKind;
 import dev.codewitness.core.requirements.ObligationOrigin;
@@ -68,6 +74,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The verification pipeline.
@@ -157,9 +164,13 @@ public final class VerificationEngine {
             limitations.add("The run operated in place: " + workspace.description());
         }
 
-        Optional<LanguageAdapter> adapter = languages.select(project, config.language().adapter());
-        if (adapter.isEmpty()) {
+        List<LanguageAdapter> adapters = languages.selectAll(project, config.language().adapter());
+        if (adapters.isEmpty()) {
             limitations.add("No language adapter supports this project. Registered adapters: " + languages.ids());
+            // With no adapter at all the run says nothing about any language, so naming the ones it can see
+            // is the most useful thing it can still do.
+            limitations.addAll(UncoveredLanguages.limitations(
+                    UncoveredLanguages.detect(workspace.root(), Set.of()), List.of("no language")));
             listener.onEvent("inspect", "no language adapter matched");
             Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.PROJECT_INSPECTION)
                     .description("No language adapter supports " + project.root())
@@ -179,258 +190,404 @@ public final class VerificationEngine {
 
         // ---------------------------------------------------------------- inspect
         Instant inspectStart = Instant.now();
-        ProjectInfo info;
+        List<Inspection> inspections;
         try {
-            VerificationContext inspectContext = context(runId, project, emptyInfo(project), config, workspace,
-                    artifacts, budget, requirements, LlmProvider.disabled("not initialised"), scoped, sandbox, state,
-                    ledger, startedAt);
-            info = adapter.get().inspect(project, inspectContext);
+            inspections = inspectAll(adapters, runId, project, config, workspace, artifacts, budget, requirements,
+                    scoped, sandbox, state, ledger, startedAt);
         } catch (RuntimeException e) {
             phases.add(new PhaseRecord("inspect", true, false, Duration.between(inspectStart, Instant.now()),
                     "inspection failed: " + e, List.of(), e.toString()));
             return failedReport(runId, project, requirements, config, workspace, state, ledger, phases, budget,
                     limitations, startedAt, "Project inspection failed: " + e);
         }
-        Evidence inspection = ledger.add(ledger.newEvidence(EvidenceType.PROJECT_INSPECTION)
-                .description("Detected " + info.describe())
-                .confidence(EvidenceConfidence.DETERMINISTIC)
-                .status(EvidenceStatus.SUPPORTS)
-                .result(info.describe())
-                .metadata("language", info.language().id())
-                .metadata("buildSystem", info.buildSystem().id())
-                .metadata("modules", info.modules().stream().map(m -> m.name()).toList())
-                .metadata("testFrameworks", List.copyOf(info.testFrameworks()))
-                .metadata("javaVersion", info.javaVersion().orElse("undeclared"))
-                .build());
+        if (inspections.size() > 1) {
+            limitations.add("This project is polyglot: " + inspections.size() + " language adapters claimed "
+                    + "part of it (" + inspections.stream().map(i -> i.adapter().id()).toList()
+                    + "). Each language's own phases were run, but the report's build, test, coverage and "
+                    + "mutation summaries are aggregated across them, so read them together with the "
+                    + "per-language evidence rather than as one project's numbers.");
+        }
+        // Running every adapter that claims the project still leaves any language nothing can verify. Saying
+        // so is the difference between an incomplete report and a misleading one.
+        limitations.addAll(UncoveredLanguages.limitations(
+                UncoveredLanguages.detect(workspace.root(), inspections.stream()
+                        .map(inspection -> inspection.info().language())
+                        .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new))),
+                inspections.stream().map(inspection -> inspection.info().language().id()).toList()));
+        // One description of the whole tree, for mapping requirements to files and for the report. Without
+        // it the languages other than the first would be invisible to both.
+        ProjectInfo info = ProjectInfo.union(project,
+                inspections.stream().map(Inspection::info).toList());
+        List<String> inspectionEvidence = new ArrayList<>();
+        for (Inspection inspection : inspections) {
+            ProjectInfo languageInfo = inspection.info();
+            Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.PROJECT_INSPECTION)
+                    .description("Detected " + languageInfo.describe())
+                    .confidence(EvidenceConfidence.DETERMINISTIC)
+                    .status(EvidenceStatus.SUPPORTS)
+                    .result(languageInfo.describe())
+                    .metadata("adapter", inspection.adapter().id())
+                    .metadata("language", languageInfo.language().id())
+                    .metadata("buildSystem", languageInfo.buildSystem().id())
+                    .metadata("modules", languageInfo.modules().stream().map(m -> m.name()).toList())
+                    .metadata("testFrameworks", List.copyOf(languageInfo.testFrameworks()))
+                    .metadata("javaVersion", languageInfo.javaVersion().orElse("undeclared"))
+                    .build());
+            inspectionEvidence.add(evidence.id());
+            listener.onEvent("inspect", languageInfo.describe());
+        }
+        String inspected = inspections.stream().map(i -> i.info().describe())
+                .collect(java.util.stream.Collectors.joining("; "));
         phases.add(new PhaseRecord("inspect", true, true, Duration.between(inspectStart, Instant.now()),
-                info.describe(), List.of(inspection.id()), null));
-        listener.onEvent("inspect", info.describe());
+                inspected, List.copyOf(inspectionEvidence), null));
 
-        VerificationContext context = context(runId, project, info, config, workspace, artifacts, budget,
-                requirements, llm(config), scoped, sandbox, state, ledger, startedAt);
+        LlmProvider llm = llm(config);
 
         // ---------------------------------------------------------------- build
-        if (adapter.get().capabilities().contains(Capability.BUILD) && withinBudget(budget)) {
-            phases.add(runPhase("build", listener, () -> {
-                BuildResult build = firstCompiler(context)
-                        .map(c -> c.build(context))
-                        .orElseGet(() -> adapter.get().build(context));
-                state.build(build);
-                List<Finding> diagnosticFindings = diagnosticsToFindings(build);
-                state.addFindings(diagnosticFindings);
-                Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.COMPILER)
-                        .description("Build: " + build.describe())
-                        .command(build.command())
-                        .confidence(EvidenceConfidence.DETERMINISTIC)
-                        .status(build.success() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
-                        .result(build.describe())
-                        .output(tail(build.output(), 8000))
-                        .metadata("exitCode", build.exitCode())
-                        .metadata("errors", build.errors().size())
-                        .metadata("warnings", build.warnings().size())
-                        .metadata("artifacts", build.artifacts().stream().map(Path::toString).toList())
-                        .build());
-                if (!build.attempted()) {
-                    state.note("build not attempted: " + build.failureReason());
-                }
-                return new PhaseOutcome(build.success(), build.describe(), List.of(evidence.id()),
-                        build.attempted() ? null : build.failureReason());
-            }));
+        // Every language that claims part of the project gets its own build. One language failing to
+        // compile must not stop the other one from being verified: the requirements that live in the
+        // language that built are still verifiable, and reporting them BLOCKED because a sibling language
+        // did not compile would be as wrong as reporting the other side silently verified.
+        Map<String, BuildResult> builds = new LinkedHashMap<>();
+        // Per language, in addition to the merged result the strategies read. Mutation testing needs a
+        // suite to mutate against, and a language whose suite did not run is not one to spend mutant budget
+        // on even though a sibling language's suite did run.
+        Map<String, TestResult> testsByAdapter = new LinkedHashMap<>();
+        List<Inspection> builders = capable(inspections, Capability.BUILD);
+        if (builders.isEmpty()) {
+            phases.add(new PhaseRecord("build", false, true, Duration.ZERO,
+                    "no selected language adapter declares a build capability", List.of(), "skipped"));
+        } else if (!withinBudget(budget)) {
+            phases.add(new PhaseRecord("build", false, true, Duration.ZERO,
+                    "the run budget was already exhausted, so no build was attempted", List.of(), "skipped"));
         } else {
-            phases.add(new PhaseRecord("build", false, true, Duration.ZERO, "adapter declares no build capability",
-                    List.of(), "skipped"));
+            phases.add(runPhase("build", listener, () -> {
+                List<String> evidenceIds = new ArrayList<>();
+                List<BuildResult> results = new ArrayList<>();
+                for (Inspection inspection : builders) {
+                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                    BuildResult build = firstCompiler(languageContext)
+                            .map(compiler -> compiler.build(languageContext))
+                            .orElseGet(() -> inspection.adapter().build(languageContext));
+                    builds.put(inspection.adapter().id(), build);
+                    results.add(build);
+                    state.addFindings(diagnosticsToFindings(build));
+                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.COMPILER)
+                            .description("Build (" + inspection.adapter().id() + "): " + build.describe())
+                            .command(build.command())
+                            .confidence(EvidenceConfidence.DETERMINISTIC)
+                            .status(build.success() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
+                            .result(build.describe())
+                            .output(tail(build.output(), 8000))
+                            .metadata("adapter", inspection.adapter().id())
+                            .metadata("exitCode", build.exitCode())
+                            .metadata("errors", build.errors().size())
+                            .metadata("warnings", build.warnings().size())
+                            .metadata("artifacts", build.artifacts().stream().map(Path::toString).toList())
+                            .build());
+                    evidenceIds.add(evidence.id());
+                    if (!build.attempted()) {
+                        state.note("build not attempted for " + inspection.adapter().id() + ": "
+                                + build.failureReason());
+                    }
+                }
+                BuildResult merged = mergeBuilds(results);
+                state.build(merged);
+                return new PhaseOutcome(merged.success(), merged.describe(), List.copyOf(evidenceIds),
+                        merged.success() ? null : merged.failureReason());
+            }));
         }
 
         boolean buildBlocked = !state.build().success();
         if (buildBlocked) {
-            limitations.add("The project could not be built, so nothing could be verified: "
+            List<String> failed = builds.entrySet().stream().filter(entry -> !entry.getValue().success())
+                    .map(Map.Entry::getKey).toList();
+            limitations.add((inspections.size() > 1
+                    ? "Not every language in this project could be built: "
+                    : "The project could not be built, so nothing could be verified: ")
                     + state.build().describe() + ". A failed or impossible build is reported as BLOCKED, "
-                    + "not as a code defect.");
+                    + "not as a code defect."
+                    + (failed.isEmpty() ? "" : " The language(s) whose build failed: " + failed + ".")
+                    + (inspections.size() > 1
+                            ? " Requirements written in a language that did build were still verified." : ""));
         }
 
         // ---------------------------------------------------------------- existing tests
-        if (!buildBlocked && config.tests().enabled()
-                && adapter.get().capabilities().contains(Capability.TEST) && withinBudget(budget)) {
+        if (config.tests().enabled() && withinBudget(budget)) {
+            List<Inspection> testable = capable(inspections, Capability.TEST).stream()
+                    .filter(inspection -> builtSuccessfully(builds.get(inspection.adapter().id())))
+                    .toList();
             phases.add(runPhase("tests", listener, () -> {
-                Optional<VerificationTools.TestRunner> testRunner = firstTestRunner(context);
-                TestResult tests = testRunner
-                        .map(r -> r.runTests(context))
-                        .orElseGet(() -> adapter.get().runTests(context));
-                // Evidence must name the command that produced it. The build command is not that
-                // command: it compiles without running tests, so recording it would describe an
-                // invocation that cannot have yielded the result below.
-                List<String> testCommand = testRunner.map(r -> r.testCommand(context)).orElseGet(List::of);
-                state.existingTests(tests);
-                // describeWithNote, not describe: the note is how the runner says that what it parsed is
-                // not the whole story, and this record is what the report shows.
-                Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.TEST)
-                        .description("Existing tests: " + tests.describeWithNote())
-                        .command(testCommand)
-                        .confidence(EvidenceConfidence.DETERMINISTIC)
-                        .status(!tests.executed() ? EvidenceStatus.INCONCLUSIVE
-                                : (tests.anyFailure() ? EvidenceStatus.REFUTES : EvidenceStatus.SUPPORTS))
-                        .result(tests.describeWithNote())
-                        .output(tail(renderFailures(tests), 8000))
-                        .metadata("reports", tests.reports().stream().map(Path::toString).toList())
-                        .build());
-                if (!tests.executed()) {
-                    state.note("existing tests not executed: " + tests.note());
+                List<String> evidenceIds = new ArrayList<>();
+                List<TestResult> results = new ArrayList<>();
+                for (Inspection inspection : testable) {
+                    // Recorded per language as well as merged: mutation testing needs a suite to mutate
+                    // against, and a language whose suite did not run is not one to spend mutant budget on.
+
+                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                    Optional<VerificationTools.TestRunner> testRunner = firstTestRunner(languageContext);
+                    TestResult tests = testRunner
+                            .map(runner -> runner.runTests(languageContext))
+                            .orElseGet(() -> inspection.adapter().runTests(languageContext));
+                    // Evidence must name the command that produced it. The build command is not that
+                    // command: it compiles without running tests, so recording it would describe an
+                    // invocation that cannot have yielded the result below.
+                    List<String> testCommand = testRunner.map(r -> r.testCommand(languageContext)).orElseGet(List::of);
+                    results.add(tests);
+                    testsByAdapter.put(inspection.adapter().id(), tests);
+                    // describeWithNote, not describe: the note is how the runner says that what it parsed is
+                    // not the whole story, and this record is what the report shows.
+                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.TEST)
+                            .description("Existing tests (" + inspection.adapter().id() + "): "
+                                    + tests.describeWithNote())
+                            .command(testCommand)
+                            .confidence(EvidenceConfidence.DETERMINISTIC)
+                            .status(!tests.executed() ? EvidenceStatus.INCONCLUSIVE
+                                    : (tests.anyFailure() ? EvidenceStatus.REFUTES : EvidenceStatus.SUPPORTS))
+                            .result(tests.describeWithNote())
+                            .output(tail(renderFailures(tests), 8000))
+                            .metadata("adapter", inspection.adapter().id())
+                            .metadata("reports", tests.reports().stream().map(Path::toString).toList())
+                            .build());
+                    evidenceIds.add(evidence.id());
+                    if (!tests.executed()) {
+                        state.note("existing tests not executed for " + inspection.adapter().id() + ": "
+                                + tests.note());
+                    }
                 }
-                return new PhaseOutcome(tests.executed(), tests.describe(), List.of(evidence.id()),
-                        tests.executed() ? null : tests.note());
+                TestResult merged = mergeTests(results);
+                state.existingTests(merged);
+                return new PhaseOutcome(merged.executed(), merged.describe(), List.copyOf(evidenceIds),
+                        merged.executed() ? null : merged.note());
             }));
         }
 
         // ---------------------------------------------------------------- static analysis
-        if (!buildBlocked && config.staticAnalysis().enabled() && withinBudget(budget)) {
+        if (config.staticAnalysis().enabled() && withinBudget(budget)) {
+            List<Inspection> analysable = analysable(inspections, builds);
             phases.add(runPhase("static-analysis", listener, () -> {
-                // Registered providers are the extension point, and every bundled adapter registers
-                // one. Calling adapter.analyze() as well ran the whole pass twice - including a second
-                // -Xlint:all compile - for findings that were then deduplicated away. The adapter level
-                // entry point is kept as a fallback for an adapter that registers no provider.
+                List<String> evidenceIds = new ArrayList<>();
                 List<Finding> findings = new ArrayList<>();
-                var analyzers = providers.staticAnalyzers(info);
-                if (analyzers.isEmpty()) {
-                    findings.addAll(adapter.get().analyze(context));
-                } else {
-                    for (var analyzer : analyzers) {
-                        findings.addAll(analyzer.analyze(context));
+                for (Inspection inspection : analysable) {
+                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                    // Registered providers are the extension point, and every bundled adapter registers
+                    // one. Calling adapter.analyze() as well ran the whole pass twice - including a second
+                    // -Xlint:all compile - for findings that were then deduplicated away. The adapter level
+                    // entry point is kept as a fallback for an adapter that registers no provider.
+                    List<Finding> found = new ArrayList<>();
+                    var analyzers = providers.staticAnalyzers(inspection.info());
+                    if (analyzers.isEmpty()) {
+                        found.addAll(inspection.adapter().analyze(languageContext));
+                    } else {
+                        for (var analyzer : analyzers) {
+                            found.addAll(analyzer.analyze(languageContext));
+                        }
                     }
+                    // The adapter and the registered providers may report the same rule through different
+                    // paths; a finding is reported once, keyed by analyzer, rule, location and message.
+                    found = deduplicateFindings(found);
+                    findings.addAll(found);
+                    state.addFindings(found);
+                    Path report = artifacts.write("static-analysis/" + inspection.adapter().id() + "-findings.json",
+                            renderFindings(found));
+                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.STATIC_ANALYSIS)
+                            .description("Static analysis (" + inspection.adapter().id() + "): "
+                                    + found.size() + " finding(s)")
+                            .source("static-analysis")
+                            .confidence(EvidenceConfidence.DETERMINISTIC)
+                            .status(found.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
+                            .result(summariseFindings(found))
+                            .metadata("adapter", inspection.adapter().id())
+                            .metadata("bySeverity", summariseSeverity(found))
+                            .artifact(report)
+                            .build());
+                    evidenceIds.add(evidence.id());
                 }
-                // The adapter and the registered providers may report the same rule through different
-                // paths; a finding is reported once, keyed by analyzer, rule, location and message.
-                findings = deduplicateFindings(findings);
-                state.addFindings(findings);
                 // Record that the phase ran, not just what it found: a clean run and a run where nothing
                 // could execute must not look the same to the strategies.
-                state.staticAnalysisRan(true);
-                Path report = artifacts.write("static-analysis/findings.json", renderFindings(findings));
-                Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.STATIC_ANALYSIS)
-                        .description("Static analysis: " + findings.size() + " finding(s)")
-                        .source("static-analysis")
-                        .confidence(EvidenceConfidence.DETERMINISTIC)
-                        .status(findings.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
-                        .result(summariseFindings(findings))
-                        .metadata("bySeverity", summariseSeverity(findings))
-                        .artifact(report)
-                        .build());
-                return new PhaseOutcome(true, summariseFindings(findings), List.of(evidence.id()), null);
+                state.staticAnalysisRan(!analysable.isEmpty());
+                return new PhaseOutcome(!analysable.isEmpty(), summariseFindings(findings),
+                        List.copyOf(evidenceIds), null);
             }));
         }
 
-        if (!buildBlocked && config.security().enabled() && withinBudget(budget)) {
+        if (config.security().enabled() && withinBudget(budget)) {
+            List<Inspection> analysable = analysable(inspections, builds);
             phases.add(runPhase("security", listener, () -> {
+                List<String> evidenceIds = new ArrayList<>();
                 List<Finding> findings = new ArrayList<>();
-                for (var analyzer : providers.securityAnalyzers(info)) {
-                    findings.addAll(analyzer.analyze(context));
+                for (Inspection inspection : analysable) {
+                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                    var analyzers = providers.securityAnalyzers(inspection.info());
+                    List<Finding> found = new ArrayList<>();
+                    for (var analyzer : analyzers) {
+                        found.addAll(analyzer.analyze(languageContext));
+                    }
+                    found = deduplicateFindings(found);
+                    findings.addAll(found);
+                    state.addFindings(found);
+                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.SECURITY_SCAN)
+                            .description("Security analysis (" + inspection.adapter().id() + "): "
+                                    + found.size() + " finding(s)")
+                            .confidence(EvidenceConfidence.DETERMINISTIC)
+                            .status(found.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
+                            .result(summariseFindings(found))
+                            .metadata("adapter", inspection.adapter().id())
+                            .metadata("tools", analyzers.stream().map(a -> a.id()).toList())
+                            .build());
+                    evidenceIds.add(evidence.id());
                 }
-                findings = deduplicateFindings(findings);
-                state.addFindings(findings);
-                Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.SECURITY_SCAN)
-                        .description("Security analysis: " + findings.size() + " finding(s)")
-                        .confidence(EvidenceConfidence.DETERMINISTIC)
-                        .status(findings.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
-                        .result(summariseFindings(findings))
-                        .metadata("tools", providers.securityAnalyzers(info).stream().map(a -> a.id()).toList())
-                        .build());
-                return new PhaseOutcome(true, summariseFindings(findings), List.of(evidence.id()), null);
+                return new PhaseOutcome(!analysable.isEmpty(), summariseFindings(findings),
+                        List.copyOf(evidenceIds), null);
             }));
         }
 
-        if (!buildBlocked && withinBudget(budget)) {
+        if (withinBudget(budget)) {
             phases.add(runPhase("dependencies", listener, () -> {
-                List<VerificationTools.DependencyAnalyzer> analyzers = providers.dependencyAnalyzers(info);
-                DependencyReport report = analyzers.isEmpty()
-                        ? DependencyReport.notAnalysed("none", "no dependency analyzer registered")
-                        : analyzers.getFirst().analyseDependencies(context);
-                List<String> dependencyCommand = analyzers.isEmpty()
-                        ? List.of() : analyzers.getFirst().dependencyCommand(context);
-                DependencyReport scanned = report;
-                List<Path> advisoryArtifacts = new ArrayList<>();
-                if (report.analysed() && config.security().vulnerabilities().enabled()) {
-                    OsvAdvisoryScanner.Scan scan = OsvAdvisoryScanner.scan(
-                            config.security().vulnerabilities(), report.directDependencies(), artifacts);
-                    scanned = report.withAdvisoryScan(scan.coverage(), scan.vulnerabilities());
-                    advisoryArtifacts.addAll(scan.artifacts());
-                    listener.onEvent("dependencies", "advisory scan: " + scan.coverage().note());
+                List<String> evidenceIds = new ArrayList<>();
+                List<LanguageInventory> inventories = new ArrayList<>();
+                for (Inspection inspection : analysable(inspections, builds)) {
+                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                    List<VerificationTools.DependencyAnalyzer> analyzers =
+                            providers.dependencyAnalyzers(inspection.info());
+                    DependencyReport report = analyzers.isEmpty()
+                            ? DependencyReport.notAnalysed("none", "no dependency analyzer registered")
+                            : analyzers.getFirst().analyseDependencies(languageContext);
+                    List<String> dependencyCommand = analyzers.isEmpty()
+                            ? List.of() : analyzers.getFirst().dependencyCommand(languageContext);
+                    List<Path> advisoryArtifacts = new ArrayList<>();
+                    if (report.analysed() && config.security().vulnerabilities().enabled()) {
+                        OsvAdvisoryScanner.Scan scan = OsvAdvisoryScanner.scan(
+                                config.security().vulnerabilities(), report.coordinates(), artifacts);
+                        report = report.withAdvisoryScan(scan.coverage(), scan.vulnerabilities());
+                        advisoryArtifacts.addAll(scan.artifacts());
+                        listener.onEvent("dependencies", inspection.adapter().id()
+                                + " advisory scan: " + scan.coverage().note());
+                    }
+                    inventories.add(new LanguageInventory(inspection, report));
+                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.DEPENDENCY_SCAN)
+                            .description("Dependency analysis (" + inspection.adapter().id() + "): "
+                                    + report.totalDependencies() + " dependencies; "
+                                    + (report.advisoryScan().performed()
+                                            ? report.vulnerabilities().size() + " known vulnerabilities"
+                                            : "vulnerabilities not checked"))
+                            .command(dependencyCommand)
+                            .confidence(EvidenceConfidence.DETERMINISTIC)
+                            .status(EvidenceStatus.INCONCLUSIVE)
+                            .result(report.analysed() ? report.totalDependencies() + " dependencies"
+                                    : "not analysed: " + report.note())
+                            .output(report.advisoryScan().performed()
+                                    ? "advisory source " + report.advisoryScan().source() + " at "
+                                            + report.advisoryScan().endpoint() + ": "
+                                            + report.advisoryScan().note()
+                                    : "no advisory source was consulted: " + report.advisoryScan().note())
+                            .metadata("adapter", inspection.adapter().id())
+                            .metadata("vulnerabilities", report.vulnerabilities().size())
+                            .metadata("vulnerabilitiesChecked", report.advisoryScan().performed())
+                            .metadata("vulnerabilitySource", report.advisoryScan().source())
+                            .artifacts(advisoryArtifacts)
+                            .build());
+                    evidenceIds.add(evidence.id());
                 }
-                state.dependencies(scanned);
-                Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.DEPENDENCY_SCAN)
-                        .description("Dependency analysis: " + scanned.totalDependencies() + " dependencies; "
-                                + (scanned.advisoryScan().performed()
-                                        ? scanned.vulnerabilities().size() + " known vulnerabilities"
-                                        : "vulnerabilities not checked"))
-                        .command(dependencyCommand)
-                        .confidence(EvidenceConfidence.DETERMINISTIC)
-                        .status(EvidenceStatus.INCONCLUSIVE)
-                        .result(scanned.analysed() ? scanned.totalDependencies() + " dependencies"
-                                : "not analysed: " + scanned.note())
-                        .output(scanned.advisoryScan().performed()
-                                ? "advisory source " + scanned.advisoryScan().source() + " at "
-                                        + scanned.advisoryScan().endpoint() + ": " + scanned.advisoryScan().note()
-                                : "no advisory source was consulted: " + scanned.advisoryScan().note())
-                        .metadata("vulnerabilities", scanned.vulnerabilities().size())
-                        .metadata("vulnerabilitiesChecked", scanned.advisoryScan().performed())
-                        .metadata("vulnerabilitySource", scanned.advisoryScan().source())
-                        .artifacts(advisoryArtifacts)
-                        .build());
-                return new PhaseOutcome(scanned.analysed(), scanned.analysed()
-                        ? scanned.totalDependencies() + " dependencies" : scanned.note(),
-                        List.of(evidence.id()), scanned.analysed() ? null : scanned.note());
+                DependencyReport merged = mergeDependencies(inventories);
+                state.dependencies(merged);
+                return new PhaseOutcome(merged.analysed(),
+                        merged.analysed() ? merged.totalDependencies() + " dependencies" : merged.note(),
+                        List.copyOf(evidenceIds), merged.analysed() ? null : merged.note());
             }));
         }
 
         // ---------------------------------------------------------------- coverage
-        if (!buildBlocked && adapter.get().capabilities().contains(Capability.COVERAGE)
-                && withinBudget(budget)) {
+        if (withinBudget(budget)) {
+            List<Inspection> coverable = capable(inspections, Capability.COVERAGE).stream()
+                    .filter(inspection -> builtSuccessfully(builds.get(inspection.adapter().id())))
+                    .toList();
             phases.add(runPhase("coverage", listener, () -> {
-                List<VerificationTools.CoverageProvider> coverageProviders = providers.coverageProviders(info);
-                CoverageReport coverage = coverageProviders.isEmpty()
-                        ? CoverageReport.notMeasured("none", "no coverage provider registered")
-                        : coverageProviders.getFirst().measure(context);
-                state.coverage(coverage);
-                Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.COVERAGE)
-                        .description("Coverage: " + coverage.describe())
-                        .confidence(EvidenceConfidence.DETERMINISTIC)
-                        .status(coverage.measured() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
-                        .result(coverage.describe())
-                        .metadata("lineCoveragePercent", coverage.lineCoveragePercent())
-                        .metadata("branchCoveragePercent", coverage.branchCoveragePercent())
-                        .artifacts(coverage.reports())
-                        .build());
-                if (!coverage.measured()) {
-                    state.note("coverage not measured: " + coverage.note());
+                List<String> evidenceIds = new ArrayList<>();
+                List<CoverageReport> results = new ArrayList<>();
+                for (Inspection inspection : coverable) {
+                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                    List<VerificationTools.CoverageProvider> coverageProviders =
+                            providers.coverageProviders(inspection.info());
+                    CoverageReport coverage = coverageProviders.isEmpty()
+                            ? CoverageReport.notMeasured("none", "no coverage provider registered for "
+                                    + inspection.adapter().id())
+                            : coverageProviders.getFirst().measure(languageContext);
+                    results.add(coverage);
+                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.COVERAGE)
+                            .description("Coverage (" + inspection.adapter().id() + "): " + coverage.describe())
+                            .confidence(EvidenceConfidence.DETERMINISTIC)
+                            .status(coverage.measured() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
+                            .result(coverage.describe())
+                            .metadata("adapter", inspection.adapter().id())
+                            .metadata("lineCoveragePercent", coverage.lineCoveragePercent())
+                            .metadata("branchCoveragePercent", coverage.branchCoveragePercent())
+                            .artifacts(coverage.reports())
+                            .build());
+                    evidenceIds.add(evidence.id());
+                    if (!coverage.measured()) {
+                        state.note("coverage not measured for " + inspection.adapter().id() + ": "
+                                + coverage.note());
+                    }
                 }
-                return new PhaseOutcome(coverage.measured(), coverage.describe(), List.of(evidence.id()),
-                        coverage.measured() ? null : coverage.note());
+                CoverageReport merged = mergeCoverage(results);
+                state.coverage(merged);
+                return new PhaseOutcome(merged.measured(), merged.describe(), List.copyOf(evidenceIds),
+                        merged.measured() ? null : merged.note());
             }));
         }
 
         // ---------------------------------------------------------------- mutation
-        if (!buildBlocked && config.mutation().enabled() && state.existingTests().executed()
-                && withinBudget(budget)) {
+        if (config.mutation().enabled() && state.existingTests().executed() && withinBudget(budget)) {
+            List<Inspection> mutable = capable(inspections, Capability.MUTATION).stream()
+                    .filter(inspection -> builtSuccessfully(builds.get(inspection.adapter().id())))
+                    .filter(inspection -> {
+                        TestResult tests = testsByAdapter.get(inspection.adapter().id());
+                        return tests != null && tests.executed();
+                    })
+                    .toList();
             phases.add(runPhase("mutation", listener, () -> {
-                List<VerificationTools.MutationTester> testers = providers.mutationTesters(info);
-                MutationReport report = testers.isEmpty()
-                        ? MutationReport.notMeasured("none", "no mutation tester registered")
-                        : testers.getFirst().analyse(context);
-                state.mutation(report);
-                Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.MUTATION_TEST)
-                        .description("Mutation testing: " + report.describe())
-                        .confidence(EvidenceConfidence.DETERMINISTIC)
-                        .status(!report.measured() ? EvidenceStatus.INCONCLUSIVE
-                                : (report.survivors().isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE))
-                        .result(report.describe())
-                        .metadata("scorePercent", report.scorePercent())
-                        .metadata("survivors", report.survivors().stream().limit(50)
-                                .map(SurvivingMutant::location).toList())
-                        .artifacts(report.reports())
-                        .build());
-                if (!report.measured()) {
-                    state.note("mutation testing did not run: " + report.note());
+                List<String> evidenceIds = new ArrayList<>();
+                List<MutationReport> results = new ArrayList<>();
+                for (Inspection inspection : mutable) {
+                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                    List<VerificationTools.MutationTester> testers = providers.mutationTesters(inspection.info());
+                    MutationReport report = testers.isEmpty()
+                            ? MutationReport.notMeasured("none", "no mutation tester registered for "
+                                    + inspection.adapter().id())
+                            : testers.getFirst().analyse(languageContext);
+                    results.add(report);
+                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.MUTATION_TEST)
+                            .description("Mutation testing (" + inspection.adapter().id() + "): "
+                                    + report.describe())
+                            .confidence(EvidenceConfidence.DETERMINISTIC)
+                            .status(!report.measured() ? EvidenceStatus.INCONCLUSIVE
+                                    : (report.survivors().isEmpty() ? EvidenceStatus.SUPPORTS
+                                            : EvidenceStatus.INCONCLUSIVE))
+                            .result(report.describe())
+                            .metadata("adapter", inspection.adapter().id())
+                            .metadata("scorePercent", report.scorePercent())
+                            .metadata("survivors", report.survivors().stream().limit(50)
+                                    .map(SurvivingMutant::location).toList())
+                            .artifacts(report.reports())
+                            .build());
+                    evidenceIds.add(evidence.id());
+                    if (!report.measured()) {
+                        state.note("mutation testing did not run for " + inspection.adapter().id() + ": "
+                                + report.note());
+                    }
                 }
-                return new PhaseOutcome(report.measured(), report.describe(), List.of(evidence.id()),
-                        report.measured() ? null : truncate(report.note(), 240));
+                MutationReport merged = mergeMutation(results);
+                state.mutation(merged);
+                return new PhaseOutcome(merged.measured(), merged.describe(), List.copyOf(evidenceIds),
+                        merged.measured() ? null : truncate(merged.note(), 240));
             }));
         }
 
@@ -462,12 +619,26 @@ public final class VerificationEngine {
             List<ObligationOutcome> outcomes = new ArrayList<>();
             List<Counterexample> counterexamples = new ArrayList<>();
             List<String> notes = new ArrayList<>();
+            // The strategies for a requirement run against the language its code is written in, not
+            // against the union of every language in the tree. A test runner, a generator or a replay
+            // command is language specific, and handing a Python requirement Java's runner would produce a
+            // recipe for a command that cannot run.
+            Inspection owner = ownerOf(requirement, mapper, inspections);
+            Inspection running = owner != null ? owner : inspections.getFirst();
+            VerificationContext requirementContext = contextFor(running, runId, project, config, workspace,
+                    artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+            if (inspections.size() > 1 && owner == null) {
+                notes.add("This requirement could not be attributed to any language in the project, so its "
+                        + "strategies ran against " + running.adapter().id()
+                        + ", the first adapter that claimed the project.");
+            }
             for (VerificationStrategy strategy : strategies) {
-                if (!strategy.supports(info)) {
+                if (!strategy.supports(requirementContext.projectInfo())) {
                     continue;
                 }
                 try {
-                    StrategyOutcome outcome = strategy.verify(context, requirement, requirement.obligations());
+                    StrategyOutcome outcome =
+                            strategy.verify(requirementContext, requirement, requirement.obligations());
                     outcomes.addAll(outcome.obligations());
                     counterexamples.addAll(outcome.counterexamples());
                     notes.addAll(outcome.notes());
@@ -504,14 +675,18 @@ public final class VerificationEngine {
         List<RequirementVerdict> verdicts = new ArrayList<>();
         for (Requirement requirement : plannedSet.requirements()) {
             List<Evidence> requirementEvidence = ledger.forRequirement(requirement.id());
+            // Blocking is per language. A requirement written in a language that compiled is not blocked
+            // by a sibling language that did not: the two are different code, and one failing to build says
+            // nothing about the other.
+            Blocked blocked = blockedFor(requirement, mapper, inspections, builds, state.build());
             RequirementVerdict verdict = VerdictCalculator.compute(
                     requirement,
                     requirement.obligations(),
                     outcomesByRequirement.getOrDefault(requirement.id(), List.of()),
                     requirementEvidence,
                     counterexamplesByRequirement.getOrDefault(requirement.id(), List.of()),
-                    buildBlocked,
-                    buildBlocked ? state.build().describe() : null,
+                    blocked.blocked(),
+                    blocked.blocked() ? blocked.reason() : null,
                     notesByRequirement.getOrDefault(requirement.id(), List.of()));
             verdicts.add(verdict);
             listener.onEvent("verdict", requirement.id() + " -> " + verdict.status());
@@ -530,7 +705,15 @@ public final class VerificationEngine {
         // left to truncate.
         boolean budgetBlocked = budget.snapshot().exhausted()
                 && verdicts.stream().anyMatch(v -> v.status() != RequirementStatus.VERIFIED);
-        RunStatus runStatus = buildBlocked || budgetBlocked ? RunStatus.BLOCKED : RunStatus.COMPLETED;
+        // A failed build makes the run BLOCKED because it stopped requirements from being verified - so the
+        // question is whether it actually stopped any. In a polyglot project one language can fail to build
+        // while the requirements written in another were fully evaluated; calling that run truncated would
+        // be as wrong as calling it clean. A run with no requirements at all is still BLOCKED, because then
+        // there is nothing to show for the build failure.
+        boolean buildStoppedSomething = buildBlocked
+                && (verdicts.isEmpty()
+                        || verdicts.stream().anyMatch(v -> v.status() == RequirementStatus.BLOCKED));
+        RunStatus runStatus = buildStoppedSomething || budgetBlocked ? RunStatus.BLOCKED : RunStatus.COMPLETED;
         Instant finishedAt = Instant.now();
 
         VerificationRun run = new VerificationRun(runId.value(), project, runStatus, phases,
@@ -540,6 +723,15 @@ public final class VerificationEngine {
 
         return VerificationReport.builder(runId.value(), info, plannedSet)
                 .verdicts(verdicts)
+                .languages(inspections.stream()
+                        .map(inspection -> new VerificationReport.LanguageSummary(
+                                inspection.adapter().id(),
+                                inspection.info().language(),
+                                inspection.info().buildSystem(),
+                                inspection.info().modules().size(),
+                                builds.containsKey(inspection.adapter().id()),
+                                builtSuccessfully(builds.get(inspection.adapter().id()))))
+                        .toList())
                 .evidence(ledger.all())
                 .counterexamples(counterexamplesByRequirement.values().stream().flatMap(List::stream).toList())
                 .build(buildSummary(state.build()))
@@ -556,6 +748,394 @@ public final class VerificationEngine {
     // ------------------------------------------------------------------ helpers
 
     private record PhaseOutcome(boolean success, String summary, List<String> evidenceIds, String note) {
+    }
+
+    /**
+     * One language adapter and the description of the part of the project it claimed.
+     *
+     * <p>Every phase that runs before the requirement strategies runs once per inspection, against that
+     * inspection's own {@link ProjectInfo}. That is what keeps a polyglot run from handing a Python
+     * analyzer a Java project, or vice versa.
+     */
+    private record Inspection(LanguageAdapter adapter, ProjectInfo info) {
+    }
+
+    /** Whether a requirement is blocked because its own language could not be built, and why. */
+    private record Blocked(boolean blocked, String reason) {
+    }
+
+    /** One language's dependency inventory, paired with the inspection that produced it. */
+    private record LanguageInventory(Inspection inspection, DependencyReport report) {
+    }
+
+    /**
+     * Inspects the project once per adapter that claimed it.
+     *
+     * <p>Inspection is where an adapter decides what it can see, so it needs the context of a project it
+     * recognises; a detection exception is an infrastructure failure of that adapter and stops the run,
+     * because continuing would mean reporting a project whose languages could not be established.
+     */
+    private List<Inspection> inspectAll(
+            List<LanguageAdapter> adapters,
+            RunId runId,
+            ProjectRef project,
+            VerificationConfig config,
+            WorkspaceManager.Workspace workspace,
+            ArtifactStore artifacts,
+            BudgetUsage.Tracker budget,
+            RequirementSet requirements,
+            ProgressListener listener,
+            ExecutionSandbox sandbox,
+            RunState state,
+            EvidenceLedger ledger,
+            Instant startedAt) {
+
+        List<Inspection> inspections = new ArrayList<>();
+        for (LanguageAdapter adapter : adapters) {
+            VerificationContext inspectContext = context(runId, project, emptyInfo(project), config, workspace,
+                    artifacts, budget, requirements, LlmProvider.disabled("not initialised"), listener, sandbox,
+                    state, ledger, startedAt);
+            inspections.add(new Inspection(adapter, adapter.inspect(project, inspectContext)));
+        }
+        return inspections;
+    }
+
+    /** @return the inspections whose adapter declares the given capability, in selection order. */
+    private static List<Inspection> capable(List<Inspection> inspections, Capability capability) {
+        return inspections.stream().filter(i -> i.adapter().capabilities().contains(capability)).toList();
+    }
+
+    /**
+     * @return the inspections a build-dependent analysis phase may run against: those that declare
+     *     analysis capability and whose own build succeeded.
+     *
+     * <p>When nothing declares a build at all the phase still runs, because an adapter without a build
+     * step (a purely interpreted language, say) has no build to wait for; when builds were attempted, a
+     * language whose build failed is left out - analysing code that does not compile would report
+     * findings about a state the project is not in.
+     */
+    private static List<Inspection> analysable(List<Inspection> inspections, Map<String, BuildResult> builds) {
+        if (builds.isEmpty()) {
+            return List.copyOf(inspections);
+        }
+        return inspections.stream()
+                .filter(i -> builtSuccessfully(builds.get(i.adapter().id())))
+                .toList();
+    }
+
+    private static boolean builtSuccessfully(BuildResult build) {
+        return build != null && build.success();
+    }
+
+    /** @return a context bound to one language's project description but to the run's shared state. */
+    private VerificationContext contextFor(
+            Inspection inspection,
+            RunId runId,
+            ProjectRef project,
+            VerificationConfig config,
+            WorkspaceManager.Workspace workspace,
+            ArtifactStore artifacts,
+            BudgetUsage.Tracker budget,
+            RequirementSet requirements,
+            LlmProvider llm,
+            ProgressListener listener,
+            ExecutionSandbox sandbox,
+            RunState state,
+            EvidenceLedger ledger,
+            Instant startedAt) {
+        return context(runId, project, inspection.info(), config, workspace, artifacts, budget, requirements, llm,
+                listener, sandbox, state, ledger, startedAt);
+    }
+
+    /**
+     * @return the inspection that should own a requirement's strategies: the one whose language the
+     *     requirement's code is written in, or {@code null} when no mapped file identifies one.
+     */
+    private static Inspection ownerOf(Requirement requirement, RequirementCodeMapper mapper,
+            List<Inspection> inspections) {
+        for (String file : mapper.filesFor(requirement.id())) {
+            String extension = extensionOf(file);
+            if (extension.isEmpty()) {
+                continue;
+            }
+            for (Inspection inspection : inspections) {
+                if (inspection.info().sourceExtensions().contains(extension)) {
+                    return inspection;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** @return the lower-case extension of a path, without the dot, or the empty string. */
+    private static String extensionOf(String path) {
+        if (path == null) {
+            return "";
+        }
+        String name = path.replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) {
+            name = name.substring(slash + 1);
+        }
+        int dot = name.lastIndexOf('.');
+        return dot < 0 || dot == name.length() - 1 ? "" : name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * Decides whether a requirement is blocked by a failed build.
+     *
+     * <p>The rule is deliberately conservative in one direction only: a requirement is blocked when the
+     * build of a language its code is written in did not succeed. A requirement that cannot be attributed
+     * to any language - no file mentions it, or none of the languages claims its extension - falls back to
+     * the whole-run build outcome, because there is nothing better to go on. What it never does is let a
+     * language that built be blocked by a sibling that did not.
+     */
+    private Blocked blockedFor(Requirement requirement, RequirementCodeMapper mapper,
+            List<Inspection> inspections, Map<String, BuildResult> builds, BuildResult mergedBuild) {
+        Set<String> languages = new java.util.LinkedHashSet<>();
+        for (String file : mapper.filesFor(requirement.id())) {
+            String extension = extensionOf(file);
+            for (Inspection inspection : inspections) {
+                if (inspection.info().sourceExtensions().contains(extension)) {
+                    languages.add(inspection.adapter().id());
+                }
+            }
+        }
+        if (languages.isEmpty()) {
+            // Nothing identifies which language this requirement's code is written in, so the honest
+            // fallback is the whole run's build outcome rather than a guess.
+            return new Blocked(!mergedBuild.success(), mergedBuild.success() ? null : mergedBuild.describe());
+        }
+        List<String> failed = languages.stream().filter(language -> !builtSuccessfully(builds.get(language))).toList();
+        if (failed.isEmpty()) {
+            return new Blocked(false, null);
+        }
+        return new Blocked(true, "the " + String.join(", ", failed) + " code this requirement covers could not "
+                + "be built, so nothing about it could be established");
+    }
+
+    /**
+     * @return one result standing for every language's build.
+     *
+     * <p>It succeeds only when every build that ran succeeded, so the run-level summary can never claim a
+     * project built when one of its languages did not. The failing language's command, exit code and
+     * output are the ones kept, because they are the ones a reader needs; every language's own record
+     * stays in the evidence ledger, named by adapter.
+     */
+    private static BuildResult mergeBuilds(List<BuildResult> results) {
+        if (results.isEmpty()) {
+            return BuildResult.notAttempted("no build was attempted");
+        }
+        if (results.size() == 1) {
+            return results.getFirst();
+        }
+        boolean success = results.stream().allMatch(BuildResult::success);
+        BuildResult reported = results.stream().filter(result -> !result.success()).findFirst()
+                .orElse(results.getFirst());
+        List<CompilerDiagnostic> diagnostics = new ArrayList<>();
+        List<Path> artifacts = new ArrayList<>();
+        StringBuilder output = new StringBuilder();
+        Duration duration = Duration.ZERO;
+        for (BuildResult result : results) {
+            diagnostics.addAll(result.diagnostics());
+            artifacts.addAll(result.artifacts());
+            if (!result.output().isBlank()) {
+                output.append(result.output()).append('\n');
+            }
+            duration = duration.plus(result.duration());
+        }
+        return BuildResult.builder()
+                .attempted(true)
+                .success(success)
+                .exitCode(reported.exitCode())
+                .duration(duration)
+                .command(reported.command())
+                .output(output.toString())
+                .diagnostics(diagnostics)
+                .artifacts(artifacts)
+                .timedOut(results.stream().anyMatch(BuildResult::timedOut))
+                .failureReason(success ? null
+                        : "one or more languages failed to build; see the per-language build evidence")
+                .build();
+    }
+
+    /**
+     * @return one result standing for every language's test suite.
+     *
+     * <p>Counters are summed and every language's cases are kept, because each one is evidence about its
+     * own requirement. {@code executed} stays true when any suite ran, so a language whose tests did run
+     * is not reported as untested because a sibling's did not.
+     */
+    private static TestResult mergeTests(List<TestResult> results) {
+        if (results.isEmpty()) {
+            return TestResult.notExecuted("no language adapter declares a test capability, or no build "
+                    + "succeeded, so no test suite was run");
+        }
+        if (results.size() == 1) {
+            return results.getFirst();
+        }
+        List<TestCaseResult> cases = new ArrayList<>();
+        List<Path> reports = new ArrayList<>();
+        Duration duration = Duration.ZERO;
+        int total = 0;
+        int passed = 0;
+        int failed = 0;
+        int errors = 0;
+        int skipped = 0;
+        boolean executed = false;
+        List<String> notes = new ArrayList<>();
+        for (TestResult result : results) {
+            cases.addAll(result.cases());
+            reports.addAll(result.reports());
+            duration = duration.plus(result.duration());
+            total += result.total();
+            passed += result.passed();
+            failed += result.failed();
+            errors += result.errors();
+            skipped += result.skipped();
+            executed |= result.executed();
+            if (result.note() != null && !result.note().isBlank()) {
+                notes.add(result.note());
+            }
+        }
+        return new TestResult(executed, String.join("; ", notes), total, passed, failed, errors, skipped,
+                duration, cases, reports);
+    }
+
+    /**
+     * @return one result standing for every language's coverage.
+     *
+     * <p>Counters are summed rather than averaged: an average of percentages would let a language with
+     * three instrumented lines outweigh one with three thousand. A language whose coverage could not be
+     * measured leaves the aggregate measured when another's could be, and says so in the note.
+     */
+    private static CoverageReport mergeCoverage(List<CoverageReport> results) {
+        if (results.isEmpty()) {
+            return CoverageReport.notMeasured("none", "no coverage provider was registered for any language");
+        }
+        if (results.size() == 1) {
+            return results.getFirst();
+        }
+        int lineCovered = 0;
+        int lineTotal = 0;
+        int branchCovered = 0;
+        int branchTotal = 0;
+        boolean measured = false;
+        List<Path> reports = new ArrayList<>();
+        Map<String, Double> perClass = new LinkedHashMap<>();
+        List<String> notes = new ArrayList<>();
+        for (CoverageReport result : results) {
+            lineCovered += result.lineCovered();
+            lineTotal += result.lineTotal();
+            branchCovered += result.branchCovered();
+            branchTotal += result.branchTotal();
+            measured |= result.measured();
+            reports.addAll(result.reports());
+            perClass.putAll(result.perClassLineCoverage());
+            if (!result.note().isBlank()) {
+                notes.add(result.note());
+            }
+        }
+        return new CoverageReport(measured, "aggregate", String.join("; ", notes), lineCovered, lineTotal,
+                branchCovered, branchTotal, perClass, reports);
+    }
+
+    /**
+     * @return one result standing for every language's mutation run.
+     *
+     * <p>Counters are summed so the score is a kill ratio over every mutant the run generated, which is
+     * the only aggregation that stays meaningful across languages; survivors from every language are kept
+     * because each one is a weakness in the tests covering that language's code.
+     */
+    private static MutationReport mergeMutation(List<MutationReport> results) {
+        if (results.isEmpty()) {
+            return MutationReport.notMeasured("none", "no mutation tester was registered for any language");
+        }
+        if (results.size() == 1) {
+            return results.getFirst();
+        }
+        int generated = 0;
+        int killed = 0;
+        int survived = 0;
+        int noCoverage = 0;
+        int timedOut = 0;
+        boolean measured = false;
+        List<SurvivingMutant> survivors = new ArrayList<>();
+        List<Path> reports = new ArrayList<>();
+        List<String> notes = new ArrayList<>();
+        for (MutationReport result : results) {
+            generated += result.generated();
+            killed += result.killed();
+            survived += result.survived();
+            noCoverage += result.noCoverage();
+            timedOut += result.timedOut();
+            measured |= result.measured();
+            survivors.addAll(result.survivors());
+            reports.addAll(result.reports());
+            if (!result.note().isBlank()) {
+                notes.add(result.note());
+            }
+        }
+        return new MutationReport(measured, "aggregate", String.join("; ", notes), generated, killed, survived,
+                noCoverage, timedOut, survivors, reports);
+    }
+
+    /**
+     * @return one inventory standing for every language's dependencies.
+     *
+     * <p>Coordinates are the union, because the same package can legitimately appear in two ecosystems and
+     * each is a different package. The per-module breakdown is keyed by
+     * {@link DependencyReport#moduleKey}, so a dependency resolved by one language's module is never
+     * attributed to a requirement written in another's.
+     */
+    private static DependencyReport mergeDependencies(List<LanguageInventory> inventories) {
+        if (inventories.isEmpty()) {
+            return DependencyReport.notAnalysed("none", "no dependency analyzer was registered for any language");
+        }
+        List<PackageCoordinate> coordinates = new ArrayList<>();
+        Map<String, List<String>> byModule = new LinkedHashMap<>();
+        List<DependencyVulnerability> vulnerabilities = new ArrayList<>();
+        List<String> notes = new ArrayList<>();
+        List<String> tools = new ArrayList<>();
+        boolean analysed = false;
+        boolean scanned = false;
+        for (LanguageInventory inventory : inventories) {
+            DependencyReport report = inventory.report();
+            LanguageId language = inventory.inspection().info().language();
+            analysed |= report.analysed();
+            scanned |= report.advisoryScan().performed();
+            coordinates.addAll(report.coordinates());
+            vulnerabilities.addAll(report.vulnerabilities());
+            tools.add(report.tool());
+            if (report.analysed() && !report.note().isBlank()) {
+                notes.add(report.tool() + ": " + report.note());
+            }
+            report.dependenciesByModule().forEach((module, dependencies) ->
+                    byModule.merge(DependencyReport.moduleKey(language, module),
+                            List.copyOf(dependencies), (first, second) -> {
+                                List<String> merged = new ArrayList<>(first);
+                                merged.addAll(second);
+                                return List.copyOf(merged);
+                            }));
+        }
+        List<PackageCoordinate> distinct = PackageCoordinate.distinct(coordinates);
+        List<DependencyVulnerability> distinctFindings = new ArrayList<>(new java.util.LinkedHashSet<>(vulnerabilities));
+        AdvisoryScan scan = scanned
+                ? AdvisoryScan.performed("osv", null, null,
+                        "advisory scans ran once per language; see the per-language dependency evidence for "
+                                + "what each one covered")
+                : AdvisoryScan.notPerformed("no language's inventory carried a resolved coordinate, so no "
+                        + "advisory source was consulted");
+        return new DependencyReport(analysed, String.join("+", new java.util.LinkedHashSet<>(tools)),
+                String.join("; ", notes), distinct.size(),
+                distinct.stream().map(PackageCoordinate::display).toList(),
+                byMap(byModule), distinct, distinctFindings, scan);
+    }
+
+    private static Map<String, List<String>> byMap(Map<String, List<String>> input) {
+        Map<String, List<String>> copy = new LinkedHashMap<>();
+        input.forEach((key, value) -> copy.put(key, List.copyOf(value)));
+        return Map.copyOf(copy);
     }
 
     /**

@@ -4,6 +4,7 @@ import dev.codewitness.core.exec.ProcessResult;
 import dev.codewitness.core.exec.ProcessSpec;
 import dev.codewitness.core.model.AdvisoryScan;
 import dev.codewitness.core.model.DependencyReport;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
@@ -65,7 +66,8 @@ public final class MavenDependencyAnalyzer implements VerificationTools.Dependen
                 "inventory only: the dependencies Maven resolves for this project; whether any of them has a "
                         + "known advisory is recorded by the advisory scan, which is a separate question from "
                         + "which dependencies exist",
-                dependencies.size(), dependencies, byModule, List.of(), AdvisoryScan.notPerformed());
+                dependencies.size(), dependencies, byModule, PackageCoordinate.parseMaven(dependencies),
+                List.of(), AdvisoryScan.notPerformed());
     }
 
     /**

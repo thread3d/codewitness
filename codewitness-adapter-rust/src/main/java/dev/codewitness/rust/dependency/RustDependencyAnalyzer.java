@@ -2,9 +2,11 @@ package dev.codewitness.rust.dependency;
 
 import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.LanguageId;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
+import dev.codewitness.support.dependency.TomlPackageTable;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +15,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -49,6 +52,28 @@ public final class RustDependencyAnalyzer implements VerificationTools.Dependenc
 
     @Override
     public DependencyReport analyseDependencies(VerificationContext context) {
+        Path lock = context.projectRoot().resolve("Cargo.lock");
+        if (Files.isRegularFile(lock)) {
+            String locked;
+            try {
+                locked = Files.readString(lock, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                return DependencyReport.notAnalysed("cargo-lock",
+                        "Cargo.lock exists but could not be read: " + e);
+            }
+            List<PackageCoordinate> coordinates = TomlPackageTable.parse(locked, PackageCoordinate.CRATES_IO);
+            if (!coordinates.isEmpty()) {
+                return DependencyReport.inventory("cargo-lock",
+                        "inventory only: every crate Cargo.lock resolves, including transitive ones; "
+                                + "whether any of them has a known advisory is recorded by the advisory "
+                                + "scan, a separate question from which crates the program needs",
+                        coordinates,
+                        Map.of(moduleName(context), coordinates.stream().map(PackageCoordinate::display).toList()));
+            }
+            return DependencyReport.notAnalysed("cargo-lock",
+                    "Cargo.lock exists but records no resolved package, so the crates could not be "
+                            + "inventoried");
+        }
         Path manifest = context.projectRoot().resolve("Cargo.toml");
         if (!Files.isRegularFile(manifest)) {
             return DependencyReport.notAnalysed("cargo-manifest",
@@ -64,11 +89,25 @@ public final class RustDependencyAnalyzer implements VerificationTools.Dependenc
                     "Cargo.toml exists but could not be read: " + e);
         }
         Set<String> dependencies = new LinkedHashSet<>(parse(content));
-        List<String> direct = List.copyOf(dependencies);
-        return new DependencyReport(true, "cargo-manifest",
-                "inventory only: CodeWitness does not consult a vulnerability database, so it cannot claim "
-                        + "these dependencies are free of known vulnerabilities",
-                direct.size(), direct, List.of());
+        List<PackageCoordinate> declared = dependencies.stream()
+                .map(name -> PackageCoordinate.crate(name, ""))
+                .toList();
+        return DependencyReport.inventory("cargo-manifest",
+                "inventory only: the crate names Cargo.toml declares, with the version ranges it declares "
+                        + "them at; no Cargo.lock was found, so no resolved version is known and the "
+                        + "advisory scan cannot query these crates",
+                declared,
+                Map.of(moduleName(context), declared.stream().map(PackageCoordinate::display).toList()));
+    }
+
+    /** @return the name the report should attribute this crate's dependencies to. */
+    private static String moduleName(VerificationContext context) {
+        ProjectInfo info = context.projectInfo();
+        if (!info.modules().isEmpty()) {
+            return info.modules().getFirst().name();
+        }
+        Path fileName = context.projectRoot().getFileName();
+        return fileName == null ? "crate" : fileName.toString();
     }
 
     /** @return the crate names declared in the manifest's dependency tables. */

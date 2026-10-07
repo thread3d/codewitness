@@ -7,7 +7,9 @@ import dev.codewitness.core.evidence.EvidenceStatus;
 import dev.codewitness.core.evidence.EvidenceType;
 import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.DependencyVulnerability;
+import dev.codewitness.core.model.LanguageId;
 import dev.codewitness.core.model.ModuleInfo;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.Severity;
 import dev.codewitness.core.requirements.Requirement;
@@ -16,7 +18,6 @@ import dev.codewitness.core.result.Counterexample;
 import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationStrategy;
-import dev.codewitness.core.vulnerability.PackageCoordinate;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -82,7 +83,8 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
         List<DependencyVulnerability> relevant = new ArrayList<>();
         List<String> relevantModules = new ArrayList<>();
         for (DependencyVulnerability vulnerability : dependencies.vulnerabilities()) {
-            String module = moduleShipping(dependencies, vulnerability, modules);
+            String module = moduleShipping(dependencies, vulnerability, modules,
+                    context.projectInfo().language());
             if (module != null) {
                 relevant.add(vulnerability);
                 relevantModules.add(module);
@@ -154,17 +156,27 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
         return new StrategyOutcome(id(), requirement.id(), evidence, counterexamples, List.of(), notes);
     }
 
-    /** @return the module that resolves the vulnerable artifact, when this requirement ships in one. */
+    /** @return the module that resolves the vulnerable artifact, when the requirement ships in one. */
     private static String moduleShipping(
-            DependencyReport dependencies, DependencyVulnerability vulnerability, List<String> requirementModules) {
+            DependencyReport dependencies, DependencyVulnerability vulnerability, List<String> requirementModules,
+            LanguageId language) {
         for (Map.Entry<String, List<String>> entry : dependencies.dependenciesByModule().entrySet()) {
             if (!requirementModules.contains(entry.getKey())) {
                 continue;
             }
-            for (String coordinate : entry.getValue()) {
-                if (java.util.Objects.equals(vulnerability.dependency(), PackageCoordinate.artifactName(coordinate))
-                        && java.util.Objects.equals(vulnerability.version(), PackageCoordinate.versionOf(coordinate))) {
-                    return entry.getKey();
+            for (String display : entry.getValue()) {
+                for (PackageCoordinate coordinate : dependencies.coordinates()) {
+                    // The module breakdown is keyed by how the inventory displays a dependency, so the
+                    // typed coordinate is matched back through that same string. Comparing the parsed
+                    // name and version rather than the display string is what keeps this correct for
+                    // ecosystems whose names do not survive being split apart again.
+                    if (coordinate.display().equals(display)
+                            && coordinate.name().equals(vulnerability.dependency())
+                            && coordinate.version().equals(vulnerability.version())) {
+                        // The key carries the language so that same-named modules in different languages
+                        // cannot be confused; what a reader is shown is the module's own name.
+                        return DependencyReport.moduleName(language, entry.getKey());
+                    }
                 }
             }
         }
@@ -176,8 +188,12 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
         List<String> modules = new ArrayList<>();
         for (String file : mapper.filesFor(requirement.id())) {
             String module = moduleOf(file, project);
-            if (module != null && !modules.contains(module)) {
-                modules.add(module);
+            // The inventory keys each module by the language it belongs to, so the requirement's module
+            // has to be looked up under the same key. Without the prefix a dependency resolved by a
+            // same-named module in another language would be charged to this requirement.
+            String key = module == null ? null : DependencyReport.moduleKey(project.language(), module);
+            if (key != null && !modules.contains(key)) {
+                modules.add(key);
             }
         }
         return modules;
@@ -191,6 +207,13 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
      * while the module paths come from inspection and - in isolated mode - point into the run's copy of
      * the project, so comparing the two through a common root is not reliable. A module that <em>is</em>
      * the project root owns anything a nested module does not claim.
+     *
+     * <p>When nothing places the file, a language with exactly one module owns it: every line of that
+     * language's code ships in that one module, so its resolved dependencies are the dependencies that code
+     * ships with. That is a fact rather than a guess, and it is what makes an advisory attributable for the
+     * single-module projects npm, PyPI, crates.io and Go always produce. A language with several modules
+     * still answers {@code null}, because charging a dependency of one module to code in another is the
+     * mis-attribution this method exists to prevent.
      */
     static String moduleOf(String file, ProjectInfo project) {
         if (file == null || file.isBlank()) {
@@ -208,6 +231,9 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
                 bestScore = score;
                 bestName = module.name();
             }
+        }
+        if (bestName == null && project.modules().size() == 1) {
+            return project.modules().getFirst().name();
         }
         return bestName;
     }
@@ -263,7 +289,8 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
                 null,
                 new Counterexample.ReproductionRecipe(
                         "Show the dependency path that pulls the advisory into module " + module
-                                + ", then read the advisory",
+                                + ", then read the advisory"
+                                + dependencyPathHint(vulnerability),
                         dependencyTreeCommand(context, vulnerability),
                         null,
                         null,
@@ -275,18 +302,41 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
     }
 
     /**
-     * @return a command that shows why the vulnerable artifact is on the module's classpath. Advisories
-     *     are only produced for Maven coordinates today, so the recorded build executable is the right
-     *     thing to hang a Maven goal on; when no build command was recorded the recipe carries none
-     *     rather than inventing one.
+     * @return a command that shows why the vulnerable artifact is on the module's classpath.
+     *
+     * <p>Only Maven can be given one. Advisories now arrive from every ecosystem CodeWitness
+     * inventories, and hanging a hard-coded {@code dependency:tree} goal on an npm advisory would hand
+     * the reader a command that cannot show what it claims to show. For Maven the project's own recorded
+     * build executable is the one that was observed to work on this project, so the goal is hung on
+     * that; when no build command was recorded - or the dependency is not a Maven one - the recipe
+     * carries no command rather than inventing one, and {@link #dependencyPathHint} names the tool a
+     * human should reach for instead.
      */
     private static List<String> dependencyTreeCommand(
             VerificationContext context, DependencyVulnerability vulnerability) {
+        if (!PackageCoordinate.MAVEN.equals(vulnerability.ecosystem())) {
+            return List.of();
+        }
         List<String> build = context.state().build() == null ? List.of() : context.state().build().command();
         if (build.isEmpty()) {
             return List.of();
         }
         return List.of(build.getFirst(), "-B", "dependency:tree", "-Dincludes=" + vulnerability.dependency());
+    }
+
+    /**
+     * @return prose naming the ecosystem's own tool for showing a dependency path, or the empty string
+     *     for Maven, whose command is recorded as an executable recipe instead.
+     */
+    private static String dependencyPathHint(DependencyVulnerability vulnerability) {
+        String command = switch (vulnerability.ecosystem()) {
+            case PackageCoordinate.NPM -> " (npm: `npm ls " + vulnerability.dependency() + "`)";
+            case PackageCoordinate.PYPI -> " (pip: `pip show " + vulnerability.dependency() + "`)";
+            case PackageCoordinate.CRATES_IO -> " (cargo: `cargo tree -i " + vulnerability.dependency() + "`)";
+            case PackageCoordinate.GO -> " (go: `go mod why -m " + vulnerability.dependency() + "`)";
+            default -> "";
+        };
+        return command;
     }
 
     private static String render(List<DependencyVulnerability> vulnerabilities, List<String> modules) {

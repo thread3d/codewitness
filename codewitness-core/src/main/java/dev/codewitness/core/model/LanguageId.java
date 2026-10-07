@@ -20,6 +20,11 @@ public record LanguageId(String id) {
     public static final LanguageId JAVASCRIPT = new LanguageId("javascript");
     /** TypeScript, executed with Node and optionally type checked with {@code tsc}. */
     public static final LanguageId TYPESCRIPT = new LanguageId("typescript");
+    /**
+     * More than one language, verified together because more than one adapter claimed part of the
+     * project. Reported instead of silently naming whichever language happened to be inspected first.
+     */
+    public static final LanguageId POLYGLOT = new LanguageId("polyglot");
     public static final LanguageId UNKNOWN = new LanguageId("unknown");
 
     public LanguageId {

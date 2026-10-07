@@ -11,6 +11,7 @@ import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.DependencyVulnerability;
 import dev.codewitness.core.model.LanguageId;
 import dev.codewitness.core.model.ModuleInfo;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.Severity;
@@ -22,6 +23,7 @@ import dev.codewitness.core.result.Counterexample;
 import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -134,6 +136,23 @@ class DependencyAdvisoryStrategyTest {
         assertNull(DependencyAdvisoryStrategy.moduleOf(null, project));
     }
 
+    @Test
+    @DisplayName("a language with one module owns every file of that language")
+    void aSingleModuleLanguageOwnsItsFiles() {
+        // npm, PyPI, crates.io and Go projects always have exactly one module, and in isolated mode its path
+        // points into the run's copy of the project rather than at a path a requirement could name. Without
+        // this fallback an advisory would be found and then never charged to anything, which makes the scan
+        // decorative.
+        ProjectInfo single = ProjectInfo.builder(ProjectRef.of(tmp))
+                .language(LanguageId.TYPESCRIPT)
+                .addModule(new ModuleInfo("frontend", tmp.resolve("workspace"), "module", List.of(), List.of(), null))
+                .build();
+
+        assertEquals("frontend", DependencyAdvisoryStrategy.moduleOf("ledger.test.ts", single));
+        // Two modules is a different question, and there the answer stays "cannot be placed".
+        assertNull(DependencyAdvisoryStrategy.moduleOf("Somewhere.java", project()));
+    }
+
     // ------------------------------------------------------------------ fixture
 
     private record Fixture(VerificationContext context, Requirement requirement) {
@@ -170,11 +189,18 @@ class DependencyAdvisoryStrategyTest {
             Severity failOn, DependencyVulnerability vulnerability, Requirement requirement, String vulnerableModule) {
         List<String> vulnerable = List.of("com.example:vulnerable:jar:1.0:compile");
         List<String> safe = List.of("com.example:safe:jar:2.0:compile");
+        // The inventory keys each module by its language, so that a same-named module in another
+        // language cannot be charged with this one's dependencies.
         Map<String, List<String>> byModule = Map.of(
-                "module-a", vulnerableModule.equals("module-a") ? vulnerable : safe,
-                "module-b", vulnerableModule.equals("module-b") ? vulnerable : safe);
+                DependencyReport.moduleKey(LanguageId.JAVA, "module-a"),
+                vulnerableModule.equals("module-a") ? vulnerable : safe,
+                DependencyReport.moduleKey(LanguageId.JAVA, "module-b"),
+                vulnerableModule.equals("module-b") ? vulnerable : safe);
         DependencyReport dependencies = new DependencyReport(true, "maven-dependencies", "", 1,
-                List.of("com.example:vulnerable:jar:1.0:compile"), byModule, List.of(vulnerability),
+                List.of("com.example:vulnerable:jar:1.0:compile", "com.example:safe:jar:2.0:compile"), byModule,
+                PackageCoordinate.parseMaven(List.of("com.example:vulnerable:jar:1.0:compile",
+                        "com.example:safe:jar:2.0:compile")),
+                List.of(vulnerability),
                 AdvisoryScan.performed("osv", "https://api.osv.dev", Instant.now(), "queried 1"));
 
         VerificationConfig defaults = VerificationConfig.defaults();

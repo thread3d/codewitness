@@ -15,6 +15,7 @@ import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.FindingCategory;
 import dev.codewitness.core.model.ModuleInfo;
 import dev.codewitness.core.model.MutationReport;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.Severity;
 import dev.codewitness.core.model.SurvivingMutant;
@@ -160,7 +161,7 @@ public final class JsonReportWriter {
     private ObjectNode reportNode(VerificationReport report) {
         ObjectNode root = mapper.createObjectNode();
         root.put("runId", report.runId());
-        root.set("project", projectNode(report.project()));
+        root.set("project", projectNode(report));
         root.put("status", report.overallStatus().name());
         root.put("statusExplanation", statusExplanation(report));
         root.put("generatedAt", generatedAt(report).toString());
@@ -206,7 +207,8 @@ public final class JsonReportWriter {
         return Instant.now();
     }
 
-    private ObjectNode projectNode(ProjectInfo project) {
+    private ObjectNode projectNode(VerificationReport report) {
+        ProjectInfo project = report.project();
         ObjectNode node = mapper.createObjectNode();
         if (project == null) {
             node.putNull("name");
@@ -216,6 +218,7 @@ public final class JsonReportWriter {
             node.putNull("buildSystem");
             node.set("modules", mapper.createArrayNode());
             node.putNull("javaVersion");
+            node.set("languages", mapper.createArrayNode());
             return node;
         }
         node.put("name", project.project().name());
@@ -229,6 +232,20 @@ public final class JsonReportWriter {
         }
         node.set("modules", modules);
         node.put("javaVersion", project.javaVersion().orElse(null));
+        // Which languages were actually verified. A report about a polyglot project cannot be read without
+        // it: "language": "polyglot" says the verdicts span more than one language but not which ones.
+        ArrayNode languages = mapper.createArrayNode();
+        for (VerificationReport.LanguageSummary language : report.languages()) {
+            ObjectNode entry = mapper.createObjectNode();
+            entry.put("adapter", language.adapter());
+            entry.put("language", language.language().id());
+            entry.put("buildSystem", language.buildSystem().id());
+            entry.put("modules", language.modules());
+            entry.put("buildAttempted", language.buildAttempted());
+            entry.put("buildSucceeded", language.buildSucceeded());
+            languages.add(entry);
+        }
+        node.set("languages", languages);
         return node;
     }
 
@@ -562,6 +579,19 @@ public final class JsonReportWriter {
         node.put("vulnerabilityEndpoint", scan.endpoint());
         node.put("vulnerabilitiesCheckedAt", scan.performedAt() == null ? null : scan.performedAt().toString());
         node.put("vulnerabilityScanNote", scan.note());
+        // The inventory as typed advisory coordinates. This is what the scan asked about, and it is the
+        // only place a consumer can see which ecosystem each dependency belongs to: a package name is
+        // unique within one ecosystem, not across them.
+        ArrayNode coordinates = mapper.createArrayNode();
+        for (PackageCoordinate coordinate : dependencies.coordinates()) {
+            ObjectNode entry = mapper.createObjectNode();
+            entry.put("ecosystem", coordinate.ecosystem());
+            entry.put("name", coordinate.name());
+            entry.put("version", coordinate.version());
+            entry.put("resolved", coordinate.resolved());
+            coordinates.add(entry);
+        }
+        node.set("coordinates", coordinates);
         ArrayNode findings = mapper.createArrayNode();
         for (DependencyVulnerability vulnerability : dependencies.vulnerabilities()) {
             ObjectNode entry = mapper.createObjectNode();
@@ -571,6 +601,7 @@ public final class JsonReportWriter {
             entry.put("severity", vulnerability.severity().name());
             entry.put("description", vulnerability.description());
             entry.put("source", vulnerability.source());
+            entry.put("ecosystem", vulnerability.ecosystem());
             findings.add(entry);
         }
         node.set("vulnerabilityFindings", findings);

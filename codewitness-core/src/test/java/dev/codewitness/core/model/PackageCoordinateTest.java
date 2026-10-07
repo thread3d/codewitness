@@ -1,4 +1,4 @@
-package dev.codewitness.core.vulnerability;
+package dev.codewitness.core.model;
 
 import org.junit.jupiter.api.Test;
 

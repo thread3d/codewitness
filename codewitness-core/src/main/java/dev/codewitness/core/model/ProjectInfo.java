@@ -125,6 +125,60 @@ public final class ProjectInfo {
         return modules.size() > 1;
     }
 
+    /**
+     * Combines the descriptions of every adapter that claimed part of a project.
+     *
+     * <p>A polyglot tree is not one project to the core: each adapter knows only its own language's
+     * sources, tests and modules. The core, however, needs one description to scan for requirement
+     * mappings and one to report, and both have to cover the whole tree or the languages left out become
+     * invisible. The union is that description.
+     *
+     * <p>What is <em>not</em> merged is any claim about a single language: the language and build system
+     * become {@link LanguageId#POLYGLOT} and {@link BuildSystemId#POLYGLOT} rather than naming whichever
+     * adapter happened to be selected first. Only fields that describe the tree as a whole - source
+     * extensions, source and test directories, modules, descriptors, attributes - are combined.
+     *
+     * @param project the project all the descriptions belong to
+     * @param infos   one description per adapter; must not be empty
+     * @return the combined description
+     * @throws IllegalArgumentException when no description is given
+     */
+    public static ProjectInfo union(ProjectRef project, List<ProjectInfo> infos) {
+        if (infos == null || infos.isEmpty()) {
+            throw new IllegalArgumentException("at least one ProjectInfo is needed to describe a project");
+        }
+        if (infos.size() == 1) {
+            return infos.getFirst();
+        }
+        ProjectInfo.Builder builder = builder(project)
+                .language(LanguageId.POLYGLOT)
+                .buildSystem(BuildSystemId.POLYGLOT)
+                .buildRoot(project.root());
+        Set<String> extensions = new LinkedHashSet<>();
+        Map<String, String> attributes = new LinkedHashMap<>();
+        Set<String> descriptors = new LinkedHashSet<>();
+        Map<String, ModuleInfo> modules = new LinkedHashMap<>();
+        for (ProjectInfo info : infos) {
+            extensions.addAll(info.sourceExtensions());
+            info.testFrameworks().forEach(builder::addTestFramework);
+            info.detectedDescriptors().forEach(descriptor -> {
+                if (descriptors.add(descriptor.toString())) {
+                    builder.addDetectedDescriptor(descriptor);
+                }
+            });
+            info.attributes().forEach((key, value) -> attributes.putIfAbsent(key, value));
+            // Modules are keyed by path and name together: two adapters legitimately describe the same
+            // directory as a module of their own language, and collapsing those would hide one language's
+            // code from the module list.
+            info.modules().forEach(module ->
+                    modules.putIfAbsent(module.path() + "|" + module.name(), module));
+        }
+        builder.sourceExtensions(extensions);
+        builder.attributes(attributes);
+        builder.modules(List.copyOf(modules.values()));
+        return builder.build();
+    }
+
     /** All main source directories across all modules. */
     public List<Path> sourceDirs() {
         List<Path> result = new ArrayList<>();

@@ -65,8 +65,8 @@ public final class InspectCommand implements Callable<Integer> {
         JavaScriptAdapterBundle.register(languages, providers, true);
         TypeScriptAdapterBundle.register(languages, providers, true);
 
-        LanguageAdapter adapter = languages.select(projectRef, config.language().adapter()).orElse(null);
-        if (adapter == null) {
+        List<LanguageAdapter> adapters = languages.selectAll(projectRef, config.language().adapter());
+        if (adapters.isEmpty()) {
             System.err.println("No language adapter supports " + projectRef.root());
             System.err.println("Registered adapters: " + languages.ids());
             return 2;
@@ -89,8 +89,19 @@ public final class InspectCommand implements Callable<Integer> {
                 .evidenceLedger(new dev.codewitness.core.evidence.EvidenceLedger("inspect"))
                 .build();
 
-        ProjectInfo info = adapter.inspect(projectRef, context);
-        print(projectRef, info, adapter, providers, config);
+        // Inspection is per language, exactly as verification is: a project with a Java service and a
+        // TypeScript frontend has two descriptions, and printing one of them would hide the other.
+        System.out.println("CODEWITNESS  inspect");
+        System.out.println("project          " + projectRef.name() + " (" + projectRef.identifier() + ")");
+        System.out.println("path             " + projectRef.root());
+        System.out.println("adapters         " + adapters.stream().map(LanguageAdapter::id).toList());
+        for (LanguageAdapter adapter : adapters) {
+            ProjectInfo info = adapter.inspect(projectRef, context);
+            if (adapters.size() > 1) {
+                System.out.println();
+            }
+            print(info, adapter, providers, config);
+        }
 
         if (requirementsFile != null) {
             RequirementSet requirements = RequirementParser.parseFile(requirementsFile);
@@ -118,14 +129,10 @@ public final class InspectCommand implements Callable<Integer> {
     }
 
     private void print(
-            ProjectRef projectRef,
             ProjectInfo info,
             LanguageAdapter adapter,
             VerificationProviderRegistry providers,
             VerificationConfig config) {
-        System.out.println("CODEWITNESS  inspect");
-        System.out.println("project          " + projectRef.name() + " (" + projectRef.identifier() + ")");
-        System.out.println("path             " + projectRef.root());
         System.out.println("adapter          " + adapter.id());
         System.out.println("language         " + info.language());
         System.out.println("build system     " + info.buildSystem());
@@ -146,7 +153,7 @@ public final class InspectCommand implements Callable<Integer> {
         if (info.attributes().containsKey("detectionWarning")) {
             System.out.println("WARNING          " + info.attributes().get("detectionWarning"));
         }
-        if (!Files.isRegularFile(projectRef.root().resolve("requirements.md"))) {
+        if (!Files.isRegularFile(info.project().root().resolve("requirements.md"))) {
             System.out.println("note             no requirements.md found at the project root");
         }
     }

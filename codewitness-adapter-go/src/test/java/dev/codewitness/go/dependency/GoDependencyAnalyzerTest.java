@@ -1,6 +1,7 @@
 package dev.codewitness.go.dependency;
 
 import dev.codewitness.core.model.DependencyReport;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.go.GoTestContexts;
 
@@ -54,7 +55,30 @@ class GoDependencyAnalyzerTest {
     }
 
     @Test
-    @DisplayName("the analysis reads go.mod from the project and reports an inventory")
+    @DisplayName("every require directive is inventoried with the version it selects")
+    void carriesTheVersionEachRequirementSelects() {
+        String manifest = """
+                module example.com/sample
+
+                go 1.22
+
+                require (
+                	github.com/pkg/errors v0.9.1
+                	golang.org/x/text v0.14.0 // indirect
+                )
+                """;
+
+        List<PackageCoordinate> coordinates = GoDependencyAnalyzer.coordinates(manifest);
+
+        assertEquals(2, coordinates.size());
+        assertEquals("Go", coordinates.getFirst().ecosystem());
+        assertEquals("github.com/pkg/errors", coordinates.getFirst().name());
+        assertEquals("v0.9.1", coordinates.getFirst().version());
+        assertEquals("v0.14.0", coordinates.get(1).version());
+    }
+
+    @Test
+    @DisplayName("the analysis reads go.mod from the project and reports a queryable inventory")
     void inventoriesTheModule(@TempDir Path root, @TempDir Path run) throws IOException {
         GoTestContexts.write(root, "go.mod", """
                 module example.com/sample
@@ -70,9 +94,13 @@ class GoDependencyAnalyzerTest {
         assertTrue(report.analysed());
         assertEquals("go-module", report.tool());
         assertEquals(1, report.totalDependencies());
-        assertEquals(List.of("github.com/pkg/errors"), report.directDependencies());
+        assertEquals(List.of("github.com/pkg/errors@v0.9.1"), report.directDependencies());
+        // The point of carrying the version: an advisory service can be asked about this dependency,
+        // and the module it belongs to is recorded so a finding can be charged to the right code.
+        assertEquals("v0.9.1", report.coordinates().getFirst().version());
+        assertEquals(1, report.dependenciesByModule().size());
         assertTrue(report.vulnerabilities().isEmpty());
-        assertTrue(report.note().contains("vulnerability database"), report.note());
+        assertTrue(report.note().contains("known advisory"), report.note());
     }
 
     @Test

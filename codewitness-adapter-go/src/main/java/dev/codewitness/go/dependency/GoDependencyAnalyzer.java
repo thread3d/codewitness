@@ -2,6 +2,7 @@ package dev.codewitness.go.dependency;
 
 import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.LanguageId;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
@@ -12,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Inventories a Go module's declared dependencies from its {@code go.mod}.
@@ -59,12 +61,45 @@ public final class GoDependencyAnalyzer implements VerificationTools.DependencyA
             return DependencyReport.notAnalysed("go-module",
                     "go.mod exists but could not be read: " + e);
         }
-        List<String> all = parse(content);
-        List<String> direct = direct(content);
-        return new DependencyReport(true, "go-module",
-                "inventory only: the module graph is read from go.mod and no vulnerability database is "
-                        + "consulted, so this cannot claim the dependencies are free of known vulnerabilities",
-                all.size(), direct, List.of());
+        List<PackageCoordinate> coordinates = coordinates(content);
+        return DependencyReport.inventory("go-module",
+                "inventory only: the module requirements and the versions they select, read from go.mod. "
+                        + "The version on a require directive is the one the main module's build list "
+                        + "selects, which is what an advisory query needs; whether any of these modules "
+                        + "has a known advisory is recorded by the advisory scan, a separate question from "
+                        + "which modules the program needs",
+                coordinates,
+                Map.of(moduleName(context), coordinates.stream().map(PackageCoordinate::display).toList()));
+    }
+
+    /** @return the name the report should attribute this module's dependencies to. */
+    private static String moduleName(VerificationContext context) {
+        ProjectInfo info = context.projectInfo();
+        if (!info.modules().isEmpty()) {
+            return info.modules().getFirst().name();
+        }
+        Path fileName = context.projectRoot().getFileName();
+        return fileName == null ? "module" : fileName.toString();
+    }
+
+    /**
+     * @return one coordinate per {@code require} directive, direct and indirect, carrying the version
+     *     the directive declares.
+     *
+     * <p>The version comes from {@code go.mod} rather than {@code go.sum}. {@code go.sum} is a
+     * download-integrity record: it keeps every module version that has ever been fetched for this
+     * repository, including versions that a later {@code go get} replaced. Asking an advisory service
+     * about those would report advisories against versions the build no longer uses, and a false
+     * vulnerability finding is exactly the kind of wrong answer this tool exists to avoid. The
+     * {@code require} version is the one the main module's build list selects, and a module not
+     * required there is not in the build at all.
+     */
+    static List<PackageCoordinate> coordinates(String manifest) {
+        List<PackageCoordinate> coordinates = new ArrayList<>();
+        for (Requirement requirement : requirements(manifest)) {
+            coordinates.add(PackageCoordinate.go(requirement.module(), requirement.version()));
+        }
+        return List.copyOf(coordinates);
     }
 
     /** @return every module path in a {@code require} directive, direct and indirect. */
@@ -79,8 +114,33 @@ public final class GoDependencyAnalyzer implements VerificationTools.DependencyA
 
     private static List<String> collect(String manifest, boolean directOnly) {
         List<String> modules = new ArrayList<>();
+        for (Requirement requirement : requirements(manifest)) {
+            if (!directOnly || !requirement.indirect()) {
+                modules.add(requirement.module());
+            }
+        }
+        return modules;
+    }
+
+    /** One {@code require} directive: a module path, the version it selects, and whether it is indirect. */
+    private record Requirement(String module, String version, boolean indirect) {
+    }
+
+    /**
+     * Reads every {@code require} directive, in both the multi-line {@code require ( ... )} block and the
+     * single-line {@code require <module> <version>} form.
+     *
+     * <p>A trailing comment is stripped before the fields are split because it is documentation, not part
+     * of the version. The indirect marker is read from the raw line rather than from the stripped code: it
+     * is exactly the annotation that says "this module is in the build list but nothing imports it
+     * directly", which is what separates a direct dependency from a transitive one. Every other directive
+     * ({@code module}, {@code go}, {@code toolchain}, {@code replace}, {@code exclude}, {@code retract}) is
+     * an instruction about how the build is resolved, not a dependency of the program.
+     */
+    private static List<Requirement> requirements(String manifest) {
+        List<Requirement> requirements = new ArrayList<>();
         if (manifest == null || manifest.isBlank()) {
-            return modules;
+            return requirements;
         }
         boolean inRequireBlock = false;
         for (String raw : manifest.split("\\R", -1)) {
@@ -90,33 +150,24 @@ public final class GoDependencyAnalyzer implements VerificationTools.DependencyA
                     inRequireBlock = false;
                     continue;
                 }
-                addRequirement(line, directOnly, modules);
+                addRequirement(line, requirements);
                 continue;
             }
             if (!line.startsWith("require")) {
-                // module, go, toolchain, replace, exclude, retract, comments and blank lines are all
-                // ignored: none of them declares a dependency of the program.
                 continue;
             }
             String rest = line.substring("require".length()).strip();
             if (rest.startsWith("(")) {
                 inRequireBlock = true;
             } else {
-                addRequirement(rest, directOnly, modules);
+                addRequirement(rest, requirements);
             }
         }
-        return modules;
+        return requirements;
     }
 
-    /**
-     * Adds the module path of one requirement line, which is {@code <module> <version> [// indirect]}.
-     *
-     * <p>A trailing comment is stripped before the fields are split because it is documentation, not
-     * part of the version. The indirect marker is read from the raw line rather than from the stripped
-     * code: it is exactly the annotation that says "this module is in the build list but nothing
-     * imports it directly", which is what separates a direct dependency from a transitive one.
-     */
-    private static void addRequirement(String line, boolean directOnly, List<String> modules) {
+    /** Adds the requirement on one line, which is {@code <module> <version> [// indirect]}. */
+    private static void addRequirement(String line, List<Requirement> requirements) {
         boolean indirect = line.contains("// indirect");
         int comment = line.indexOf("//");
         String code = (comment >= 0 ? line.substring(0, comment) : line).strip();
@@ -128,9 +179,6 @@ public final class GoDependencyAnalyzer implements VerificationTools.DependencyA
             // A module path without a version is not a requirement; do not invent one.
             return;
         }
-        if (directOnly && indirect) {
-            return;
-        }
-        modules.add(parts[0]);
+        requirements.add(new Requirement(parts[0], parts[1], indirect));
     }
 }

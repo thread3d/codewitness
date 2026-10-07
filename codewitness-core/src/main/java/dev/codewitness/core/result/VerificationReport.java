@@ -1,9 +1,11 @@
 package dev.codewitness.core.result;
 
 import dev.codewitness.core.evidence.Evidence;
+import dev.codewitness.core.model.BuildSystemId;
 import dev.codewitness.core.model.CoverageReport;
 import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.Finding;
+import dev.codewitness.core.model.LanguageId;
 import dev.codewitness.core.model.MutationReport;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.Severity;
@@ -42,6 +44,7 @@ public final class VerificationReport {
     private final MutationReport mutation;
     private final List<Finding> findings;
     private final DependencyReport dependencies;
+    private final List<LanguageSummary> languages;
     private final VerificationRun run;
     private final List<String> limitations;
 
@@ -58,8 +61,37 @@ public final class VerificationReport {
         this.mutation = builder.mutation;
         this.findings = List.copyOf(builder.findings);
         this.dependencies = builder.dependencies;
+        this.languages = List.copyOf(builder.languages);
         this.run = builder.run;
         this.limitations = List.copyOf(builder.limitations);
+    }
+
+    /**
+     * One language a run actually verified.
+     *
+     * <p>A report whose verdicts were computed in more than one language has to be able to say which ones,
+     * or a reader cannot tell a polyglot project from a single-language one. This is that statement: one
+     * entry per adapter that claimed part of the project, with what it saw and whether its build succeeded.
+     *
+     * @param adapter        the language adapter that ran, for example {@code java}
+     * @param language       the language it reported
+     * @param buildSystem    the build system it reported
+     * @param modules        how many modules it found
+     * @param buildAttempted whether its build phase ran
+     * @param buildSucceeded whether its build succeeded; {@code false} when it was not attempted
+     */
+    public record LanguageSummary(
+            String adapter,
+            LanguageId language,
+            BuildSystemId buildSystem,
+            int modules,
+            boolean buildAttempted,
+            boolean buildSucceeded) {
+
+        public String describe() {
+            return language + " via " + adapter + " (" + buildSystem + ", " + modules + " module(s), build "
+                    + (buildAttempted ? (buildSucceeded ? "succeeded" : "failed") : "not attempted") + ")";
+        }
     }
 
     public static Builder builder(String runId, ProjectInfo project, RequirementSet requirements) {
@@ -112,6 +144,11 @@ public final class VerificationReport {
 
     public DependencyReport dependencies() {
         return dependencies;
+    }
+
+    /** @return every language this run verified, in the order the adapters were selected. */
+    public List<LanguageSummary> languages() {
+        return languages;
     }
 
     public VerificationRun run() {
@@ -203,6 +240,7 @@ public final class VerificationReport {
         private MutationReport mutation = MutationReport.notMeasured("none", "not run");
         private final List<Finding> findings = new ArrayList<>();
         private DependencyReport dependencies = DependencyReport.notAnalysed("none", "not run");
+        private final List<LanguageSummary> languages = new ArrayList<>();
         private VerificationRun run;
         private final List<String> limitations = new ArrayList<>();
 
@@ -258,6 +296,12 @@ public final class VerificationReport {
 
         public Builder dependencies(DependencyReport value) {
             this.dependencies = value;
+            return this;
+        }
+
+        public Builder languages(List<LanguageSummary> value) {
+            this.languages.clear();
+            this.languages.addAll(value);
             return this;
         }
 

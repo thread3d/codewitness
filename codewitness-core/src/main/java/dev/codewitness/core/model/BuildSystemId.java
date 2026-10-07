@@ -20,6 +20,8 @@ public record BuildSystemId(String id) {
      */
     public static final BuildSystemId NODE = new BuildSystemId("node");
     public static final BuildSystemId NONE = new BuildSystemId("none");
+    /** More than one build system, because more than one language adapter claimed part of the project. */
+    public static final BuildSystemId POLYGLOT = new BuildSystemId("polyglot");
 
     public BuildSystemId {
         Objects.requireNonNull(id, "id");

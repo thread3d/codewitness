@@ -4,6 +4,8 @@ import dev.codewitness.core.config.VerificationConfig;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
+import dev.codewitness.core.model.LanguageId;
+import dev.codewitness.core.model.ModuleInfo;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
@@ -116,10 +118,106 @@ class VerificationEngineTest {
                 "inspection is always recorded");
     }
 
+    // ------------------------------------------------------------------ polyglot projects
+
+    @Test
+    @DisplayName("every adapter that claims part of a project is inspected and built")
+    void aPolyglotProjectIsVerifiedByEveryAdapterThatClaimsIt() throws Exception {
+        // A Java service with a TypeScript frontend is two verifiable projects in one tree. Selecting one
+        // adapter for the whole tree verified one side and left the other absent from the report.
+        LanguageAdapter service = fake("java", LanguageId.JAVA, "java", true);
+        LanguageAdapter frontend = fake("node", LanguageId.TYPESCRIPT, "ts", true);
+
+        VerificationReport report = run(service, frontend);
+
+        assertEquals(LanguageId.POLYGLOT, report.project().language(),
+                "a tree verified in two languages must not be reported as one of them");
+        assertEquals(2, report.evidence().stream()
+                        .filter(e -> e.type() == dev.codewitness.core.evidence.EvidenceType.COMPILER).count(),
+                "each language's build is recorded in its own right: " + report.evidence());
+        assertTrue(report.limitations().stream().anyMatch(l -> l.contains("polyglot")),
+                report.limitations().toString());
+        assertTrue(report.evidence().stream().anyMatch(e -> "java".equals(e.metadata().get("adapter"))));
+        assertTrue(report.evidence().stream().anyMatch(e -> "node".equals(e.metadata().get("adapter"))));
+    }
+
+    @Test
+    @DisplayName("a language that fails to build blocks its own requirements and not the other language's")
+    void aFailedBuildBlocksOnlyTheLanguageThatFailed() throws Exception {
+        LanguageAdapter service = fake("java", LanguageId.JAVA, "java", false);
+        LanguageAdapter frontend = fake("node", LanguageId.TYPESCRIPT, "ts", true);
+
+        VerificationReport report = run(List.of(service, frontend), requirements("R-JAVA", "R-TS"));
+
+        assertEquals(RequirementStatus.BLOCKED, report.verdict("R-JAVA").orElseThrow().status(),
+                "the Java requirement is blocked by the Java build: " + report.verdicts());
+        assertTrue(report.verdict("R-TS").orElseThrow().status() != RequirementStatus.BLOCKED,
+                "the TypeScript requirement is written in code that built, and a sibling language failing "
+                        + "to compile says nothing about it: " + report.verdicts());
+    }
+
+    @Test
+    @DisplayName("a configured adapter narrows a polyglot project to the one language asked for")
+    void anExplicitAdapterNarrowsTheSelection() throws Exception {
+        LanguageAdapter service = fake("java", LanguageId.JAVA, "java", true);
+        LanguageAdapter frontend = fake("node", LanguageId.TYPESCRIPT, "ts", true);
+        VerificationConfig config = VerificationConfig.defaults()
+                .withLanguage(new VerificationConfig.Language("java"));
+
+        VerificationReport report = run(List.of(service, frontend), requirements("R-JAVA", "R-TS"), config);
+
+        assertEquals(LanguageId.JAVA, report.project().language());
+        assertEquals(1, report.evidence().stream()
+                .filter(e -> e.type() == dev.codewitness.core.evidence.EvidenceType.COMPILER).count());
+    }
+
+    @Test
+    @DisplayName("a language nothing can verify is named in the limitations instead of being ignored")
+    void aLanguageWithNoAdapterIsReported() throws Exception {
+        // The half of the polyglot problem that running more adapters cannot fix: a language present in the
+        // tree that no adapter understands must still appear in the report.
+        java.nio.file.Files.writeString(tmp.resolve("Gemfile"), "source 'https://rubygems.org'\n");
+        LanguageAdapter service = fake("java", LanguageId.JAVA, "java", true);
+
+        VerificationReport report = run(service);
+
+        assertTrue(report.limitations().stream().anyMatch(l -> l.contains("Ruby") && l.contains("Gemfile")),
+                report.limitations().toString());
+        assertEquals(List.of("java"), report.languages().stream()
+                .map(language -> language.language().id()).toList());
+    }
+
+    @Test
+    @DisplayName("a run whose requirements were all evaluated is COMPLETED even if a sibling language did not build")
+    void aPolyglotRunIsNotBlockedByAnUnrelatedBuildFailure() throws Exception {
+        // BLOCKED is what makes a truncated run exit non-zero. A language failing to build when no
+        // requirement lives in it did not truncate anything, and calling that run blocked would be as wrong
+        // as calling it clean.
+        LanguageAdapter service = fake("java", LanguageId.JAVA, "java", false);
+        LanguageAdapter frontend = fake("node", LanguageId.TYPESCRIPT, "ts", true);
+
+        VerificationReport report = run(List.of(service, frontend), requirements("R-TS"));
+
+        assertEquals(RequirementStatus.UNVERIFIED, report.verdict("R-TS").orElseThrow().status());
+        assertEquals(RunStatus.COMPLETED, report.run().status(),
+                "no requirement was blocked, so the run was not truncated: " + report.limitations());
+        assertTrue(report.limitations().stream().anyMatch(l -> l.contains("Not every language")),
+                report.limitations().toString());
+    }
+
     // ------------------------------------------------------------------ fake adapter
 
     private static RequirementSet requirements() {
         return new RequirementSet(List.of(REQUIREMENT));
+    }
+
+    /** One requirement per id, each mentioned by a source file in the fake adapter's language. */
+    private static RequirementSet requirements(String... ids) {
+        List<Requirement> requirements = new java.util.ArrayList<>();
+        for (String id : ids) {
+            requirements.add(Requirement.builder(id, "The system must behave.").title(id).build());
+        }
+        return new RequirementSet(requirements);
     }
 
     private VerificationReport run(LanguageAdapter adapter) {
@@ -127,8 +225,23 @@ class VerificationEngineTest {
     }
 
     private VerificationReport run(LanguageAdapter adapter, VerificationConfig config) {
-        return new VerificationEngine(LanguageAdapterRegistry.of(adapter), VerificationProviderRegistry.empty())
-                .verify(ProjectRef.of(tmp), requirements(), config, (phase, message) -> { });
+        return run(List.of(adapter), requirements(), config);
+    }
+
+    private VerificationReport run(LanguageAdapter first, LanguageAdapter second) {
+        return run(List.of(first, second), requirements(), VerificationConfig.defaults());
+    }
+
+    private VerificationReport run(List<LanguageAdapter> adapters, RequirementSet requirements) {
+        return run(adapters, requirements, VerificationConfig.defaults());
+    }
+
+    private VerificationReport run(List<LanguageAdapter> adapters, RequirementSet requirements,
+            VerificationConfig config) {
+        LanguageAdapterRegistry registry = new LanguageAdapterRegistry();
+        adapters.forEach(registry::register);
+        return new VerificationEngine(registry, VerificationProviderRegistry.empty())
+                .verify(ProjectRef.of(tmp), requirements, config, (phase, message) -> { });
     }
 
     /** An adapter that can be told to succeed or fail its build, and that declares nothing else. */
@@ -151,15 +264,7 @@ class VerificationEngineTest {
 
             @Override
             public BuildResult build(VerificationContext context) {
-                return BuildResult.builder()
-                        .attempted(true)
-                        .success(buildSucceeds)
-                        .exitCode(buildSucceeds ? 0 : 1)
-                        .duration(Duration.ofMillis(1))
-                        .command(List.of("fake", "build"))
-                        .output(buildSucceeds ? "BUILD SUCCESS" : "error: cannot find symbol")
-                        .failureReason(buildSucceeds ? null : "the compiler rejected the project")
-                        .build();
+                return buildResult(buildSucceeds);
             }
 
             @Override
@@ -177,6 +282,79 @@ class VerificationEngineTest {
                 return capabilities;
             }
         };
+    }
+
+    /**
+     * A language adapter that claims the project, writes one source file per requirement id into the
+     * project, and reports the language and extension it speaks for.
+     *
+     * <p>Real adapters decide which files matter by extension; the requirement mapper and the engine's
+     * per-language blocking both rely on that, so the fake has to answer the same question the same way.
+     */
+    private LanguageAdapter fake(String id, LanguageId language, String extension, boolean buildSucceeds) {
+        return new LanguageAdapter() {
+            @Override
+            public String id() {
+                return id;
+            }
+
+            @Override
+            public boolean supports(ProjectRef project) {
+                return true;
+            }
+
+            @Override
+            public ProjectInfo inspect(ProjectRef project, VerificationContext context) {
+                Path source = tmp.resolve(id + "-source." + extension);
+                try {
+                    java.nio.file.Files.writeString(source, fileBodyFor(language));
+                } catch (java.io.IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+                return ProjectInfo.builder(project)
+                        .language(language)
+                        .sourceExtensions(Set.of(extension))
+                        .addModule(new ModuleInfo(id, tmp, "directory", List.of(tmp), List.of(), null))
+                        .build();
+            }
+
+            @Override
+            public BuildResult build(VerificationContext context) {
+                return buildResult(buildSucceeds);
+            }
+
+            @Override
+            public TestResult runTests(VerificationContext context) {
+                return TestResult.notExecuted("this adapter declares no test capability");
+            }
+
+            @Override
+            public List<Finding> analyze(VerificationContext context) {
+                return List.of();
+            }
+
+            @Override
+            public Set<Capability> capabilities() {
+                return Set.of(Capability.INSPECT, Capability.BUILD);
+            }
+        };
+    }
+
+    /** @return the source text that makes the requirement ids of this test map to this language's file. */
+    private static String fileBodyFor(LanguageId language) {
+        return language.equals(LanguageId.JAVA) ? "class Service { // R-JAVA\n}" : "// R-TS\nexport {};\n";
+    }
+
+    private static BuildResult buildResult(boolean succeeds) {
+        return BuildResult.builder()
+                .attempted(true)
+                .success(succeeds)
+                .exitCode(succeeds ? 0 : 1)
+                .duration(Duration.ofMillis(1))
+                .command(List.of("fake", "build"))
+                .output(succeeds ? "BUILD SUCCESS" : "error: cannot find symbol")
+                .failureReason(succeeds ? null : "the compiler rejected the project")
+                .build();
     }
 
     /** An adapter that exists but does not claim the project. */

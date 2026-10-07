@@ -12,7 +12,8 @@
   <artifactId>codewitness-adapter-support</artifactId>
   <name>CodeWitness :: Adapter Support</name>
   <description>Machinery shared by more than one language adapter, none of which belongs in the
-    language-independent core: the text mutator and the mutation tester loop that drives it.</description>
+    language-independent core: the text mutator, the mutation tester loop that drives it, and the
+    lock-file readers that turn a resolved dependency graph into advisory coordinates.</description>
 
   <dependencies>
     <!-- This module holds machinery used by more than one adapter, so it depends on core for the SPI
@@ -20,6 +21,14 @@
     <dependency>
       <groupId>dev.codewitness</groupId>
       <artifactId>codewitness-core</artifactId>
+    </dependency>
+
+    <!-- package-lock.json is nested JSON, and a lock file misread as flat text would attribute a
+         version to the wrong package. It is parsed with a real parser, the same one the advisory
+         scanner already uses. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
     </dependency>
 
     <dependency>

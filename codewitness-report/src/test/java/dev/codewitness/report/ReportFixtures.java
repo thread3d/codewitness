@@ -14,6 +14,7 @@ import dev.codewitness.core.model.LanguageId;
 import dev.codewitness.core.model.BuildSystemId;
 import dev.codewitness.core.model.ModuleInfo;
 import dev.codewitness.core.model.MutationReport;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.MutantStatus;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
@@ -298,11 +299,13 @@ final class ReportFixtures {
 
     static DependencyReport dependencies() {
         DependencyVulnerability vulnerability = new DependencyVulnerability("com.example:lib", "1.0",
-                "CVE-2024-0001", Severity.HIGH, "Prototype pollution in the JSON parser.", "NVD");
-        return new DependencyReport(true, "owasp-dependency-check", "", 12,
-                List.of("com.example:lib:1.0"), List.of(vulnerability),
+                "CVE-2024-0001", Severity.HIGH, "Prototype pollution in the JSON parser.", "NVD", "Maven");
+        List<String> inventory = List.of("com.example:lib:jar:1.0:compile");
+        return new DependencyReport(true, "owasp-dependency-check", "", 12, inventory,
+                PackageCoordinate.parseMaven(inventory), List.of(vulnerability),
                 AdvisoryScan.performed("osv", "https://api.osv.dev", STARTED_AT,
-                        "queried osv for 1 dependency(ies) with a resolved version; 1 advisory(ies) matched"));
+                        "queried osv for 1 dependency(ies) with a resolved version in Maven; "
+                                + "1 advisory(ies) matched"));
     }
 
     static VerificationRun run() {

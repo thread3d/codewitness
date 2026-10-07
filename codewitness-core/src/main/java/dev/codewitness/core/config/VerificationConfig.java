@@ -249,6 +249,18 @@ public record VerificationConfig(
                 staticAnalysis, security, llm, report, sandbox, newScenarios);
     }
 
+    /**
+     * Copies this configuration with a different language adapter selection.
+     *
+     * <p>{@code auto} selects every adapter that claims part of the project, which is what a polyglot tree
+     * needs. Naming one narrows the run to that language, which is how a reader insists on how their tree
+     * is read.
+     */
+    public VerificationConfig withLanguage(Language newLanguage) {
+        return new VerificationConfig(project, newLanguage, limits, tests, mutation, propertyTesting,
+                staticAnalysis, security, llm, report, sandbox, scenarios);
+    }
+
     /** @return a map representation suitable for embedding in a report. */
     public Map<String, Object> asMap() {
         Map<String, Object> map = new LinkedHashMap<>();

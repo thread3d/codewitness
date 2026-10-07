@@ -86,7 +86,8 @@ class JsonReportWriterTest {
     @Test
     void projectBlockIsComplete() {
         JsonNode project = json.path("project");
-        assertEquals(List.of("name", "path", "identifier", "language", "buildSystem", "modules", "javaVersion"),
+        assertEquals(List.of("name", "path", "identifier", "language", "buildSystem", "modules", "javaVersion",
+                        "languages"),
                 keys(project));
         assertEquals("example-project", project.path("name").asText());
         assertFalse(project.path("path").asText().isBlank());
@@ -95,6 +96,8 @@ class JsonReportWriterTest {
         assertEquals(2, project.path("modules").size());
         assertEquals("example-core", project.path("modules").get(0).asText());
         assertEquals("17", project.path("javaVersion").asText());
+        assertEquals(0, project.path("languages").size(),
+                "the JSON writer emits one entry per verified language; a fixture that declares none has none");
     }
 
     @Test
@@ -291,7 +294,8 @@ class JsonReportWriterTest {
         JsonNode dependencies = json.path("dependencies");
         assertEquals(List.of("analysed", "tool", "note", "totalDependencies", "vulnerabilities",
                         "vulnerabilitiesChecked", "vulnerabilitySource", "vulnerabilityEndpoint",
-                        "vulnerabilitiesCheckedAt", "vulnerabilityScanNote", "vulnerabilityFindings"),
+                        "vulnerabilitiesCheckedAt", "vulnerabilityScanNote", "coordinates",
+                        "vulnerabilityFindings"),
                 keys(dependencies));
         assertTrue(dependencies.path("analysed").asBoolean());
         assertEquals(12, dependencies.path("totalDependencies").asInt());
@@ -299,8 +303,13 @@ class JsonReportWriterTest {
         // A count is only meaningful next to whether anything was looked for.
         assertTrue(dependencies.path("vulnerabilitiesChecked").asBoolean());
         assertEquals("osv", dependencies.path("vulnerabilitySource").asText());
+        // An advisory is a statement about a package in one ecosystem, so a finding without its
+        // ecosystem cannot be traced back to the dependency that produced it.
+        JsonNode coordinate = dependencies.path("coordinates").get(0);
+        assertEquals(List.of("ecosystem", "name", "version", "resolved"), keys(coordinate));
         JsonNode finding = dependencies.path("vulnerabilityFindings").get(0);
-        assertEquals(List.of("dependency", "version", "vulnerabilityId", "severity", "description", "source"),
+        assertEquals(List.of("dependency", "version", "vulnerabilityId", "severity", "description", "source",
+                        "ecosystem"),
                 keys(finding));
         assertEquals("CVE-2024-0001", finding.path("vulnerabilityId").asText());
         assertEquals("HIGH", finding.path("severity").asText());

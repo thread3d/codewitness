@@ -15,6 +15,7 @@ import dev.codewitness.core.model.BuildSystemId;
 import dev.codewitness.core.model.ModuleInfo;
 import dev.codewitness.core.model.MutantStatus;
 import dev.codewitness.core.model.MutationReport;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.Severity;
@@ -1520,7 +1521,8 @@ public final class SqliteVerificationStore implements VerificationStore {
                     "vulnerabilityId", vulnerability.vulnerabilityId(),
                     "severity", vulnerability.severity(),
                     "description", vulnerability.description(),
-                    "source", vulnerability.source()));
+                    "source", vulnerability.source(),
+                    "ecosystem", vulnerability.ecosystem()));
         }
         return map(
                 "analysed", dependencies.analysed(),
@@ -1529,6 +1531,7 @@ public final class SqliteVerificationStore implements VerificationStore {
                 "totalDependencies", dependencies.totalDependencies(),
                 "directDependencies", dependencies.directDependencies(),
                 "dependenciesByModule", dependencies.dependenciesByModule(),
+                "coordinates", coordinateMaps(dependencies.coordinates()),
                 "vulnerabilities", vulnerabilities,
                 "advisoryScanPerformed", dependencies.advisoryScan().performed(),
                 "advisoryScanSource", dependencies.advisoryScan().source(),
@@ -1625,10 +1628,13 @@ public final class SqliteVerificationStore implements VerificationStore {
                     Json.string(map, "vulnerabilityId"),
                     enumValue(Severity.class, Json.string(map, "severity"), Severity.INFO),
                     Json.string(map, "description"),
-                    Json.string(map, "source")));
+                    Json.string(map, "source"),
+                    Json.string(map, "ecosystem")));
         }
         // Rows written before advisory scanning existed simply have no scan fields; they come back as
-        // "not performed" rather than as a scan that found nothing.
+        // "not performed" rather than as a scan that found nothing. Rows written before typed coordinates
+        // existed have no coordinates either, and the DependencyReport constructor recovers them from the
+        // Maven-shaped inventory strings, exactly as the scan used to.
         return new DependencyReport(
                 Json.bool(row, "analysed", false),
                 Json.string(row, "tool", "unknown"),
@@ -1636,6 +1642,7 @@ public final class SqliteVerificationStore implements VerificationStore {
                 Json.integer(row, "totalDependencies", 0),
                 Json.strings(row.get("directDependencies")),
                 stringLists(row.get("dependenciesByModule")),
+                coordinates(row.get("coordinates")),
                 vulnerabilities,
                 new AdvisoryScan(
                         Json.bool(row, "advisoryScanPerformed", false),
@@ -1643,6 +1650,35 @@ public final class SqliteVerificationStore implements VerificationStore {
                         Json.string(row, "advisoryScanEndpoint"),
                         instant(Json.string(row, "advisoryScanPerformedAt")),
                         Json.string(row, "advisoryScanNote")));
+    }
+
+    /** @return the typed dependency coordinates of a report, as stored. */
+    private static List<PackageCoordinate> coordinates(Object value) {
+        List<PackageCoordinate> result = new ArrayList<>();
+        for (Object entry : Json.array(value)) {
+            Map<String, Object> map = Json.object(entry);
+            String ecosystem = Json.string(map, "ecosystem");
+            String name = Json.string(map, "name");
+            if (ecosystem.isBlank() || name.isBlank()) {
+                continue;
+            }
+            result.add(new PackageCoordinate(ecosystem, name, Json.string(map, "version"),
+                    Json.string(map, "display")));
+        }
+        return List.copyOf(result);
+    }
+
+    /** @return the typed dependency coordinates rendered as plain maps, for storage. */
+    private static List<Object> coordinateMaps(List<PackageCoordinate> coordinates) {
+        List<Object> result = new ArrayList<>();
+        for (PackageCoordinate coordinate : coordinates == null ? List.<PackageCoordinate>of() : coordinates) {
+            result.add(map(
+                    "ecosystem", coordinate.ecosystem(),
+                    "name", coordinate.name(),
+                    "version", coordinate.version(),
+                    "display", coordinate.display()));
+        }
+        return result;
     }
 
     /** @return a map of string lists, as stored for the per-module dependency breakdown. */

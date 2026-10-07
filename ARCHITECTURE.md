@@ -115,8 +115,10 @@ them.
    no compile step before it.
 5. **static analysis** — compiler diagnostics plus the adapter's heuristic rule table.
 6. **security** — the same rule table, filtered to security rules, reported separately.
-7. **dependencies** — inventory only, from the project's manifests (including `package.json` for the
-   Node adapters and `go.mod` for Go); see the limitations in the README.
+7. **dependencies** — a resolved inventory per language, read from the lock file when there is one
+   (`package-lock.json`, `poetry.lock`, `Cargo.lock`) or from the versions the manifest itself selects
+   (`go.mod`), and from the declared names and ranges otherwise. Which dependencies exist is a separate
+   question from whether any of them has an advisory, and the report answers the two separately.
 8. **coverage** — the adapter's coverage provider (JaCoCo for Java, coverage.py for Python,
    cargo-llvm-cov for Rust, `go test -coverprofile` for Go, V8 through LCOV for TypeScript and
    JavaScript), with the Java agent attached automatically when no report exists.
@@ -132,6 +134,32 @@ them.
 
 Every phase runs inside a budget: wall clock, generated tests, LLM calls, mutation time. When a limit
 is reached the run is marked `ABORTED` and everything not yet verified stays unverified.
+
+### Polyglot projects
+
+`LanguageAdapterRegistry.selectAll` returns **every** adapter that claims the project, not the first
+one. A tree with a Java service and a TypeScript frontend is two verifiable projects, and selecting one
+adapter for the whole tree verified one side while leaving the other absent from the report. Each
+inspection produces its own `ProjectInfo`, and the build, test, static-analysis, security, dependency,
+coverage and mutation phases run once per language against that language's description.
+
+The requirement strategies still run once per requirement, but against the `ProjectInfo` of the language
+the requirement's code is written in, because a test runner, a generator and a replay command are all
+language specific. Verdicts are blocked per language too: a build failure in one language blocks the
+requirements written in it, and not the ones written in a sibling that compiled.
+
+The run's own status follows the same rule: it is `BLOCKED` when a build failure actually stopped a
+requirement from being verified, not merely when some language somewhere failed to compile. A polyglot
+run in which every requirement was evaluated is `COMPLETED` even if a language no requirement lives in
+did not build, because `BLOCKED` is what makes a truncated run exit non-zero and this one was not
+truncated. A run with no requirements at all is still `BLOCKED` after a failed build: then there is
+nothing to show for it.
+
+For the core's own purposes - mapping requirements to files, describing the project in the report - the
+inspections are combined by `ProjectInfo.union`, which reports `polyglot` as the language rather than
+naming whichever adapter was selected first. A language present in the tree that no adapter understands
+is reported as an explicit limitation by `UncoveredLanguages`; that table is a naming heuristic only and
+never influences what runs or what a verdict says.
 
 ## 4. The verdict rules, and why
 
