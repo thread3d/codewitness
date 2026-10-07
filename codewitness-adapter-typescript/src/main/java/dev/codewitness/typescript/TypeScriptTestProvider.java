@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import dev.codewitness.support.NodeTestReportParser;
 
 /**
  * Runs a TypeScript project's existing tests with Node's own test runner.
@@ -86,7 +87,7 @@ public final class TypeScriptTestProvider implements VerificationTools.TestRunne
                     + result.describeOutcome() + "); last output: " + NodeRuntime.lastLines(result.combinedOutput(), 4));
         }
         reports.add(report);
-        return TypeScriptTestReportParser.parse(report,
+        return NodeTestReportParser.parse(report,
                 "parsed from the Node JUnit report; " + result.describeOutcome(), reports);
     }
 

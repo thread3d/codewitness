@@ -12,7 +12,6 @@ import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.typescript.NodeRuntime;
 import dev.codewitness.typescript.TypeScriptTestProvider;
-import dev.codewitness.typescript.TypeScriptTestReportParser;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -23,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import dev.codewitness.support.NodeTestReportParser;
 
 /**
  * Executes generated scenario tests and reads the structured counterexamples out of them.
@@ -103,7 +103,7 @@ public final class TypeScriptGeneratedTestRunner implements VerificationTools.Ge
                 return new GeneratedTestExecution(tests, TestResult.notExecuted(note), artifacts, note);
             }
 
-            TestResult parsed = TypeScriptTestReportParser.parse(report,
+            TestResult parsed = NodeTestReportParser.parse(report,
                     "generated test run (" + result.describeOutcome() + ")", List.of());
             Set<String> classNames = new LinkedHashSet<>();
             tests.forEach(test -> classNames.add(test.className()));

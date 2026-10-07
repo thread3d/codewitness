@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import dev.codewitness.support.NodeTestReportParser;
 
 /**
  * Runs a JavaScript project's existing tests with Node's own test runner.
@@ -85,7 +86,7 @@ public final class JavaScriptTestProvider implements VerificationTools.TestRunne
                     + result.describeOutcome() + "); last output: " + NodeRuntime.lastLines(result.combinedOutput(), 4));
         }
         reports.add(report);
-        return JavaScriptTestReportParser.parse(report,
+        return NodeTestReportParser.parse(report,
                 "parsed from the Node JUnit report; " + result.describeOutcome(), reports);
     }
 

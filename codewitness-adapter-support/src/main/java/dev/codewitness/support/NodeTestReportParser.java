@@ -1,4 +1,4 @@
-package dev.codewitness.javascript;
+package dev.codewitness.support;
 
 import dev.codewitness.core.model.TestCaseResult;
 import dev.codewitness.core.model.TestOutcome;
@@ -44,7 +44,7 @@ import java.util.regex.Pattern;
  * Entities are decoded before the counterexample protocol is read, because the protocol line contains
  * {@code <=} and {@code <} is escaped in the report.
  */
-public final class JavaScriptTestReportParser {
+public final class NodeTestReportParser {
 
     private static final Pattern TESTCASE = Pattern.compile("<testcase\\b([^>]*?)(/?)>", Pattern.DOTALL);
     private static final Pattern ATTRIBUTE = Pattern.compile("([A-Za-z_][A-Za-z0-9_:.-]*)\\s*=\\s*\"([^\"]*)\"");
@@ -54,7 +54,7 @@ public final class JavaScriptTestReportParser {
     private static final Pattern ERROR_ELEMENT = Pattern.compile("<error\\b");
     private static final Pattern SKIPPED_ELEMENT = Pattern.compile("<skipped\\b");
 
-    private JavaScriptTestReportParser() {
+    private NodeTestReportParser() {
     }
 
     /** Parses a JUnit XML report file written by Node's test runner. */

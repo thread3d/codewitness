@@ -34,6 +34,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import dev.codewitness.support.NodeTestReportParser;
 
 /**
  * A node test run killed at its timeout is not a finished observation.
@@ -69,7 +70,7 @@ class JavaScriptTimeoutTest {
         Path runDirectory = tmp.resolve("run");
         Path report = runDirectory.resolve("artifacts/javascript/tests/node-junit.xml");
 
-        assertTrue(JavaScriptTestReportParser.parse(JUNIT_XML, "partial", List.of()).executed(),
+        assertTrue(NodeTestReportParser.parse(JUNIT_XML, "partial", List.of()).executed(),
                 "the partial report parses on its own, so the guard is what refuses it");
 
         VerificationContext context = context(root, runDirectory, sandbox(() -> write(report, JUNIT_XML)));
