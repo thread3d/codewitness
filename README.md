@@ -11,8 +11,10 @@ adversarial tests, executing them, searching for counterexamples, and then repor
 observed — with the evidence attached. A language model's opinion is recorded as a suggestion and
 never counted as proof.
 
-```
-CLAIM  ──▶  OBLIGATION  ──▶  EXPERIMENT  ──▶  OBSERVATION  ──▶  EVIDENCE  ──▶  CONCLUSION
+```mermaid
+flowchart LR
+    CLAIM["CLAIM"] --> OBLIGATION["OBLIGATION"] --> EXPERIMENT["EXPERIMENT"]
+    EXPERIMENT --> OBSERVATION["OBSERVATION"] --> EVIDENCE["EVIDENCE"] --> CONCLUSION["CONCLUSION"]
 ```
 
 ---

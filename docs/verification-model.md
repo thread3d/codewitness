@@ -125,28 +125,26 @@ a verdict, does not.
 
 `VerdictCalculator` is the only place that assigns a status, and it does so from evidence:
 
-```
-                     ┌────────────────────────────┐
-                     │ Did the project build?     │──no──▶ BLOCKED
-                     └──────────────┬─────────────┘        (a broken build is not a code defect)
-                                    │ yes
-                     ┌──────────────▼─────────────┐
-                     │ Any executed counterexample│──yes─▶ FAILED
-                     │ or deterministic refutation?│
-                     └──────────────┬─────────────┘
-                                    │ no
-                     ┌──────────────▼─────────────┐
-                     │ Any executed experiment    │──no──▶ UNVERIFIED
-                     │ supporting the requirement?│        (and the reason is stated)
-                     └──────────────┬─────────────┘
-                                    │ yes
-                     ┌──────────────▼─────────────┐
-                     │ Every obligation          │──no──▶ PARTIALLY_VERIFIED
-                     │ discharged?                │
-                     └──────────────┬─────────────┘
-                                    │ yes
-                                    ▼
-                                 VERIFIED
+```mermaid
+flowchart TD
+    BUILD{"Did the project build?"}
+    CX{"Any executed counterexample<br/>or deterministic refutation?"}
+    EXP{"Any executed experiment<br/>supporting the requirement?"}
+    OBL{"Every obligation discharged?"}
+    BLOCKED["BLOCKED"]
+    FAILED["FAILED"]
+    UNVERIFIED["UNVERIFIED"]
+    PARTIAL["PARTIALLY_VERIFIED"]
+    VERIFIED["VERIFIED"]
+
+    BUILD -->|no| BLOCKED
+    BUILD -->|yes| CX
+    CX -->|yes| FAILED
+    CX -->|no| EXP
+    EXP -->|no| UNVERIFIED
+    EXP -->|yes| OBL
+    OBL -->|no| PARTIAL
+    OBL -->|yes| VERIFIED
 ```
 
 Overall run status: any `FAILED` makes the run `FAILED`; an all-`VERIFIED` claim set makes it

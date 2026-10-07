@@ -34,37 +34,39 @@ Each arrow is a place where a verification tool usually starts lying. CodeWitnes
 
 ## 2. Layers
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│ CLI (picocli)         verify · inspect · test · report · …    │
-├──────────────────────────────────────────────────────────────┤
-│ Verification engine   pipeline, budget, phase records         │
-├──────────────────────────────────────────────────────────────┤
-│ Requirement / evidence model   requirements, obligations,     │
-│                                evidence ledger, verdicts      │
-├──────────────────────────────────────────────────────────────┤
-│ Verification strategies   existing tests · static analysis ·  │
-│                           generated tests · mutation · LLM    │
-├──────────────────────────────────────────────────────────────┤
-│ Language adapter API   LanguageAdapter · VerificationTools    │
-├────────────────┬───────────────────────┬─────────────────────┤
-│ Java adapter   │ Python adapter        │ Rust adapter         │
-│ Maven · Gradle │ pytest · unittest ·   │ Cargo · libtest ·    │
-│ JUnit · PIT    │ coverage.py · ast     │ cargo-llvm-cov · src │
-├────────────────┴───────────────────────┴─────────────────────┤
-│ Go adapter                                                    │
-│ go build · go test -json · go vet · coverprofile · bounded src│
-├──────────────────────────────────────────────────────────────┤
-│ TypeScript adapter                                            │
-│ node · node:test · tsc · V8 (LCOV) · bounded source mutation  │
-├──────────────────────────────────────────────────────────────┤
-│ JavaScript adapter                                            │
-│ node · node:test · V8 (LCOV) · bounded source mutation        │
-├──────────────────────────────────────────────────────────────┤
-│ External tools: javac · Maven · Gradle · JUnit · PIT ·        │
-│ JaCoCo · python · pytest · coverage.py · cargo · rustc ·      │
-│ go · node · tsc                                               │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    CLI["CLI (picocli)<br/>verify · inspect · test · report"]
+    ENGINE["Verification engine<br/>pipeline · budget · phase records"]
+    MODEL["Requirement / evidence model<br/>requirements · obligations · evidence ledger · verdicts"]
+    STRATEGIES["Verification strategies<br/>existing tests · static analysis · generated tests · mutation · LLM"]
+    SPI["Language adapter API<br/>LanguageAdapter · VerificationTools"]
+
+    JAVA["Java<br/>Maven · Gradle · JUnit · PIT"]
+    PYTHON["Python<br/>pytest · unittest · coverage.py · AST"]
+    RUST["Rust<br/>Cargo · libtest · cargo-llvm-cov"]
+    GO["Go<br/>go build · go test -json · go vet"]
+    TS["TypeScript<br/>node · tsc · V8 (LCOV)"]
+    JS["JavaScript<br/>node:test · V8 (LCOV)"]
+    CSHARP["C# / .NET<br/>dotnet build · dotnet test (TRX) · Roslyn · coverlet · xUnit"]
+
+    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet"]
+
+    CLI ==> ENGINE ==> MODEL ==> STRATEGIES ==> SPI
+    SPI ==> JAVA
+    SPI ==> PYTHON
+    SPI ==> RUST
+    SPI ==> GO
+    SPI ==> TS
+    SPI ==> JS
+    SPI ==> CSHARP
+    JAVA --> TOOLS
+    PYTHON --> TOOLS
+    RUST --> TOOLS
+    GO --> TOOLS
+    TS --> TOOLS
+    JS --> TOOLS
+    CSHARP --> TOOLS
 ```
 
 Enforced by module boundaries, not by convention:
