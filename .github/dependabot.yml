@@ -1,0 +1,35 @@
+# Dependabot exists to keep the commit-SHA pins in .github/workflows/ci.yml current.
+#
+# Pinning an action to a SHA is what stops a re-pointed tag from changing what CI runs, but a pin
+# never moves on its own: without this file, a security fix in actions/checkout or setup-java would
+# never reach the workflow. Dependabot reads the `# vX.Y.Z` comment beside each pin to know which
+# release the SHA came from, opens the bump as a reviewable pull request, and rewrites the comment
+# alongside the SHA.
+#
+# The rust-toolchain pin has no release tag to track - it is a commit on a moving branch - so
+# Dependabot cannot propose updates for it. Refresh that one deliberately when the Rust fixture
+# needs a newer compiler.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+    # Grouping is what makes SHA pins sustainable. One pull request per action would mean seven
+    # reviewable changes a week for a repository whose workflow rarely changes, so the pins would
+    # rot or be merged unread. Patch and minor bumps arrive together as one reviewable unit with
+    # the pinned SHA and version comment both shown in the diff. Major bumps are excluded from the
+    # group on purpose: v8 of an action can drop a runner, change an input, or require new
+    # permissions, which is a decision to make on its own rather than as a line in a group PR.
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+
+    # A group PR that breaks CI is worse than a stale pin, so keep the noise proportionate to how
+    # much this repository cares about its workflow.
+    open-pull-requests-limit: 5

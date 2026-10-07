@@ -25,13 +25,19 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      # Every action below is pinned to a full-length commit SHA rather than a movable tag or
+      # branch, so a compromised or re-pointed upstream ref cannot change what this workflow runs.
+      # The trailing comment names the release the SHA came from and is what Dependabot reads to
+      # propose updates (.github/dependabot.yml). This workflow is never run from a fork pull
+      # request with write credentials - `permissions` above is read-only - so pinning is the
+      # remaining supply-chain control.
       - name: Check out
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The project targets release 25 (pom.xml: maven.compiler.release=25), so the JDK must be 25.
       # cache: maven caches ~/.m2/repository keyed on the poms and the wrapper properties.
       - name: Set up Temurin JDK 25
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '25'
@@ -48,22 +54,26 @@ jobs:
       # keeps that from happening silently.
       # ---------------------------------------------------------------------------------------
       - name: Set up Python 3
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.x'
 
+      # Pinned to the commit at the tip of dtolnay/rust-toolchain's `stable` branch, which is what
+      # `@stable` resolved to. That branch is a moving ref: pinning freezes the toolchain at the
+      # Rust release current on 2026-10-01, so a rustc upgrade from here on is a deliberate pin
+      # update, not something an upstream branch silently changes under the build.
       - name: Set up Cargo
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable 2026-10-01
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: 'stable'
 
       # Node 22 resolves to the latest 22.x, which satisfies the TypeScript adapter's 22.18 floor
       # (type stripping is only on by default from 22.18) and the JavaScript adapter's 18.17 floor.
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
@@ -72,7 +82,7 @@ jobs:
       # then MAVEN_HOME/M2_HOME, then `mvn` on PATH - so Maven has to be on PATH, and the version has to
       # be one we chose. 3.9.16 is the version this repository's own wrapper pins.
       - name: Set up Maven 3.9.16
-        uses: stCarolas/setup-maven@v5.1
+        uses: stCarolas/setup-maven@12eb41b233df95d49b0c11fc1b5bc8312e5d4ce0 # v5.1
         with:
           maven-version: 3.9.16
 
