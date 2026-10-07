@@ -43,6 +43,7 @@
     <module>codewitness-adapter-go</module>
     <module>codewitness-adapter-javascript</module>
     <module>codewitness-adapter-typescript</module>
+    <module>codewitness-adapter-csharp</module>
     <module>codewitness-cli</module>
   </modules>
 
@@ -145,6 +146,11 @@
       <dependency>
         <groupId>dev.codewitness</groupId>
         <artifactId>codewitness-adapter-typescript</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-adapter-csharp</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

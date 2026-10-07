@@ -165,6 +165,13 @@ public final class RequirementCodeMapper {
             // dropped, which is what the Node test report parser produces for the same file.
             return stripTestMarker(stripExtension(fileName));
         }
+        if (extension.equals("cs") || extension.equals("fs") || extension.equals("vb")) {
+            // The .NET test runner reports a test class by the fully qualified name the compiler gave
+            // it, which is its namespace followed by its class name. The class name is the file's own
+            // name by the convention every .NET project follows, so reading the file's namespace is
+            // enough to derive the same identifier the TRX report will carry.
+            return dotnetClassName(file, stripExtension(fileName));
+        }
         for (Path root : roots) {
             if (root != null && file.startsWith(root)) {
                 String relative = root.relativize(file).toString().replace(java.io.File.separatorChar, '.')
@@ -183,6 +190,36 @@ public final class RequirementCodeMapper {
     private static String stripExtension(String value) {
         int dot = value.lastIndexOf('.');
         return dot < 0 ? value : value.substring(0, dot);
+    }
+
+    /** A .NET namespace declaration: {@code namespace A.B;} or {@code namespace A.B} before a brace. */
+    private static final java.util.regex.Pattern DOTNET_NAMESPACE =
+            java.util.regex.Pattern.compile("(?m)^\\s*namespace\\s+([A-Za-z_][A-Za-z0-9_.]*)");
+
+    /**
+     * @return the name a .NET test runner reports the class in {@code file} under: the namespace the
+     *     file declares followed by the file's own name, or just the file's name when the class is in
+     *     the global namespace.
+     *
+     * <p>A file that declares several namespaces maps to the first one, and a file whose class is not
+     *     named after it maps to the file name. Both are conventions rather than guarantees, and in
+     *     either case the mapping degrades to an identifier that simply does not match a reported test
+     *     - the report then says the test was not mapped rather than attributing it to a requirement it
+     *     may not exercise.
+     */
+    static String dotnetClassName(Path file, String fallback) {
+        String content;
+        try {
+            content = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException _) {
+            return fallback;
+        }
+        java.util.regex.Matcher matcher = DOTNET_NAMESPACE.matcher(content);
+        if (!matcher.find()) {
+            return fallback;
+        }
+        String namespace = matcher.group(1);
+        return namespace.isEmpty() ? fallback : namespace + "." + fallback;
     }
 
     /**

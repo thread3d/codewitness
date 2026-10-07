@@ -88,6 +88,12 @@ or a JavaScript project:
 ./codewitness verify ./my-javascript-project --requirements requirements.md
 ```
 
+or a C#/.NET project:
+
+```bash
+./codewitness verify ./my-dotnet-project --requirements requirements.md
+```
+
 The language is detected, and a project may be written in several. `LanguageAdapterRegistry.selectAll`
 runs **every** adapter that claims part of the tree — a Java service with a TypeScript frontend is two
 verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
@@ -106,10 +112,10 @@ the file that gave it away — a language that appears nowhere in the report is 
 that is not there. Recognition comes from `LanguageDetector` implementations discovered like adapters are,
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
-`language.adapter: java`, `python`, `rust`, `go`, `typescript` or `javascript` *narrows* the run to that one
-adapter instead of being merged with the automatic choice. It is not forced: the named adapter is used when
-it exists and actually claims the project, and otherwise the run falls back to auto-detection — an unknown
-id is silently ignored rather than reported.
+`language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript` or `csharp` *narrows* the run
+to that one adapter instead of being merged with the automatic choice. It is not forced: the named adapter
+is used when it exists and actually claims the project, and otherwise the run falls back to
+auto-detection — an unknown id is silently ignored rather than reported.
 
 Python support needs only an interpreter: it uses `pytest` when the project has it and the standard library `unittest` runner
 otherwise, so a project with no third-party packages can still be verified. Rust support needs only
@@ -123,7 +129,11 @@ syntax-checked, tested, analysed and mutated by the runtime it already has, and 
 become ordinary `node:test` modules. JavaScript support needs only Node 18.17 or later: there is no
 compiler and no type check anywhere in the pipeline — the build is a syntax check with the runtime's
 own parser — and a project with no `node_modules` is checked, tested, analysed and mutated by the
-runtime it already has, with generated scenarios becoming ordinary `node:test` modules.
+runtime it already has, with generated scenarios becoming ordinary `node:test` modules. C# support
+needs only the .NET SDK: a solution is built with `dotnet build` and tested with `dotnet test`,
+restore is left enabled but `-p:NuGetAudit=false` is passed on every command, because CodeWitness runs
+its own advisory scan and NuGet's own audit would make each build depend on api.nuget.org, and
+generated scenarios become xUnit cases in the tree's own test project.
 
 ---
 
@@ -407,6 +417,40 @@ JavaScript generated tests use only Node's standard library, so they run on Node
 without a build step; `#{name}` becomes a JavaScript variable, and `type` only selects `bigint`
 wrapping.
 
+For a C# project the fragments are C# statements, `${name}` becomes a C# variable, and the generated
+test is an xUnit class written into the tree's own test project — a C# test must live in a project
+that compiles against the code under test, so there is nowhere else for it to go. The class is
+declared in the namespace that project's own tests already use and the production namespaces are
+imported, so a scenario writes `new WithdrawalLedger()` without spelling out where the type lives:
+
+```yaml
+language:
+  adapter: csharp
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      var l = new WithdrawalLedger();
+    steps:
+      - call: "l.Withdraw(${t1}, ${a1})"
+        inputs:
+          - {name: t1, type: long, domain: integer, values: ["85800000"]}
+          - {name: a1, type: long, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+      - call: "l.Withdraw(${t2}, ${a2})"
+        inputs:
+          - {name: t2, type: long, domain: integer, values: ["90000000"]}
+          - {name: a2, type: long, domain: integer, values: ["70000"]}
+    observation: "l.TotalWithinLast24Hours(${t2})"
+    invariant: "observation <= 100000"
+```
+
+The generated class is run with `dotnet test --filter FullyQualifiedName~<class>` and removed
+afterwards unless `report.keep_generated_tests` is set, with a copy always kept in the run's artefact
+store; a failing case reaches the engine as a `CODEWITNESS_COUNTEREXAMPLE|…` line carried in the TRX
+failure message, so the counterexample carries data rather than a stack trace.
+
 ```bash
 mvn -Dtest=Cw_SC_ROLLING_OB_001_Test -Dcodewitness.seed=42 -Dcodewitness.case=37 test
 ```
@@ -424,7 +468,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | go | typescript | javascript
+  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp
 
 verification:
   timeout: 15m           # per build or test command
@@ -486,10 +530,11 @@ also indexed in `<project>/.codewitness/codewitness.db` (SQLite).
 ## Reproducibility
 
 A report is only useful if it can be reproduced, so every run records: the project identifier, the
-source revision, the CodeWitness version, the Java version, the build tool and its version, the
-verification configuration fingerprint, every tool version, the language model identifier if any, the
-requirements hash, the isolation level, timestamps and every command that was executed. Evidence
-records carry their command and inputs, and counterexamples carry a replayable command.
+source revision, the CodeWitness version, the runtime version (the Java version for a Java project,
+the .NET SDK version for a C# one), the build tool and its version, the verification configuration
+fingerprint, every tool version, the language model identifier if any, the requirements hash, the
+isolation level, timestamps and every command that was executed. Evidence records carry their command
+and inputs, and counterexamples carry a replayable command.
 
 ---
 
@@ -544,6 +589,9 @@ codewitness/
 │                               check), node:test with JUnit parsing, heuristics, security, V8
 │                               coverage from LCOV, built-in source mutation, dependency inventory;
 │                               no third-party package required
+├── codewitness-adapter-csharp/  C#/.NET projects: dotnet build over the tree's solution, dotnet test
+│                               with TRX parsing, Roslyn diagnostics, heuristics, security, coverlet
+│                               cobertura coverage, bounded source mutation, NuGet inventory
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -556,10 +604,10 @@ engine. Recognising a language CodeWitness has no adapter for is the same shape:
 `dev.codewitness.core.spi.LanguageDetector`, discovered the same way, and the detectors for the languages
 nothing here implements live in `codewitness-language-detectors`. A few platform defaults do remain in core
 — the `LanguageId` and `BuildSystemId` constants (`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`,
-`TYPESCRIPT`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup needs, and the
-excluded-directory and build-wrapper names in `WorkspaceManager` — but they are vocabulary and platform
-defaults, not language logic, and the engine never switches on a language. Nothing in core names a language
-it cannot already verify.
+`TYPESCRIPT`, `CSHARP`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
+needs, and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
+vocabulary and platform defaults, not language logic, and the engine never switches on a language.
+Nothing in core names a language it cannot already verify.
 
 ---
 
@@ -573,9 +621,11 @@ mvn -pl codewitness-core test   # one module
 ```
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
-plus Python 3, Cargo, Go and Node for the Python, Rust, Go, TypeScript and JavaScript fixtures, and
-network access the first time, because it builds real projects. An end-to-end test is skipped rather
-than failed when its toolchain is absent.
+plus Python 3, Cargo, Go, Node and the .NET SDK for the Python, Rust, Go, TypeScript, JavaScript and
+C# fixtures, and network access the first time, because it builds real projects. The C# fixture is
+the one that needs none: its sandbox config sets `allow_network: false`, and it works because the
+SDK's test host packages are already in the machine's NuGet cache on any machine that has run
+`dotnet test` before. An end-to-end test is skipped rather than failed when its toolchain is absent.
 
 ---
 
@@ -803,14 +853,72 @@ The honest limits of JavaScript support are:
   that directory, which is why the convention is stated in the documentation;
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
+The C#/.NET adapter is implemented and exercised end to end as well
+(`fixtures/csharp-withdrawal-ledger`):
+
+- detection of .NET trees in the three ways one announces itself — a solution file, one or more
+  project files, or C# sources with no project file at all — with the conventional `src/` and `tests/`
+  split; a test project is identified by what it references (`Microsoft.NET.Test.Sdk` or
+  `Microsoft.Testing.Platform`) or by an `IsTestProject` declaration, rather than by its name;
+- a build through `dotnet build` over the tree's single solution, or over each project when there is
+  no single solution, whose Roslyn/MSBuild diagnostics are parsed from the canonical
+  `file(line,col): error CS####: message [project]` line shape, so a compile error is `BLOCKED` and
+  never a code defect. Restore is left enabled, but `-p:NuGetAudit=false` is passed on every command,
+  because CodeWitness runs its own advisory scan and NuGet's own audit would make each build depend
+  on api.nuget.org;
+- existing tests through one `dotnet test` per test project with `--logger trx`, read from the TRX
+  report rather than from console output — a report that starts with a UTF-8 BOM — with classes taken
+  from `TestDefinitions`, anything that is not `Passed` or `Failed` recorded as skipped, and a
+  failure's `<Message>` carried into the counterexample verbatim;
+- static analysis runs over a C# rule table (`csharp-heuristics`, ids `CW-CS-SEC-*`,
+  `CW-CS-CORRECT-*`, `CW-CS-REL-*` and `CW-CS-TEST-001`) alongside the Roslyn diagnostics the build
+  phase already produced, with one shared `CSharpSourceScan` handling comments, verbatim strings
+  (`@"..."`), raw strings (`"""..."""`) and interpolated strings, so the mutation lexis and the
+  analyzer can never disagree about where a literal ends. A separate security rule set is filtered
+  out of the same table;
+- coverage from coverlet's cobertura report, collected with
+  `dotnet test --collect:"XPlat Code Coverage"`; a project without `coverlet.collector` comes back
+  "not measured", naming the collector instead of reporting zero;
+- mutation testing through the shared `CommandMutationTester` and a C# `CSharpLexis`, with a bounded
+  operator set (arithmetic, comparison boundaries, boolean operators and boolean constants) that
+  flips one operator at a time and re-runs each mutant with `dotnet test --no-restore`;
+- a dependency inventory read from `packages.lock.json` when it is present — the resolved graph,
+  transitives included — and otherwise from `PackageReference` versions and central `PackageVersion`
+  entries, in the `NuGet` ecosystem; a version behind an MSBuild property is reported unresolved
+  rather than guessed;
+- generated adversarial tests from declared scenarios: the fragments are C#, the generated test is an
+  xUnit class written into the tree's own test project — its namespace taken from that project's own
+  tests, the production namespaces imported — it is run with
+  `dotnet test --filter FullyQualifiedName~<class>`, and it is removed afterwards unless
+  `report.keep_generated_tests` is set. A failing case reaches the engine as a
+  `CODEWITNESS_COUNTEREXAMPLE|…` line carried in the TRX failure message, so a counterexample carries
+  the exact inputs plus a replayable `dotnet test` command.
+
+The honest limits of C#/.NET support are:
+
+- coverage needs `coverlet.collector` in the test project: without it the phase reports the project
+  as not measured and names the collector rather than reporting zero;
+- restore is left enabled, so a tree whose packages this machine has never restored needs network
+  access or a populated NuGet cache before it can build;
+- a version that stands behind an MSBuild property is reported unresolved rather than guessed, so the
+  advisory scan cannot query it; and a project that references neither test host and declares no
+  `IsTestProject` is not treated as a test project, so its tests are not run;
+- mutation uses a deliberately small operator set rather than a dedicated framework, and only
+  operators surrounded by whitespace are considered, so an unformatted expression may be skipped;
+- a tree that holds `.cs` sources but no project file at all is claimed with a warning: the sources can
+  be analysed, but there is no project for the SDK to build, so nothing can be compiled, tested or
+  mutated.
+
 Implemented but limited, and reported as such:
 
 - **Dependency advisories** are checked only when you turn the scan on. It covers every ecosystem the
   adapters can inventory at a resolved version: Maven (from `dependency:list`), npm and PyPI and
   crates.io (from `package-lock.json`, `poetry.lock` and `Cargo.lock`, or from requirements pinned with
-  `==`) and Go (from the versions `go.mod` selects). A dependency an inventory reports without a
-  resolved version cannot be asked about, so the report says the scan could not query it rather than
-  implying it is clean. When the scan is on, CodeWitness asks OSV which of the resolved dependencies are
+  `==`), Go (from the versions `go.mod` selects) and NuGet (from `packages.lock.json`, or from
+  `PackageReference` versions and central `PackageVersion` entries when there is no lock file). A
+  dependency an inventory reports without a resolved version cannot be asked about, so the report says
+  the scan could not query it rather than implying it is clean. When the scan is on, CodeWitness asks
+  OSV which of the resolved dependencies are
   affected and records the answer, the service it asked and when; when it is off, the report says the
   dependencies were *not checked* rather than reporting zero vulnerabilities. An advisory at `fail_on`
   severity or above **fails** the requirements whose own module resolves the vulnerable artifact — the
@@ -827,7 +935,7 @@ Implemented but limited, and reported as such:
   profile; a clean run is weak evidence. Its rules carry real severities — `CW-SEC-001` is `CRITICAL`
   and `CW-SEC-002`, `CW-SEC-004` and `CW-NUM-001/002` are `HIGH` — but a rule match is not a
   demonstration: findings from the heuristic tables are recorded as advisory evidence with a note,
-  and only a finding from a deterministic tool (a compiler, a linter, `go vet`) may refute a
+  and only a finding from a deterministic tool (a compiler, a linter, `go vet`, Roslyn) may refute a
   requirement. One rule in particular, `CW-CONC-001`, fires on any class that reads a mutable private
   field in a condition and writes it in the same file without synchronisation, even when the object is
   never shared. It is advisory: it never changes a verdict.

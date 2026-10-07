@@ -8,6 +8,7 @@ import dev.codewitness.core.spi.LanguageAdapterRegistry;
 import dev.codewitness.core.spi.LanguageDetectorRegistry;
 import dev.codewitness.core.spi.ProgressListener;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
+import dev.codewitness.csharp.CSharpAdapterBundle;
 import dev.codewitness.go.GoAdapterBundle;
 import dev.codewitness.java.JavaAdapterBundle;
 import dev.codewitness.javascript.JavaScriptAdapterBundle;
@@ -37,6 +38,7 @@ final class CliSupport {
         PythonAdapterBundle.register(languages, providers, true);
         RustAdapterBundle.register(languages, providers, true);
         GoAdapterBundle.register(languages, providers, true);
+        CSharpAdapterBundle.register(languages, providers, true);
         // JavaScript and TypeScript are registered as a pair because they own disjoint file sets -
         // js/mjs/cjs against ts/tsx/mts/cts - and can therefore both run over one tree. A TypeScript
         // frontend next to plain-JavaScript tooling is verified in both languages rather than losing one.

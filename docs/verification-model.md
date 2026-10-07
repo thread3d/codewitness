@@ -117,9 +117,10 @@ The model is language-independent. The examples in this document use Java becaus
 adapter, but a Python generated test raises the same line from its standard-library `unittest` case, a
 Rust generated test raises it from a Cargo integration test, a Go generated test records it from a
 `_test.go` file in the package under test, a TypeScript or JavaScript generated test throws it from a
-`node:test` module, and the engine parses it identically. What changes between languages is only how
-the experiment is run and how a replay command is built; what a counterexample is, and how it affects
-a verdict, does not.
+`node:test` module, a C# generated test throws it as an `XunitException` inside an xUnit fact — which is
+what carries the line into the TRX failure message the engine reads — and the engine parses it
+identically. What changes between languages is only how the experiment is run and how a replay command
+is built; what a counterexample is, and how it affects a verdict, does not.
 
 ## Verdicts
 
@@ -146,6 +147,9 @@ flowchart TD
     OBL -->|no| PARTIAL
     OBL -->|yes| VERIFIED
 ```
+
+A project that never built is `BLOCKED`, not `FAILED`: a build that does not compile has not been shown
+to be defective. An experiment that never ran is `UNVERIFIED`, not a pass, and its reason is stated.
 
 Overall run status: any `FAILED` makes the run `FAILED`; an all-`VERIFIED` claim set makes it
 `VERIFIED`; all-`BLOCKED` makes it `BLOCKED`; nothing verified at all makes it `UNVERIFIED`;

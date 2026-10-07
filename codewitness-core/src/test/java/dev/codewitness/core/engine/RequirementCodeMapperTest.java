@@ -243,4 +243,45 @@ class RequirementCodeMapperTest {
         assertEquals(List.of("ledger"), mapper.testClassesFor("R-001"));
         assertEquals(Optional.of("R-001"), mapper.requirementForTestClass("ledger"));
     }
+
+    @Test
+    @DisplayName("a C# test file maps to the fully qualified name the TRX report records")
+    void csharpTestFileMapsToItsNamespaceAndClassName(@TempDir Path root) throws IOException {
+        ProjectInfo csharpProject = ProjectInfo.builder(ProjectRef.of(root))
+                .sourceExtensions(java.util.Set.of("cs"))
+                .addModule(new ModuleInfo("Ledger.Tests", root.resolve("tests/Ledger.Tests"), "csproj",
+                        List.of(), List.of(root.resolve("tests/Ledger.Tests")), null))
+                .build();
+        write(root.resolve("tests/Ledger.Tests/WithdrawalLedgerTests.cs"), """
+                using Xunit;
+
+                namespace Ledger.Tests;
+
+                // R-001
+                public class WithdrawalLedgerTests
+                {
+                    [Fact]
+                    public void Passes() => Assert.Equal(1, 1);
+                }
+                """);
+
+        RequirementCodeMapper mapper = RequirementCodeMapper.build(csharpProject,
+                requirements(Requirement.builder("R-001", "text").build()));
+
+        // The test host reports a class by the name the compiler gave it; the file's namespace plus its
+        // own name is that name, and the two rules have to agree for an executed test to be attributed.
+        assertEquals(List.of("Ledger.Tests.WithdrawalLedgerTests"), mapper.testClassesFor("R-001"));
+        assertEquals(Optional.of("R-001"),
+                mapper.requirementForTestClass("Ledger.Tests.WithdrawalLedgerTests"));
+    }
+
+    @Test
+    @DisplayName("a class in the global namespace is named by its file, as the test host names it")
+    void csharpClassWithoutNamespaceKeepsItsFileName(@TempDir Path root) throws IOException {
+        assertEquals("Program", RequirementCodeMapper.dotnetClassName(
+                write(root.resolve("Program.cs"), "public static class Program { }\n"), "Program"));
+        assertEquals("Program", RequirementCodeMapper.dotnetClassName(
+                root.resolve("missing.cs"), "Program"),
+                "an unreadable file falls back to the file name rather than guessing a namespace");
+    }
 }

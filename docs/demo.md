@@ -16,9 +16,9 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ./demo.sh             # or follow the steps below
 ```
 
-The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript and JavaScript
-sections at the end need Python 3, Cargo, the `go` tool and a Node runtime (22.6+ for TypeScript,
-18.17+ for JavaScript) respectively, and nothing else.
+The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript and C#
+sections at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for TypeScript, 18.17+
+for JavaScript) and the .NET SDK (8+) respectively, and nothing else.
 
 ## 1. What is in the project?
 
@@ -370,3 +370,43 @@ replay command is a `node --test <saved generated test>` invocation with the rec
 Coverage comes from Node's own V8 instrumentation, read from its LCOV export. Mutation runs through
 the adapter's built-in source mutator, so no mutation framework has to be installed. Node 18.17 or
 later is required for the JUnit reporter the test phase reads; no package and no build step is.
+
+## 13. The same thing for C#
+
+The C# fixture is the same ledger again, this time as a .NET solution with amounts in `long` minor
+units. Its test project references the test host every `dotnet test` project references, so there is
+nothing to install beyond the SDK:
+
+```bash
+./codewitness verify fixtures/csharp-withdrawal-ledger \
+    --requirements fixtures/csharp-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}  actual: 140000
+  CE-002  R-003  inputs: {amount=-10000}                                 actual: 40000
+
+Coverage
+  line 89.5% (17/19), branch 50.0% (1/2)
+
+Mutation testing
+  12 mutants, 5 killed, 7 survived, 0 no coverage, score 41.7%
+```
+
+The scenario fragments are C#, the generated tests are xUnit classes written into the tree's own test
+project — `CwScRollingOb001` and `CwScNegativeOb003` — and the replay command is a
+`dotnet test --filter FullyQualifiedName~<class>` invocation with the recorded seed and case in the
+environment, because a `--filter` cannot carry them. Existing tests are read from the TRX report the
+runner writes, coverage comes from coverlet's cobertura report collected by
+`dotnet test --collect:"XPlat Code Coverage"`, and mutation runs through the adapter's own source
+mutator, so no mutation framework has to be installed. The fixture targets `net8.0`, needs the .NET 8
+SDK, and needs no network: its sandbox config sets `allow_network: false`, and the test host packages it
+restores must already be in the machine's NuGet cache — which they are on any machine that has run
+`dotnet test` before.

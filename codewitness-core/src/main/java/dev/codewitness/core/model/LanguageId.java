@@ -21,6 +21,14 @@ public record LanguageId(String id) {
     /** TypeScript, executed with Node and optionally type checked with {@code tsc}. */
     public static final LanguageId TYPESCRIPT = new LanguageId("typescript");
     /**
+     * C#, built and tested with the .NET SDK's {@code dotnet} driver.
+     *
+     * <p>The language is named for the language and not for the platform or the toolchain, exactly as
+     * {@link #JAVA} is not called {@code maven}: {@code dotnet} is how this language is compiled, and
+     * the build system is reported separately as {@link BuildSystemId#DOTNET}.
+     */
+    public static final LanguageId CSHARP = new LanguageId("csharp");
+    /**
      * More than one language, verified together because more than one adapter claimed part of the
      * project. Reported instead of silently naming whichever language happened to be inspected first.
      */

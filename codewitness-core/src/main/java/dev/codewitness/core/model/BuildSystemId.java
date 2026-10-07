@@ -19,6 +19,11 @@ public record BuildSystemId(String id) {
      * (npm, pnpm, yarn or bun) is recorded in the project attributes rather than encoded here.
      */
     public static final BuildSystemId NODE = new BuildSystemId("node");
+    /**
+     * The .NET SDK, driven by {@code dotnet build} and {@code dotnet test} over a solution or one or
+     * more {@code .csproj} projects; packages come from NuGet.
+     */
+    public static final BuildSystemId DOTNET = new BuildSystemId("dotnet");
     public static final BuildSystemId NONE = new BuildSystemId("none");
     /** More than one build system, because more than one language adapter claimed part of the project. */
     public static final BuildSystemId POLYGLOT = new BuildSystemId("polyglot");

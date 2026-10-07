@@ -27,6 +27,11 @@ public final class WorkspaceManager {
     /** Directories that are never copied: build output, VCS metadata and previous runs. */
     private static final Set<String> EXCLUDED_DIRECTORIES = Set.of(
             "target", "build", "out", ".git", ".gradle", ".idea", ".codewitness", "node_modules", ".mvn-cache",
+            // The .NET SDK writes compiled assemblies to bin and every intermediate file - including
+            // project.assets.json, whose package paths are absolute and belong to the machine that ran
+            // the restore - to obj. Copying either would carry a stale restore into the isolated
+            // workspace, so both are excluded and the build restores for itself.
+            "bin", "obj",
             // Python build output, caches and virtual environments. A virtual environment is a copy of
             // an interpreter with absolute paths baked in: copying it into the workspace would both be
             // enormous and produce an interpreter that cannot find itself.

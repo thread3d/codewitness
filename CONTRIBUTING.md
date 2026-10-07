@@ -18,7 +18,12 @@ change has to respect.
 - Node 18.17 or newer on `PATH` for the JavaScript adapter and its end-to-end fixture (no package is
   needed, and there is no compiler or type check; 18.17 is the first release whose JUnit reporter the
   test phase reads)
-- Network access for the first build (dependencies) and for the end-to-end tests
+- The .NET SDK 8 or newer on `PATH` for the C# adapter and its end-to-end fixture (the fixture targets
+  `net8.0` and needs only the test host packages the project already references, which must already be
+  in the machine's NuGet cache — they are on any machine that has run `dotnet test` before — because
+  the fixture's sandbox config sets `allow_network: false`)
+- Network access for the first build (dependencies) and for the end-to-end tests, except the C# fixture,
+  which needs none
 
 ## Build and test
 
@@ -75,8 +80,9 @@ To add one:
    `fixtures/python-withdrawal-ledger` (Python, `pyproject.toml`, `unittest`/pytest),
    `fixtures/rust-withdrawal-ledger` (Rust, `Cargo.toml`, libtest),
    `fixtures/go-withdrawal-ledger` (Go, `go.mod`, `go test`),
-   `fixtures/typescript-withdrawal-ledger` (TypeScript, `tsconfig.json`, `node:test`) or
-   `fixtures/javascript-withdrawal-ledger` (JavaScript, `package.json`, `node:test`). Keep at least
+   `fixtures/typescript-withdrawal-ledger` (TypeScript, `tsconfig.json`, `node:test`),
+   `fixtures/javascript-withdrawal-ledger` (JavaScript, `package.json`, `node:test`) or
+   `fixtures/csharp-withdrawal-ledger` (C#, `WithdrawalLedger.sln`, `dotnet test`). Keep at least
    one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
    adapter's "Java 17+" claim stays exercised against real bytecode.
 2. Introduce **one** defect, and state it in a comment at the top of the class — the comment is part
@@ -98,8 +104,8 @@ To add one:
    inspectable class, like `JavaProjectDetector`.
 3. Implement the tool providers you need from `VerificationTools` and register them where the CLI
    wires everything (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`,
-   `GoAdapterBundle`,
-   `TypeScriptAdapterBundle` and `JavaScriptAdapterBundle` are the worked examples). If your
+   `GoAdapterBundle`, `TypeScriptAdapterBundle`, `JavaScriptAdapterBundle` and `CSharpAdapterBundle`
+   are the worked examples). If your
    tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
    counterexample carries a command that actually runs.
 4. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the
@@ -158,9 +164,9 @@ outcomes. You cannot assign a verdict; the engine does that from your evidence. 
 - [ ] `./demo.sh` still finds the four defects in `fixtures/withdrawal-ledger`, and
       `./codewitness verify fixtures/python-withdrawal-ledger` still reports R-001 and R-003 as `FAILED`
       and R-002 as `VERIFIED`, and `./codewitness verify fixtures/rust-withdrawal-ledger`,
-      `fixtures/go-withdrawal-ledger`, `fixtures/typescript-withdrawal-ledger` and
-      `fixtures/javascript-withdrawal-ledger` still report R-001 and R-003 as `FAILED`, R-002 as
-      `VERIFIED` and R-004 as `UNVERIFIED`.
+      `fixtures/go-withdrawal-ledger`, `fixtures/typescript-withdrawal-ledger`,
+      `fixtures/javascript-withdrawal-ledger` and `fixtures/csharp-withdrawal-ledger` still report
+      R-001 and R-003 as `FAILED`, R-002 as `VERIFIED` and R-004 as `UNVERIFIED`.
 - [ ] No `.codewitness` run data, build output or generated test sources are committed.
 - [ ] The README's "honest status" section still describes what the tool actually does.
 - [ ] Any new limitation is stated in the README and, where it affects a run, in the report's

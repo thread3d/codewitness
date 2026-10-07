@@ -47,11 +47,11 @@ jobs:
       # Toolchains for the end-to-end suite.
       #
       # `./mvnw -Pe2e test` runs the fixture projects through their own toolchains: Maven for the
-      # Java fixture, Python 3, Cargo, `go` and Node for the others (Node 22.18+ for TypeScript, where
-      # type stripping is on by default, and 18.17+ for JavaScript). Each end-to-end test skips itself
-      # (a JUnit assumption) when its toolchain is absent, so a missing tool produces a green build with
-      # those languages never having run. Installing each one here, then asserting it below, is what
-      # keeps that from happening silently.
+      # Java fixture, Python 3, Cargo, `go`, Node for the others (Node 22.18+ for TypeScript, where
+      # type stripping is on by default, and 18.17+ for JavaScript) and the .NET SDK for the C# fixture.
+      # Each end-to-end test skips itself (a JUnit assumption) when its toolchain is absent, so a missing
+      # tool produces a green build with those languages never having run. Installing each one here, then
+      # asserting it below, is what keeps that from happening silently.
       # ---------------------------------------------------------------------------------------
       - name: Set up Python 3
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -77,6 +77,15 @@ jobs:
         with:
           node-version: '22'
 
+      # The C# fixture targets net8.0, so the SDK that builds it is the 8.0 one. The fixture's sandbox
+      # configuration forbids the network, and the SDK's test host packages are in the runner's NuGet
+      # cache after this step (it restores them), which is what lets the fixture's `dotnet test` run
+      # offline the way it does on a developer's machine.
+      - name: Set up .NET SDK 8.0
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '8.0.x'
+
       # Pin Maven instead of trusting whatever the runner image happens to ship. The Java fixture is
       # built by `BuildToolLauncher.resolve`, which looks for a wrapper in the fixture (there is none),
       # then MAVEN_HOME/M2_HOME, then `mvn` on PATH - so Maven has to be on PATH, and the version has to
@@ -99,6 +108,7 @@ jobs:
           cargo --version
           go version
           node --version
+          dotnet --version
 
       # Unit and integration tests. Surefire excludes the `e2e` group by default (pom.xml:
       # excluded.groups), so this is the fast suite.
@@ -106,6 +116,6 @@ jobs:
         run: ./mvnw -B test
 
       # The end-to-end suite, opt-in through the `e2e` profile, which clears excluded.groups. It
-      # builds the fixture projects with real Maven, Python, Cargo, Go and Node runs.
+      # builds the fixture projects with real Maven, Python, Cargo, Go, Node and .NET runs.
       - name: End-to-end tests (fixture projects)
         run: ./mvnw -B -Pe2e test

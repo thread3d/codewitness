@@ -17,6 +17,7 @@ import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.LanguageDetectorRegistry;
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
+import dev.codewitness.csharp.CSharpAdapterBundle;
 import dev.codewitness.go.GoAdapterBundle;
 import dev.codewitness.java.JavaAdapterBundle;
 import dev.codewitness.javascript.JavaScriptAdapterBundle;
@@ -63,6 +64,7 @@ public final class InspectCommand implements Callable<Integer> {
         PythonAdapterBundle.register(languages, providers, true);
         RustAdapterBundle.register(languages, providers, true);
         GoAdapterBundle.register(languages, providers, true);
+        CSharpAdapterBundle.register(languages, providers, true);
         JavaScriptAdapterBundle.register(languages, providers, true);
         TypeScriptAdapterBundle.register(languages, providers, true);
 

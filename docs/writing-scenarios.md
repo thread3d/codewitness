@@ -8,11 +8,12 @@ scheduling, execution, and reproducible counterexamples.
 Scenarios live in `codewitness.yaml` under `scenarios:`. The fragments (`setup`, `call`,
 `observation`, `invariant`) are written in the **project's own language**: Java for a Java project,
 Python for a Python project, Rust for a Rust project, Go for a Go module, TypeScript for a TypeScript
-project, plain JavaScript for a JavaScript project. Everything else — modes, inputs, ranges, seeds, the
-counterexample protocol — is identical. The examples below are Java; the Python, Rust, Go, TypeScript
-and JavaScript forms are shown in [Python projects](#python-projects), [Rust projects](#rust-projects),
-[Go projects](#go-projects), [TypeScript projects](#typescript-projects) and
-[JavaScript projects](#javascript-projects).
+project, plain JavaScript for a JavaScript project, C# for a C#/.NET project. Everything else — modes,
+inputs, ranges, seeds, the counterexample protocol — is identical. The examples below are Java; the
+Python, Rust, Go, TypeScript, JavaScript and C# forms are shown in
+[Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
+[TypeScript projects](#typescript-projects), [JavaScript projects](#javascript-projects) and
+[C# projects](#c-projects).
 
 ```yaml
 scenarios:
@@ -75,7 +76,7 @@ Each step declares the inputs it searches over:
 | Field | Meaning |
 | --- | --- |
 | `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
-| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, or `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value). |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), or a C# type such as `long`, `decimal`, `double`, `bool` or `string`. |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -457,6 +458,87 @@ steps:
 There is no type check anywhere in a JavaScript verification: the build is a syntax check with Node's
 own parser and nothing more. A project that has a `tsconfig.json` or any `.ts`/`.tsx`/`.mts`/`.cts`
 source is deliberately left to the TypeScript adapter, which can actually type check it.
+
+## C# projects
+
+For a C# project the same scenario is written in C#. A generated test must live in a test project —
+that is the only place the .NET SDK will compile and run it — so it is written into the tree's own test
+project, in the namespace that project's tests already use, and `${name}` becomes a C# variable:
+
+```yaml
+language:
+  adapter: csharp
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      var l = new WithdrawalLedger();
+    steps:
+      - call: "l.Withdraw(${t1}, ${a1})"
+        inputs:
+          - {name: t1, type: long, domain: integer, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: long, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+    observation: "l.TotalWithinLast24Hours(${t1})"
+    invariant: "observation <= 100000"
+    cases: 200
+    seed: 42
+```
+
+Notes specific to C#:
+
+- the fragments are C# **statements**, so each `call` ends in `;` (CodeWitness adds one if you leave it
+  out); a step may be several statements, and a call whose value you do not need is simply a statement;
+- the generated file imports `System`, `System.Collections.Generic`, `System.Globalization`,
+  `System.Linq`, `System.Threading.Tasks`, `Xunit` and every namespace the project declares, so a
+  scenario writes `new WithdrawalLedger()` without spelling out where the type lives. If two production
+  namespaces declare the same type name the unqualified mention becomes ambiguous and the generated file
+  does not compile, which the run reports as a build failure rather than as a defect in the code;
+- `type` is a C# type the generator can name: `long`, `int`, `short`, `byte`, `sbyte`, `uint`, `ulong`,
+  `ushort`, `double`, `float`, `decimal`, `bool`, `string`, `object` or `char`. `domain: decimal`
+  generates a `decimal`, `domain: double` a `double`, `domain: boolean` a `bool`, `domain: string` a
+  `string`, and the integer domains (`integer`, `long`, `instantMillis`) a `long`. Money is usually
+  `long` minor units, as the C# fixture does. For anything else use `domain: raw` and write the value
+  as C#;
+- every generated input is discarded with `_ = name;`, so a fragment that does not mention an input does
+  not produce a warning in a project that treats warnings as errors;
+- a failing case is reported by throwing `Xunit.Sdk.XunitException` carrying the single
+  `CODEWITNESS_COUNTEREXAMPLE|case=…|seed=…|inputs={…}|…` line. That is what puts the structured line
+  into the TRX failure message, which is where the engine reads it from — which is why a counterexample
+  contains the exact inputs rather than only a stack trace;
+- `mode: concurrent` runs the step list once per worker across eight `Parallel.For` workers against one
+  shared subject, then checks the invariant once. It is real parallelism on a multi-core machine, so an
+  interleaving is more likely to be observed than under a single-threaded runner, but the workers are
+  not released by a barrier: a concurrent scenario must still share the subject safely if the API is
+  not already safe;
+- generated classes are written into the test project's own directory while they run and are removed
+  afterwards unless `report.keep_generated_tests` is set; a copy is always kept in the run's artefact
+  store. Each class carries its own private helpers, so two scenarios in one project cannot collide;
+- a tree with no test project gets no generated test at all, and the requirement stays `UNVERIFIED`
+  rather than `BLOCKED`: nothing was attempted, and the report says so.
+
+A generated class is named after the scenario and the obligation, in PascalCase — `SC-ROLLING` and
+`OB-001` become `CwScRollingOb001`, declared in the test project's own namespace, so the full name is
+`Ledger.Tests.CwScRollingOb001`. The seed and the case index are carried in the environment rather than
+on the command line, because a `--filter` cannot express them:
+
+```bash
+env CODEWITNESS_SEED=42 CODEWITNESS_CASE=37 dotnet test tests/Ledger.Tests/Ledger.Tests.csproj \
+    --nologo -p:NuGetAudit=false --filter FullyQualifiedName~CwScRollingOb001
+```
+
+`CODEWITNESS_SEED` and `CODEWITNESS_CASE` pin the search (and `CODEWITNESS_CASES` the case count);
+`./codewitness reproduce <run-id> --counterexample CE-001` prints exactly this command.
+
+C# rejection is expressed the same way, in C#. A step that throws is a failure by default, so assert the
+throw rather than letting it escape:
+
+```yaml
+steps:
+  - call: "Assert.Throws<System.ArgumentOutOfRangeException>(() => l.Withdraw(0, ${amount}));"
+    description: an amount above the limit must be rejected by throwing
+```
 
 ## Practical advice
 

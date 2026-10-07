@@ -102,14 +102,20 @@ class CommonLanguageDetectorsTest {
     }
 
     @Test
-    @DisplayName("every detector names a language and an id, and claims no language id of its own")
+    @DisplayName("every detector names a language and an id, and any adapter language it claims is well formed")
     void everyDetectorIsWellFormed() {
         for (LanguageDetector detector : new LanguageDetectorRegistry().discover().all()) {
             assertFalse(detector.id().isBlank(), detector.getClass().getName());
             assertFalse(detector.language().isBlank(), detector.getClass().getName());
-            assertTrue(detector.verifiedAsAdapterLanguage().isEmpty(),
-                    detector.getClass().getName() + " claims to speak for an adapter language, but nothing "
-                            + "in this module can verify anything");
+            // A detector may declare the id of an adapter language: that is how a language which later gains
+            // an adapter stops being reported twice, and DotNetLanguageDetector does exactly that for csharp.
+            // Whether the adapter it names really exists cannot be checked from here - this module depends on
+            // no adapter at all - so it is checked in codewitness-cli, where both sides are on the classpath.
+            // What can be checked here is that the claim is shaped like a language id rather than like prose.
+            detector.verifiedAsAdapterLanguage().ifPresent(id -> assertTrue(
+                    id.matches("[a-z][a-z0-9-]*"),
+                    detector.getClass().getName() + " declares the adapter language \"" + id
+                            + "\", which is not shaped like a language id"));
         }
     }
 }

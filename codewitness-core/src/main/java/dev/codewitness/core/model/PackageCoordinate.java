@@ -44,6 +44,8 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
     public static final String CRATES_IO = "crates.io";
     /** The Go module ecosystem id. */
     public static final String GO = "Go";
+    /** The NuGet ecosystem id, which covers .NET packages including C# and F# ones. */
+    public static final String NUGET = "NuGet";
 
     public PackageCoordinate {
         Objects.requireNonNull(ecosystem, "ecosystem");
@@ -92,6 +94,11 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
     /** @return a Go coordinate for a module path at a resolved version. */
     public static PackageCoordinate go(String module, String version) {
         return new PackageCoordinate(GO, module, version, null);
+    }
+
+    /** @return a NuGet coordinate for a .NET package id at a resolved version. */
+    public static PackageCoordinate nuget(String packageId, String version) {
+        return new PackageCoordinate(NUGET, packageId, version, null);
     }
 
     /** @return a coordinate in an arbitrary ecosystem, for sources this class has no shortcut for. */

@@ -24,6 +24,14 @@ node_modules/
 fixtures/**/dist/
 fixtures/**/*.tsbuildinfo
 
+# .NET dependencies and build output. The C# fixture restores the .NET SDK's own test host, which every
+# .NET project needs, and the SDK writes compiled assemblies to bin and intermediate files to obj; a
+# developer who runs `dotnet test` in a fixture by hand should not commit either. TestResults holds the
+# TRX and coverage reports of such a run.
+fixtures/**/bin/
+fixtures/**/obj/
+fixtures/**/TestResults/
+
 # CodeWitness run data produced inside the repository
 .codewitness/
 **/.codewitness/

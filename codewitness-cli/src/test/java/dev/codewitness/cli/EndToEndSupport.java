@@ -109,6 +109,45 @@ abstract class EndToEndSupport {
         return findExecutable("node");
     }
 
+    /** Skips the test when no .NET SDK is available, instead of failing spuriously. */
+    static void assumeDotnetAvailable() {
+        Assumptions.assumeTrue(findDotnet() != null,
+                "no dotnet executable on PATH, in DOTNET_ROOT or in a conventional install location: "
+                        + "C# end-to-end verification cannot run");
+    }
+
+    /**
+     * @return the .NET SDK driver, or {@code null} when none can be found.
+     *
+     * <p>The search mirrors the adapter's: {@code DOTNET_ROOT} first, then the locations the SDK's own
+     * installer and the package managers use, then the per-user install, and {@code PATH} last. A test
+     * that only consulted {@code PATH} would skip on a machine that has an SDK the adapter would have
+     * found and used.
+     */
+    static String findDotnet() {
+        String executable = isWindows() ? "dotnet.exe" : "dotnet";
+        String root = System.getenv("DOTNET_ROOT");
+        if (root != null && !root.isBlank() && Files.isExecutable(Path.of(root, executable))) {
+            return Path.of(root, executable).toString();
+        }
+        for (String directory : List.of("/usr/local/share/dotnet", "/usr/share/dotnet",
+                "/opt/homebrew/opt/dotnet/libexec")) {
+            Path candidate = Path.of(directory, executable);
+            if (Files.isExecutable(candidate)) {
+                return candidate.toString();
+            }
+        }
+        String home = System.getProperty("user.home");
+        if (home != null && Files.isExecutable(Path.of(home, ".dotnet", executable))) {
+            return Path.of(home, ".dotnet", executable).toString();
+        }
+        return findExecutable(executable);
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+    }
+
     /** @return an executable found on {@code PATH}, or {@code null}. */
     static String findExecutable(String name) {
         String path = System.getenv("PATH");

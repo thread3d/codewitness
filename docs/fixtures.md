@@ -17,6 +17,7 @@ not install a `codewitness` command on `PATH`.
 | `go-withdrawal-ledger` | Go: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for Go: module detection, `go build`, `go test -json` parsing, scenario-generated `_test.go` files in the package under test, counterexamples, built-in coverprofile coverage and bounded source mutation, with no third-party module. |
 | `typescript-withdrawal-ledger` | TypeScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language executed by Node's type stripper: detection, syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
 | `javascript-withdrawal-ledger` | JavaScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for plain JavaScript, with no compiler and no type check anywhere: detection, `node --check` syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
+| `csharp-withdrawal-ledger` | C#/.NET: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for the .NET SDK: solution and project detection, `dotnet build` with Roslyn/MSBuild diagnostics, `dotnet test` with TRX parsing, scenario-generated xUnit facts written into the test project, counterexamples, coverlet cobertura coverage and bounded source mutation, with nothing installed beyond the SDK and the test host packages the project already references. |
 | `polyglot-service` | six languages in one directory, plus a `Gemfile` nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
@@ -209,6 +210,55 @@ and its build is a syntax check with the runtime's own parser. The two adapters 
 project with a `tsconfig.json` or any TypeScript source belongs to the TypeScript adapter — so a
 JavaScript run never implies a type check happened.
 
+### `csharp-withdrawal-ledger`
+
+The C# counterpart of the reference fixture: a .NET solution whose `Ledger` library applies its limit
+per calendar day instead of over a rolling 24-hour window (R-001) and which accepts a negative
+withdrawal and reduces the recorded total (R-003). Amounts are `long` minor units and instants are epoch
+milliseconds, so the fixture needs no decimal type. The project's own two tests pass, which is the
+point.
+
+The fixture is three files of project definition — `WithdrawalLedger.sln`, `src/Ledger/Ledger.csproj`
+and `tests/Ledger.Tests/Ledger.Tests.csproj` — because in .NET the unit of build and of testing is the
+project, not the tree. The test project is recognised by what it references (`Microsoft.NET.Test.Sdk`,
+`xunit` and `coverlet.collector`), not by where it sits; that is what tells the adapter where tests live
+and where a generated test may be written.
+
+```bash
+./codewitness verify fixtures/csharp-withdrawal-ledger \
+    --requirements fixtures/csharp-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}  actual: 140000
+  CE-002  R-003  inputs: {amount=-10000}                                 actual: 40000
+
+Coverage:         line 89.5% (17/19), branch 50.0% (1/2)   (coverlet, cobertura)
+Mutation testing: 12 mutants, 5 killed, 7 survived         (built-in source mutator)
+```
+
+R-001 and R-003 fail through generated xUnit classes written into `Ledger.Tests` — `CwScRollingOb001`
+for the midnight crossing and `CwScNegativeOb003` for the accepted negative amount — and R-002 is
+discharged by an executed generated test, which is the only path to `VERIFIED`; R-004 declares no
+scenario and stays `UNVERIFIED`. Each counterexample carries the exact inputs and a replay command that
+is an `env CODEWITNESS_SEED=… CODEWITNESS_CASE=… dotnet test --filter FullyQualifiedName~<class>`
+invocation, with the seed and case index in the environment because a `--filter` cannot carry them.
+
+The fixture needs the .NET 8 SDK and nothing else installed: it targets `net8.0` and references only the
+test host packages an ordinary `dotnet test` project already has, and its `codewitness.yaml` sets
+`sandbox.allow_network: false`, so those packages must already be in the machine's NuGet cache — which
+they are on any machine that has run `dotnet test` before. NuGet has no switch that forbids the network
+the way Cargo's `--offline` or Go's `GOPROXY=off` do, so what keeps this fixture offline is the populated
+cache rather than the flag; the adapter still disables NuGet's own vulnerability audit on every command,
+so nothing in a build goes looking for advisory data.
+
 ### `polyglot-service`
 
 One directory holding six languages' projects and a `Gemfile`: a Maven project, a Python package with a
@@ -346,6 +396,7 @@ with the `./codewitness` launcher:
 ./codewitness verify fixtures/go-withdrawal-ledger --requirements fixtures/go-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/typescript-withdrawal-ledger --requirements fixtures/typescript-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/javascript-withdrawal-ledger --requirements fixtures/javascript-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/csharp-withdrawal-ledger --requirements fixtures/csharp-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 
