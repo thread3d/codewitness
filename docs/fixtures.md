@@ -20,6 +20,7 @@ not install a `codewitness` command on `PATH`.
 | `csharp-withdrawal-ledger` | C#/.NET: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for the .NET SDK: solution and project detection, `dotnet build` with Roslyn/MSBuild diagnostics, `dotnet test` with TRX parsing, scenario-generated xUnit facts written into the test project, counterexamples, coverlet cobertura coverage and bounded source mutation, with nothing installed beyond the SDK and the test host packages the project already references. |
 | `kotlin-withdrawal-ledger` | Kotlin: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for Kotlin on the JVM: Gradle/Maven detection by Kotlin source rather than by the build descriptor it shares with Java, `kotlinc` diagnostics read from the compiler's own four shapes, JUnit XML reports, scenario-generated Kotlin test classes compiled by the project's own build, counterexamples, JaCoCo coverage over JVM bytecode and bounded source mutation, with nothing installed beyond the build tool and the Kotlin plugin it already declares. |
 | `cpp-withdrawal-ledger` | C++: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language whose build system is not a package manager: CMake detection and configure, `cmake --build`, CTest with JUnit parsing, scenario-generated self-contained C++ programs compiled with the flags the project's own build recorded, counterexamples, gcov coverage over a second instrumented build and bounded source mutation, with no package fetched at all. |
+| `php-withdrawal-ledger` | PHP: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language whose test tool is a Composer dependency rather than part of the toolchain: detection from the Composer manifest and the PHPUnit configuration, a build that is the interpreter's own parse followed by `composer install`, PHPUnit with JUnit parsing, scenario-generated PHPUnit `TestCase` classes written into the tree's own test root, counterexamples with a real PHPUnit replay command, coverage reported as not measured when no Xdebug or PCOV driver is loaded, and bounded source mutation — with nothing installed beyond the interpreter and Composer. |
 | `polyglot-service` | six languages in one directory, plus a `Gemfile` nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
@@ -400,6 +401,68 @@ offline, and mutation and coverage use the compiler and `gcov` the machine alrea
 driven: a C or C++ tree built by a hand-written `Makefile` or by Meson is recognised and reported as
 present and not verified rather than built by a guess at its commands.
 
+### `php-withdrawal-ledger`
+
+The PHP counterpart of the reference fixture: a Composer project whose `WithdrawalLedger` applies its
+limit per calendar day instead of over a rolling 24-hour window (R-001) and which accepts a negative
+withdrawal and reduces the recorded total (R-003). Money is held in integer cents, so the arithmetic the
+requirements ask about is exact and the fixture needs no decimal type. The project's own tests pass,
+which is the point.
+
+The fixture is a `composer.json` with a PSR-4 autoload prefix and PHPUnit declared in `require-dev`, a
+`phpunit.xml` whose `bootstrap` is the Composer autoloader, `src/WithdrawalLedger.php`,
+`tests/WithdrawalLedgerTest.php`, `requirements.md` and its own `codewitness.yaml`. The `bootstrap` is
+not decoration: PHPUnit has no notion of a test tree it discovers by name alone, so the autoloader is
+what makes a generated class findable, and the Composer manifest is what makes PHPUnit exist at all.
+
+R-001 and R-003 fail through generated PHPUnit `TestCase` classes written into `tests/`; R-002 is
+discharged by an executed generated test, which is the only path to `VERIFIED`; R-004 declares no
+scenario and stays `UNVERIFIED`. Each counterexample carries the exact inputs and a replay command that
+is a real PHPUnit invocation with the seed and the case index in the environment, because a `--filter`
+cannot carry them.
+
+The fixture's own suite is two tests, and both pass — that is the point of the fixture, and the reason a
+passing suite written by the same process is not evidence. Verification runs those two and then generates
+three PHPUnit classes, one per scenario. R-001 fails through
+`CwScSC_ROLLINGTest#test_case0000` with the inputs `{t1=85800000, a1=70000, t2=90000000, a2=70000}` and an
+observed total of 140,000 cents against a limit of 100,000, and R-003 through
+`CwScSC_NEGATIVETest#test_case0000` with `{amount=-10000}` and an observed 40,000 where at least 50,000
+was required. R-002 is discharged by `CwScSC_FEETest`, an executed generated test. Mutation produces eight
+mutants, of which two are killed; the six survivors include `=== -> !==` at `src/WithdrawalLedger.php:45`,
+the calendar-day comparison that no test in the fixture distinguishes from its negation. Static analysis
+reports no finding, and the dependency inventory is 27 packages read from `composer.lock`.
+
+Coverage needs an instrumenting driver, which PHPUnit does not supply itself: with neither Xdebug nor
+PCOV loaded in the interpreter that runs the tests, the phase reports the figure as not measured and names
+the missing driver rather than reporting zero, because a zero is a measurement and a missing driver is
+not. The CI job loads Xdebug so that the coverage phase is exercised there rather than silently absent.
+
+```bash
+./codewitness verify fixtures/php-withdrawal-ledger \
+    --requirements fixtures/php-withdrawal-ledger/requirements.md
+```
+
+The verdict shape is fixed by the fixture's two declared defects and its three scenarios. The counts a
+run prints — executed tests, the coverage figure when a driver is loaded, killed and surviving mutants —
+are that run's own, and are recorded by the end-to-end suite rather than transcribed here.
+
+Two things about the PHP fixture are worth knowing before reading its report. The first is that PHPUnit
+is a Composer dependency, not part of the toolchain: the build phase has to run `composer install`
+before a test can run at all, which is why the fixture's `codewitness.yaml` sets
+`sandbox.allow_network: true` and why a CI job warms the toolchain first — the run is then measuring the
+adapter, not a download. The second is that coverage is reported as not measured unless Xdebug or PCOV
+is loaded for the interpreter that runs the tests; PHP has no instrumentation of its own, and a missing
+driver is an unknown figure rather than a zero.
+
+The fixture needs an interpreter and Composer and nothing else installed, and its `composer.json`
+declares `php: >=8.1`, which is the version floor the adapter reads and records — and the lowest PHPUnit
+11 supports. Beyond that platform requirement it declares one dependency, PHPUnit, in `require-dev`, and
+its committed `composer.lock` is Composer's own resolution record for it: committed on purpose, because a
+lock file is what makes an install reproducible and because only a lock file carries the resolved
+versions an advisory can be a statement about. The ledger itself is plain PHP with no runtime dependency,
+so everything the fixture asks about is in `src/WithdrawalLedger.php` and the only package Composer
+installs is the test tool.
+
 ### `polyglot-service`
 
 One directory holding six languages' projects and a `Gemfile`: a Maven project, a Python package with a
@@ -540,6 +603,7 @@ with the `./codewitness` launcher:
 ./codewitness verify fixtures/csharp-withdrawal-ledger --requirements fixtures/csharp-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/kotlin-withdrawal-ledger --requirements fixtures/kotlin-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/cpp-withdrawal-ledger --requirements fixtures/cpp-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/php-withdrawal-ledger --requirements fixtures/php-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 

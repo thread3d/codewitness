@@ -50,6 +50,17 @@ public record LanguageId(String id) {
      */
     public static final LanguageId CPP = new LanguageId("cpp");
     /**
+     * PHP, installed and tested with Composer and PHPUnit.
+     *
+     * <p>The language is named for the language and not for the package manager, exactly as
+     * {@link #CSHARP} is not called {@code dotnet}: Composer resolves this language's dependencies and
+     * is reported separately as {@link BuildSystemId#COMPOSER}. PHP has no separate compilation step,
+     * but it does have a well defined first failure - a file the interpreter cannot parse - and that is
+     * checked with the interpreter's own parser so a file that does not parse is BLOCKED rather than
+     * reported as a code defect.
+     */
+    public static final LanguageId PHP = new LanguageId("php");
+    /**
      * More than one language, verified together because more than one adapter claimed part of the
      * project. Reported instead of silently naming whichever language happened to be inspected first.
      */

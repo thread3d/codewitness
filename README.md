@@ -106,6 +106,12 @@ or a CMake C++ project:
 ./codewitness verify ./my-cmake-project --requirements requirements.md
 ```
 
+or a PHP project:
+
+```bash
+./codewitness verify ./my-php-project --requirements requirements.md
+```
+
 The language is detected, and a project may be written in several. `LanguageAdapterRegistry.selectAll`
 runs **every** adapter that claims part of the tree — a Java service with a TypeScript frontend is two
 verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
@@ -124,7 +130,8 @@ the file that gave it away — a language that appears nowhere in the report is 
 that is not there. Recognition comes from `LanguageDetector` implementations discovered like adapters are,
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
-`language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp`, `kotlin` or `cpp`
+`language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp`, `kotlin`,
+`cpp` or `php`
 *narrows* the run
 to that one adapter instead of being merged with the automatic choice. It is not forced: the named adapter
 is used when it exists and actually claims the project, and otherwise the run falls back to
@@ -159,7 +166,13 @@ package inventory is read from `conan.lock`, `vcpkg.json` and the CMake files, a
 scenarios become one self-contained C++ translation unit each, compiled with the arguments the
 project's own build recorded and linked against the archives it produced. A tree built by a
 hand-written `Makefile` or by Meson is recognised and reported as present and not verified, because
-this adapter drives CMake and does not guess at a build it does not understand.
+this adapter drives CMake and does not guess at a build it does not understand. PHP support needs only
+an interpreter and Composer: a tree with a `composer.json` is linted with the interpreter's own parser,
+its dependencies are resolved with `composer install`, its PHPUnit suite is run and read from the JUnit
+report PHPUnit writes, and generated scenarios become ordinary PHPUnit `TestCase` classes in the tree's
+own test root. PHPUnit is the one test tool here that is not part of the toolchain — it is a Composer
+dependency, so it exists only after the build has resolved it, and a project that has none is reported
+as having no test runner rather than quietly passing.
 
 ---
 
@@ -494,7 +507,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp
+  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php
 
 verification:
   timeout: 15m           # per build or test command
@@ -558,7 +571,7 @@ also indexed in `<project>/.codewitness/codewitness.db` (SQLite).
 A report is only useful if it can be reproduced, so every run records: the project identifier, the
 source revision, the CodeWitness version, the runtime version (the Java version for a Java project,
 the .NET SDK version for a C# one, the Kotlin release for a Kotlin one, the CMake version for a C and
-C++ one), the build tool and its version, the verification configuration
+C++ one, the PHP version for a PHP one), the build tool and its version, the verification configuration
 fingerprint, every tool version, the language model identifier if any, the requirements hash, the
 isolation level, timestamps and every command that was executed. Evidence records carry their command
 and inputs, and counterexamples carry a replayable command.
@@ -625,6 +638,9 @@ codewitness/
 ├── codewitness-adapter-cpp/     C and C++ projects: CMake configure and build, clang/gcc/MSVC
 │                               diagnostics, CTest with JUnit parsing, heuristics, security, gcov
 │                               coverage, bounded source mutation, Conan/vcpkg/CMake inventory
+├── codewitness-adapter-php/     PHP projects: the interpreter's own parse and composer install,
+│                               PHPUnit with JUnit parsing, heuristics, security, Xdebug/PCOV
+│                               coverage, bounded source mutation, Composer/Packagist inventory
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -637,8 +653,8 @@ engine. Recognising a language CodeWitness has no adapter for is the same shape:
 `dev.codewitness.core.spi.LanguageDetector`, discovered the same way, and the detectors for the languages
 nothing here implements live in `codewitness-language-detectors`. A few platform defaults do remain in core
 — the `LanguageId` and `BuildSystemId` constants (`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`,
-`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `CMAKE`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
-needs, and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
+`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `CMAKE`, `COMPOSER`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
+needs (`PACKAGIST` for PHP among them), and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
 vocabulary and platform defaults, not language logic, and the engine never switches on a language.
 Nothing in core names a language it cannot already verify.
 
@@ -654,15 +670,18 @@ mvn -pl codewitness-core test   # one module
 ```
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
-plus Python 3, Cargo, Go, Node, the .NET SDK and CMake with CTest for the Python, Rust, Go,
-TypeScript, JavaScript, C# and C/C++ fixtures, and network access the first time, because it builds
-real projects. The Kotlin fixture
+plus Python 3, Cargo, Go, Node, the .NET SDK, CMake with CTest and PHP with Composer for the Python,
+Rust, Go, TypeScript, JavaScript, C#, C/C++ and PHP fixtures, and network access the first time, because
+it builds real projects. The Kotlin fixture
 needs no toolchain of its own beyond Maven: it is a Maven build with `kotlin-maven-plugin`, so the
 compiler, the standard library and Surefire are resolved from a repository the way a dependency is. The C# fixture
 needs no toolchain of its own beyond the SDK: its sandbox config sets `allow_network: false`, and it works because the
 SDK's test host packages are already in the machine's NuGet cache on any machine that has run
 `dotnet test` before. The C and C++ fixture needs CMake and CTest and nothing else — it fetches no
-package — so it builds and tests without reaching for anything. An end-to-end test is skipped rather than
+package — so it builds and tests without reaching for anything. The PHP fixture needs an interpreter
+and Composer and nothing else installed: PHPUnit is a Composer dependency rather than a part of the
+toolchain, so the first run resolves it from Packagist and the fixture allows network access for that
+reason, exactly as a real project's `composer install` needs it. An end-to-end test is skipped rather than
 failed when its toolchain is absent.
 
 ---
@@ -1121,14 +1140,120 @@ The honest limits of C and C++ support are:
 - the heuristic rule table is intentionally small and has a known false-positive profile, exactly like
   every other adapter's.
 
+The PHP adapter is implemented and exercised end to end as well
+(`fixtures/php-withdrawal-ledger`):
+
+- detection of PHP trees by what a PHP project announces itself with — a `composer.json`, a
+  `phpunit.xml` or `phpunit.xml.dist`, a `Pest.php`, or a Laravel `artisan` file — with the conventional
+  `src/`, `app/` or `lib/` source layout and the project root as the last resort, a `tests/`, `test/` or
+  `spec/` tree when it holds `.php` files, the PHP version the project declares in `composer.json`'s
+  `require.php` alongside the interpreter's own version from the probe, and the test framework named
+  from what the project declares (`phpunit` or `pest`). `vendor/` is excluded from the source walk, as
+  is `.phpunit.cache`, because a copy of somebody else's sources and a previous run's results are not
+  the project's own code. A `composer.json` that cannot be parsed is recorded as a detection warning
+  rather than silently treated as absent;
+- a build in two parts, because PHP has no separate compilation step. The interpreter's own parser runs
+  over every source file through `token_get_all($source, TOKEN_PARSE)` and every syntax error is read
+  from the single line per diagnostic the lint program prints, so a project that does not parse is
+  `BLOCKED` and never a code defect. When `composer.json` exists the build then runs
+  `composer install --no-interaction --no-progress --no-scripts --prefer-dist`, which is what
+  materialises `vendor/` and therefore what makes PHPUnit exist at all; `--no-scripts` because running a
+  project's arbitrary install scripts is not something a verifier does. A Composer failure is a failed
+  **build**, with Composer's own output in the notes, never a defect in the code;
+- existing tests through PHPUnit, with the report at `<artifacts>/php/tests/junit.xml`, deleted before
+  the run. PHPUnit is resolved at test time rather than from the inspection probe, and that is the one
+  place PHP differs structurally from every other adapter: PHPUnit is a Composer dependency, so
+  `vendor/bin/phpunit` only exists *after* the build phase has run `composer install`. The adapter looks
+  for it in that order — `<project>/vendor/bin/phpunit` first, because that is the binary this run's own
+  build produced — then the project-local or `PATH` binary the probe recorded, then `phpunit.phar`
+  beside the interpreter, invoking any `.phar` through the interpreter. With none of the three the
+  phase returns "not executed" naming PHPUnit, because PHP has no standard-library test framework and
+  "PHPUnit or nothing" is the honest answer;
+- results parsed from PHPUnit's JUnit XML, which carries a test class's name twice: `class` in PHP's own
+  spelling (`App\Tests\LedgerTest`, backslashes) and `classname` in JUnit's (`App.Tests.LedgerTest`,
+  dots). The parser reads the dotted one and normalises any backslash to a dot, which is exactly the
+  identifier `RequirementCodeMapper` derives from the file's `namespace` declaration, so a test is
+  attributed to the requirement that names it without either side guessing. Anything that is not a pass
+  or a failure is recorded as skipped, because a case that did not run is not evidence, and a malformed
+  report becomes an error case rather than a silent skip. A timeout is checked before the report is
+  looked for at all, so a run that was killed can never be read as a run that found nothing;
+- static analysis over a PHP rule table (`php-heuristics`, ids `CW-PHP-SEC-*`, `CW-PHP-CORRECT-*`,
+  `CW-PHP-REL-*` and `CW-PHP-TEST-001`) read through one literal-aware `PhpSourceScan` that knows single
+  and double quotes, heredoc and nowdoc strings, `//`, `#` and `/* */` comments and backslash escapes,
+  so a rule sees the code and not a literal that happens to look like code. A separate security rule set
+  (`php-security`) is filtered out of the same table, so a rule is defined once and reported under one
+  id, and each finding carries its file, its line and its rule id;
+- coverage through PHPUnit's Clover report (provider id `php-coverage`, `--coverage-clover`), asked for
+  **only** when the probe found a driver loaded — Xdebug or PCOV — and counted over the project's own
+  files only. PHP has no coverage
+  instrumentation of its own, so without one of those two extensions the figure is unknowable, and the
+  report says "not measured" and names the missing driver rather than reporting zero, which would read
+  as "nothing is covered". That distinction is the whole point of the phase: a zero is a measurement and
+  a missing driver is not;
+- a dependency inventory (`php-dependencies`) read from `composer.json` (`require` and `require-dev`)
+  and, when it exists, from `composer.lock` (`packages` and `packages-dev`), every entry carrying
+  `PackageCoordinate.packagist(name, version)` and so queryable as the Packagist ecosystem. Only a lock
+  file carries the version a resolution actually selected; a `require` entry that is a range, a wildcard
+  or a branch alias (`^11.5`, `*`, `dev-main`) is reported **unresolved** rather than guessed, and the
+  `platform`, `php` and `ext-*` entries are not packages and are skipped. Manifests are read directly
+  rather than through a tool, and the note says which of the two sources was read;
+- mutation testing through the shared `TextMutator` and a `PhpLexis` (provider id `php-text-mutation`,
+  report tool `php-text`) that knows what a text mutator gets wrong in PHP: `.` is string concatenation
+  and not a number separator, `===` and `!==` are not `==` and `!=`, and a single- or double-quoted
+  string, a heredoc, a nowdoc or a backtick shell string is not code. The run is bounded — at most
+  sixteen mutants over at most twenty files, within the configured mutation budget — each mutant is
+  checked with the **same** lint script
+  the build uses so one that does not parse is discarded rather than counted as killed, every file is
+  restored in a `finally`, and surviving mutants are reported loudly without ever changing a verdict;
+- generated adversarial tests from declared scenarios: the fragments are PHP, `${name}` becomes the PHP
+  variable `$name`, and the generated test is a PHPUnit `TestCase` class named `CwSc<ScenarioId>Test`
+  (every character of the id that is not a letter or a digit becomes an underscore, so `SC-ROLLING`
+  generates `CwScSC_ROLLINGTest`) written into the project's own test root, because a PHP project's
+  autoloader and PHPUnit
+  configuration are what make a class runnable and there is nowhere else PHPUnit would find it. A
+  failing case carries the single `CODEWITNESS_COUNTEREXAMPLE|…` line the engine parses into the JUnit
+  failure text, `CODEWITNESS_SEED` and `CODEWITNESS_CASE` pin one case for replay, and the reproduction
+  command is a real `php vendor/bin/phpunit --filter 'CwSc…Test'` invocation carrying them.
+
+The honest limits of PHP support are:
+
+- PHPUnit is a Composer dependency and not part of the toolchain. It exists only after the build has run
+  `composer install`, so a project that declares no PHPUnit and has none on the machine is reported as
+  having no test runner, and its requirements stay `UNVERIFIED` — there is no standard-library runner to
+  fall back on, the way Python has `unittest` and Rust has libtest;
+- that build step resolves packages from Packagist, so the first run of a project needs network access
+  unless its `vendor/` directory is already populated. CodeWitness installs nothing on its own; it runs
+  the install the project's own manifest asks for;
+- Pest is recognised from `Pest.php` or a `pest` entry in `composer.json` and named in the report, but the
+  test phase drives PHPUnit. A project whose suite is Pest's is detected and reported as such, and its
+  tests are not run by this adapter;
+- coverage is reported as not measured unless Xdebug or PCOV is loaded for the interpreter that runs the
+  tests, and it is never reported as zero: a missing driver means the figure is unknown, not empty. The
+  instrumented run also costs what an instrumented run costs, which is why the phase is bounded by the
+  same per-command timeout as everything else;
+- a dependency version that is a Composer range, a wildcard or a branch alias is reported unresolved,
+  because it is not a version an advisory can be a statement about, and the report says the scan could
+  not query it rather than implying the package is clean;
+- mutation uses a deliberately small operator set rather than a dedicated framework such as Infection,
+  and only operators surrounded by whitespace are considered, so an unformatted expression may be
+  skipped. A surviving mutant means nobody checked that behaviour; it never changes a verdict;
+- a scenario declared `mode: concurrent` is executed sequentially, and the generated file says so in a
+  `LIMIT:` comment: PHP's standard build has no threads, so there is no barrier to release and no race
+  to run. Such a scenario is evidence about the sequence of its steps and nothing about interleaving;
+- a tree that holds `.php` sources but no `composer.json` is still claimed and linted, but there is no
+  manifest for Composer to install from, so `vendor/` cannot be produced and there is no test runner
+  unless one is already on the machine;
+- the heuristic rule table is intentionally small and has a known false-positive profile.
+
 Implemented but limited, and reported as such:
 
 - **Dependency advisories** are checked only when you turn the scan on. It covers every ecosystem the
   adapters can inventory at a resolved version: Maven (from `dependency:list`), npm and PyPI and
   crates.io (from `package-lock.json`, `poetry.lock` and `Cargo.lock`, or from requirements pinned with
   `==`), Go (from the versions `go.mod` selects), NuGet (from `packages.lock.json`, or from
-  `PackageReference` versions and central `PackageVersion` entries when there is no lock file) and
-  ConanCenter (from `conan.lock`). A
+  `PackageReference` versions and central `PackageVersion` entries when there is no lock file),
+  ConanCenter (from `conan.lock`) and Packagist (from `composer.lock`, or from the declared `require`
+  and `require-dev` ranges when there is no lock file, where a range is left unresolved). A
   dependency an inventory reports without a resolved version cannot be asked about, so the report says
   the scan could not query it rather than implying it is clean. When the scan is on, CodeWitness asks
   OSV which of the resolved dependencies are

@@ -36,6 +36,14 @@ fixtures/**/TestResults/
 # developer who opens it in Gradle or IntelliJ gets a .kotlin directory and a Gradle build directory.
 fixtures/**/.kotlin/
 
+# PHP dependencies and caches. The PHP fixture's `composer.lock` *is* committed, because Composer's
+# convention is that an application pins its dependencies and its lock file is what makes a later
+# `composer install` reproduce the same tree; vendor is the result of that install, and a developer who
+# runs it by hand should not commit it. The two PHPUnit caches are per-machine result caches.
+fixtures/**/vendor/
+fixtures/**/.phpunit.cache/
+fixtures/**/.phpunit.result.cache/
+
 # CodeWitness run data produced inside the repository
 .codewitness/
 **/.codewitness/

@@ -172,6 +172,15 @@ public final class RequirementCodeMapper {
             // enough to derive the same identifier the TRX report will carry.
             return dotnetClassName(file, stripExtension(fileName));
         }
+        if (extension.equals("php")) {
+            // PHPUnit reports a test case under the test class the file declares. Its JUnit XML carries
+            // that name twice: `class` in PHP's own spelling (App\Tests\LedgerTest, backslashes) and
+            // `classname` in JUnit's (App.Tests.LedgerTest, dots). The adapter's report parser reads
+            // `classname` and normalises a backslash to a dot, so the mapping derives the same
+            // dotted identifier from the file's namespace declaration. The class is the file's own name
+            // by the convention every PHP project follows, so reading the file's namespace is enough.
+            return phpClassName(file, stripExtension(fileName));
+        }
         for (Path root : roots) {
             if (root != null && file.startsWith(root)) {
                 String relative = root.relativize(file).toString().replace(java.io.File.separatorChar, '.')
@@ -220,6 +229,39 @@ public final class RequirementCodeMapper {
         }
         String namespace = matcher.group(1);
         return namespace.isEmpty() ? fallback : namespace + "." + fallback;
+    }
+
+    /** A PHP namespace declaration: {@code namespace App\Tests;} or {@code namespace App\Tests}. */
+    private static final java.util.regex.Pattern PHP_NAMESPACE =
+            java.util.regex.Pattern.compile("(?m)^\\s*namespace\\s+([A-Za-z_][A-Za-z0-9_\\\\]*)");
+
+    /**
+     * @return the name PHPUnit reports the test class in {@code file} under, in the dotted form the
+     *     adapter's report parser records: the namespace the file declares followed by the file's own
+     *     name, or just the file's name when the class is in the global namespace.
+     *
+     * <p>PHP spells a qualified name with backslashes ({@code App\Tests\LedgerTest}); PHPUnit's JUnit XML
+     * carries both that spelling in {@code class} and the JUnit-conventional dotted spelling in
+     * {@code classname}, and the parser reads the latter and normalises any backslash to a dot. Deriving
+     * the dotted form here is what makes the mapping agree with the report rather than merely resembling
+     * it. A file that declares several namespaces maps to the first one, and a file whose class is not
+     * named after it maps to the file name; in either case the mapping degrades to an identifier that
+     * simply does not match a reported test, and the report says the test was not mapped rather than
+     * attributing it to a requirement it may not exercise.
+     */
+    static String phpClassName(Path file, String fallback) {
+        String content;
+        try {
+            content = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException _) {
+            return fallback;
+        }
+        java.util.regex.Matcher matcher = PHP_NAMESPACE.matcher(content);
+        if (!matcher.find()) {
+            return fallback;
+        }
+        String namespace = matcher.group(1);
+        return namespace.isEmpty() ? fallback : namespace.replace('\\', '.') + "." + fallback;
     }
 
     /**

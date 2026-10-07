@@ -16,11 +16,13 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ./demo.sh             # or follow the steps below
 ```
 
-The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin
-and C/C++ sections at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for TypeScript,
-18.17+ for JavaScript), the .NET SDK (8+), Maven with network access the first time and CMake with CTest
-respectively, and nothing else: the Kotlin section is a Maven build, so `kotlinc` and the standard library
-arrive as dependencies, and the C and C++ section fetches no package at all.
+The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin,
+C/C++ and PHP fixtures at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for
+TypeScript, 18.17+ for JavaScript), the .NET SDK (8+), Maven with network access the first time, CMake
+with CTest and an interpreter with Composer respectively, and nothing else: the Kotlin section is a
+Maven build, so `kotlinc` and the standard library arrive as dependencies, the C and C++ section fetches
+no package at all, and the PHP section's PHPUnit arrives from Packagist as a Composer dependency rather
+than as part of the toolchain.
 
 ## 1. What is in the project?
 
@@ -516,3 +518,63 @@ Only CMake is driven, which is the one thing about C and C++ support worth knowi
 a tree: a `CMakeLists.txt` declaring a `project()` and at least one C or C++ source is claimed and
 verified, while a tree built by a hand-written `Makefile` or by Meson is recognised and reported as
 present and not verified. Nothing is guessed at a build this adapter does not drive.
+
+## 16. The same thing for PHP
+
+The PHP fixture is the same ledger once more, this time as a Composer project with PHPUnit. It needs an
+interpreter and Composer and nothing else installed, but it is the one fixture here whose test tool is a
+project dependency rather than a tool of the machine: PHPUnit comes from Packagist, so the build phase
+has to run `composer install` before a test can run at all, which is why the fixture's sandbox
+configuration allows network access and why the CI job warms the toolchain first. The run is then
+measuring the adapter, not a download.
+
+```bash
+./codewitness verify fixtures/php-withdrawal-ledger \
+    --requirements fixtures/php-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  CwScSC_ROLLINGTest   R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}
+                              expected: $observation <= 100000   actual: 140000
+  CwScSC_NEGATIVETest  R-003  inputs: {amount=-10000}
+                              expected: $observation >= 50000    actual: 40000
+
+Tests
+  2 executed, 2 passed, 0 failed, 0 skipped  (parsed from the PHPUnit JUnit XML report)
+
+Coverage
+  coverage not measured (no coverage driver is loaded in the PHP interpreter)
+
+Mutation testing
+  8 mutants, 2 killed, 6 survived, score 25.0%
+```
+
+The scenario fragments are PHP. `${name}` becomes the PHP variable `$name`, `setup` is PHP statements run
+once per case, `observation` is a PHP expression assigned to `$observation`, and `invariant` is the PHP
+boolean expression that must hold — in the fixture, `$observation <= 100000`. The generated tests are
+PHPUnit `TestCase` classes written into the project's own test root, because a PHP project's autoloader
+and PHPUnit configuration are what make a class runnable; the replay command is a real
+`php vendor/bin/phpunit --filter 'CwScSC_ROLLINGTest'` invocation with the recorded seed and case in the
+environment, because a `--filter` cannot carry them.
+
+Existing tests are read from the JUnit report `--log-junit` writes. PHPUnit gives a test class's name
+twice — in PHP's own backslash spelling and in JUnit's dotted one — and the parser reads the dotted
+`classname`, which is the identifier the requirement mapper derives from the file's `namespace`
+declaration. Coverage comes from PHPUnit's Clover report when Xdebug or PCOV is loaded for the
+interpreter and is reported as not measured, with the missing driver named, when neither is: PHP has no
+instrumentation of its own, and a missing driver is an unknown figure rather than a zero. Mutation runs
+through the adapter's own text mutator, whose lexis knows that `.` is string concatenation and not a
+number separator and that `===` is not `==`.
+
+The fixture's two defects are the rolling-window bug behind R-001 and the accepted negative amount
+behind R-003, its fee scenario discharges R-002 through an executed generated test, and R-004 declares no
+scenario, so it stays `UNVERIFIED`. PHPUnit is also the thing to know before pointing this at a real
+project: a project that declares no PHPUnit and has none on the machine is reported as having no test
+runner rather than as passing, because PHP has no standard-library test framework to fall back on.

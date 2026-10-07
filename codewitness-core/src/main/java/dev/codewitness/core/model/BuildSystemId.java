@@ -35,6 +35,16 @@ public record BuildSystemId(String id) {
      * the language id because it is the build system, not the language.
      */
     public static final BuildSystemId CMAKE = new BuildSystemId("cmake");
+    /**
+     * Composer, driven by {@code composer.json} and {@code composer.lock}, resolving PHP packages from
+     * Packagist into {@code vendor}.
+     *
+     * <p>PHP has one package manager in practice, so this build system is what every PHP tree the
+     * adapter claims is reported with. The Composer executable is recorded in the project attributes
+     * rather than encoded here, because a project may pin its own copy or ship only a
+     * {@code composer.phar}.
+     */
+    public static final BuildSystemId COMPOSER = new BuildSystemId("composer");
     public static final BuildSystemId NONE = new BuildSystemId("none");
     /** More than one build system, because more than one language adapter claimed part of the project. */
     public static final BuildSystemId POLYGLOT = new BuildSystemId("polyglot");

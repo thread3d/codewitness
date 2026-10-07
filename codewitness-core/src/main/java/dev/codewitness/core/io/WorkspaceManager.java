@@ -45,7 +45,13 @@ public final class WorkspaceManager {
             // hand-written directory called CMakeFiles would be shadowed by this, which is the price of
             // not copying a stale configure into the workspace.
             "CMakeFiles", "_deps", "vcpkg_installed", "cmake-build-debug", "cmake-build-release",
-            "cmake-build-relwithdebinfo", "cmake-build-minsizerel", ".cache");
+            "cmake-build-relwithdebinfo", "cmake-build-minsizerel", ".cache",
+            // Composer's install tree. vendor holds the packages a lock file resolved to and, like
+            // node_modules, is a copy of somebody else's sources rather than the project's own; the
+            // adapter's build restores it with `composer install`. The two PHPUnit caches hold absolute
+            // paths and result data belonging to the machine that wrote them, so they are not carried
+            // into the workspace either - a stale one would make a fresh run look like a previous one.
+            "vendor", ".phpunit.cache", ".phpunit.result.cache");
 
     private static boolean isExcludedDirectory(String name) {
         return EXCLUDED_DIRECTORIES.contains(name) || name.endsWith(".egg-info");

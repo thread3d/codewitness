@@ -51,8 +51,9 @@ flowchart TD
     CSHARP["C# / .NET<br/>dotnet build · dotnet test (TRX) · Roslyn · coverlet · xUnit"]
     KOTLIN["Kotlin<br/>Gradle · Maven · kotlinc · JUnit · JaCoCo"]
     CPP["C/C++<br/>CMake · ctest · gcov · clang · gcc"]
+    PHP["PHP<br/>composer · phpunit · xdebug · pcov"]
 
-    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet · kotlinc<br/>cmake · ctest · gcov · clang · gcc"]
+    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet · kotlinc<br/>cmake · ctest · gcov · clang · gcc · php · composer · phpunit"]
 
     CLI ==> ENGINE ==> MODEL ==> STRATEGIES ==> SPI
     SPI ==> JAVA
@@ -64,6 +65,7 @@ flowchart TD
     SPI ==> CSHARP
     SPI ==> KOTLIN
     SPI ==> CPP
+    SPI ==> PHP
     JAVA --> TOOLS
     PYTHON --> TOOLS
     RUST --> TOOLS
@@ -73,6 +75,7 @@ flowchart TD
     CSHARP --> TOOLS
     KOTLIN --> TOOLS
     CPP --> TOOLS
+    PHP --> TOOLS
 ```
 
 Enforced by module boundaries, not by convention:
@@ -89,6 +92,7 @@ Enforced by module boundaries, not by convention:
 | `codewitness-adapter-csharp` | core | C#, .NET SDK, `dotnet build`/`dotnet test`, Roslyn diagnostics, xUnit, coverlet |
 | `codewitness-adapter-kotlin` | core, adapter-support | Kotlin, Gradle, Maven, `kotlinc` diagnostics, JUnit reports, JaCoCo coverage, source mutation |
 | `codewitness-adapter-cpp` | core, adapter-support | C and C++, CMake, CTest, clang/gcc/MSVC diagnostics, gcov coverage, source mutation, Conan/vcpkg/CMake inventory |
+| `codewitness-adapter-php` | core, adapter-support | PHP, the interpreter's own parse, Composer, PHPUnit, Xdebug/PCOV coverage, source mutation, Packagist inventory |
 | `codewitness-storage` | core | SQLite persistence |
 | `codewitness-report` | core, Jackson | JSON and HTML rendering |
 | `codewitness-cli` | all of the above | argument parsing and wiring |
@@ -109,7 +113,7 @@ them.
    build wrapper, runtime version (the language's project detector: `JavaProjectDetector`,
    `PythonProjectDetector`, `RustProjectDetector`, `GoProjectDetector`, `TypeScriptProjectDetector`,
    `JavaScriptProjectDetector`, `CSharpProjectDetector`, `KotlinProjectDetector`,
-   `CppProjectDetector`).
+   `CppProjectDetector`, `PhpProjectDetector`).
 2. **workspace** — the project is copied into the run directory, excluding build output, VCS metadata
    and previous run data, with executable bits restored on `mvnw`/`gradlew`. `bin` and `obj` are
    excluded too, because `obj/project.assets.json` holds absolute package paths belonging to the
@@ -119,7 +123,8 @@ them.
    excluded for the same reason: they are absolute-path-laden leftovers of a configure that ran
    somewhere else. A `build` directory of the project's own is already excluded by name from the
    copy, as are `third_party`, `vendor`, `extern`, `external`, `conan` and `out` from the C and C++
-   adapter's own source scan.
+   adapter's own source scan, and PHP's `.phpunit.cache` and `.phpunit.result.cache`, because a previous
+   run's results are not the project's sources.
 3. **build** — `test-compile`/`testClasses` for Java, a syntax compile of every source file for
    Python, `cargo build --all-targets` for Rust, `go build ./...` for Go, `tsc --noEmit` (or a Node
    type-stripping syntax check when no compiler is installed) for TypeScript, `node --check` over
@@ -127,14 +132,21 @@ them.
    and no type check anywhere in the pipeline — and `dotnet build` for C#, over the tree's single
    solution or over each project when there is no single solution. Restore is left enabled and
    `-p:NuGetAudit=false` is passed on every command, because CodeWitness runs its own advisory scan
-   and NuGet's own audit would make each build depend on api.nuget.org. Diagnostics are parsed from
-   and `testClasses`/`test-compile` for Kotlin, which is how `kotlinc` is invoked at all — Kotlin's
-   compiler diagnostics are read in the four shapes it prints them. For C and C++ it is
+   and NuGet's own audit would make each build depend on api.nuget.org. Kotlin is compiled by its own
+   build tool — `testClasses` for a Gradle build and `test-compile` for a Maven one, which is how
+   `kotlinc` is invoked at all — and its compiler diagnostics are read in the four shapes it prints
+   them. For C and C++ it is
    `cmake -S <src> -B <build> -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug` followed by
    `cmake --build <build> --parallel`, in a build directory inside the run: clang and gcc diagnostics
    (`file:line:col: error: message`, and gcc's `file:line:` without a column), MSVC's
    `file(line,col): error C1234:` and a linker failure with no position are all read, so a compile
-   error is `BLOCKED` here too. A failure ends verification here,
+   error is `BLOCKED` here too. PHP has no compilation step of its own, so its build is a lint of every
+   source file with the interpreter's own parser (`token_get_all(…, TOKEN_PARSE)`) followed, when a
+   `composer.json` exists, by `composer install --no-interaction --no-progress --no-scripts
+   --prefer-dist` — the command that materialises `vendor/` and therefore the only reason PHPUnit can
+   exist at all. A Composer failure is a failed build with Composer's own output in the notes, and
+   `--no-scripts` because running a project's arbitrary install scripts is not a verifier's job. A
+   failure ends verification here,
    as `BLOCKED`.
 4. **tests** — stale reports are deleted, the suite is run, and results are parsed from the raw XML
    reports, not from console output. Rust has no XML report, so results are parsed from libtest's
@@ -150,13 +162,22 @@ them.
    own test task and reads the same JUnit XML a Java project produces, because Kotlin tests run on the
    JVM under the same reporting machinery. C and C++ run
    `ctest --test-dir <build> --output-junit <file> --output-on-failure` and read the JUnit report CTest
-   writes, which names each test the way it was registered with `add_test`.
+   writes, which names each test the way it was registered with `add_test`. PHP runs PHPUnit, resolved at
+   test time rather than at inspection because it is a Composer dependency this run's own build has just
+   installed, with `--log-junit` and `--do-not-cache-result`, and reads the JUnit XML it writes. PHPUnit
+   carries a test class's name twice, in PHP's own backslash spelling and in JUnit's dotted one; the
+   parser reads the dotted `classname` and normalises any backslash to a dot, which is the identifier
+   `RequirementCodeMapper` derives for the same file from its `namespace` declaration. When no PHPUnit
+   exists at all the phase reports the tests as not executed and names it, because PHP has no
+   standard-library test framework to fall back on.
 5. **static analysis** — compiler diagnostics plus the adapter's heuristic rule table. For C# that
    is the Roslyn diagnostics the build phase already produced, plus a C# rule table; for Kotlin it is
    a Kotlin rule table read through one scanner that knows the language's literals; for C and C++ it
    is one rule table read through one `CppSourceScan` that offers each rule a code view, a
    literal-masked view and a directive view, so a rule sees the literals it is about and the
-   statements a literal would otherwise hide.
+   statements a literal would otherwise hide; for PHP it is a rule table read through one
+   literal-aware `PhpSourceScan` that knows single and double quotes, heredoc and nowdoc strings,
+   `//`, `#` and `/* */` comments and backslash escapes.
 6. **security** — the same rule table, filtered to security rules, reported separately.
 7. **dependencies** — a resolved inventory per language, read from the lock file when there is one
    (`package-lock.json`, `poetry.lock`, `Cargo.lock`, `packages.lock.json`) or from the versions the
@@ -166,7 +187,10 @@ them.
    `conan.lock`, whose resolved graph is queried as the `ConanCenter` ecosystem, `vcpkg.json`, whose
    versions are declared floors and so are reported without a version, and the `FetchContent_Declare`
    and `find_package` calls in the CMake files, where a git tag is not a released version and a system
-   package's version is a property of the machine. Which
+   package's version is a property of the machine. For PHP the sources are `composer.json` and, when it
+   exists, `composer.lock`, every entry queried as the `Packagist` ecosystem, with a version that is a
+   range, a wildcard or a branch alias reported unresolved rather than guessed and the `platform`,
+   `php` and `ext-*` entries skipped because they are not packages. Which
    dependencies exist is a separate question from whether any of them has an advisory, and the report
    answers the two separately.
 8. **coverage** — the adapter's coverage provider (JaCoCo for Java, coverage.py for Python,
@@ -177,14 +201,18 @@ them.
    reporting zero. C and C++ coverage is `gcov`, measured over a second configure that adds
    `--coverage` to `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS` and the project's own CTest suite run over
    it; the figures cover the project's own sources only, with the reports for headers nobody in the
-   project wrote excluded and the note saying how many were.
+   project wrote excluded and the note saying how many were. PHP coverage is PHPUnit's Clover report,
+   and PHP has no instrumentation of its own: when the probe found no Xdebug and no PCOV loaded the
+   phase reports the figure as not measured and names the missing driver, never as zero.
 9. **mutation** — the adapter's mutation tester (PIT for Java, a bounded AST mutator for Python, a
-   bounded source-operator mutator for Rust, Go, TypeScript, JavaScript, C#, Kotlin and C and C++),
-   with stale reports deleted first. C# re-runs each mutant with `dotnet test --no-restore`; Kotlin
-   re-runs the project's own test goal, because PIT's bytecode mutants do not map back to Kotlin
+   bounded source-operator mutator for Rust, Go, TypeScript, JavaScript, C#, Kotlin, C and C++ and
+   PHP), with stale reports deleted first. C# re-runs each mutant with `dotnet test --no-restore`;
+   Kotlin re-runs the project's own test goal, because PIT's bytecode mutants do not map back to Kotlin
    source lines; C and C++ re-run each mutant through the platform shell, because CMake has no single
    invocation that builds and tests in one command, and decide viability by whether CTest reached its
-   own `Total Test time` summary rather than by matching failure words.
+   own `Total Test time` summary rather than by matching failure words. PHP re-runs each mutant through
+   PHPUnit and decides viability with the same lint program the build uses, so a mutant that does not
+   parse is discarded rather than counted as killed, and every file is restored in a `finally`.
 10. **obligation planning** — scenarios declared by the user, properties derived from requirement
     text, or an explicit "nothing can be attempted here" obligation.
 11. **strategies** — per requirement: existing tests, static analysis, generated tests, mutation,
@@ -240,7 +268,10 @@ time as present and unverifiable. What remains on that path is F# and Visual Bas
 recognised and still reported as unverifiable. `CppLanguageDetector` declares the same for `cpp`, so a
 CMake tree the C and C++ adapter verified is not described twice, and what remains for it is a C or
 C++ tree built by a hand-written `Makefile` or by Meson, which is recognised and reported as
-unverifiable rather than passed over.
+unverifiable rather than passed over. `PhpLanguageDetector` declares the same for `php`: it used to
+stand in for a language CodeWitness had no adapter for, and now it names PHP only for a tree the
+adapter does not claim, so a PHP project that was verified is not described a second time as
+unverifiable and one that was not is still reported rather than passed over.
 
 ## 4. The verdict rules, and why
 
@@ -294,7 +325,10 @@ failures through a single structured line, `CODEWITNESS_COUNTEREXAMPLE|case=…|
 which the engine parses — that is why a counterexample contains data rather than just a stack trace.
 A C and C++ generated test is one self-contained program that prints that line to standard output and
 exits non-zero; CTest records `Failed` as the failure message with the program's output beside it in
-`system-out`, which is why the CTest report parser joins the two.
+`system-out`, which is why the CTest report parser joins the two. A PHP generated test is a PHPUnit
+`TestCase` method whose failure message carries the same line, which is where the JUnit report parser
+reads it from — the protocol is one line in every language, and only the place it is read from
+differs.
 
 ## 6. Requirements, obligations and the mapping problem
 
@@ -314,16 +348,21 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
 - a source or test file belongs to a requirement when the requirement's id appears in it, or when the
   requirement declares `paths:`/`tests:` explicitly. The extensions that count as source come from the
   adapter (`sourceExtensions`), so the same rule works for `.java` files, Python modules, Rust files,
-  Go files, TypeScript files, JavaScript files, C# files, Kotlin files and C and C++ files; Go adds one refinement,
-  because its tests
+  Go files, TypeScript files, JavaScript files, C# files, Kotlin files, C and C++ files and PHP files;
+  Go adds one refinement, because its tests
   live beside the code rather than in a separate tree, so only `*_test.go` files in a Go test tree are
   treated as tests;
 - a mutation location is mapped to its source file path, whether the tool reports a Java class name,
   a Python file, a Rust file, a Go file, a TypeScript file, a JavaScript file, a C# file, a Kotlin
-  file or a C or C++ file;
+  file, a C or C++ file or a PHP file;
 - a test declared in a requirement is matched by the identifier the language's own report uses, which
   is why `RequirementCodeMapper` derives a .NET test class identifier as `<namespace>.<file stem>` —
-  the shape of the TRX `className` — the same way it already special-cases Go and Node;
+  the shape of the TRX `className` — the same way it already special-cases Go and Node. PHP is the same
+  problem in a different spelling: PHPUnit's JUnit report gives a test class twice, as `class` in PHP's
+  own backslash form and as `classname` in JUnit's dotted form, and the adapter's parser records the
+  dotted one. The mapper therefore derives `Namespace.Class` from the file's own `namespace`
+  declaration and writes the separators as dots, so the identifier the report carries and the
+  identifier derived from the file agree rather than merely resemble each other;
 - anything unmapped stays unmapped and the report says so. CodeWitness never silently attributes a
   passing test to a requirement it does not mention.
 
@@ -334,8 +373,8 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
 providers. The engine needs no change: it selects an adapter by asking each one whether it supports
 the project, and never switches on a language string. `codewitness-adapter-python`,
 `codewitness-adapter-rust`, `codewitness-adapter-go`, `codewitness-adapter-typescript`,
-`codewitness-adapter-javascript`, `codewitness-adapter-csharp`, `codewitness-adapter-kotlin` and
-`codewitness-adapter-cpp` are the worked examples: each reuses the whole pipeline and adds only
+`codewitness-adapter-javascript`, `codewitness-adapter-csharp`, `codewitness-adapter-kotlin`,
+`codewitness-adapter-cpp` and `codewitness-adapter-php` are the worked examples: each reuses the whole pipeline and adds only
 detection, tool providers and a generator. A language that shares a build tool with another one — Kotlin with Java, over Gradle and
 Maven — has to claim by *source language* as well as by build system, because two adapters claiming
 one tree is a polyglot run and two providers claiming one project both run. The C and C++ adapter is
@@ -348,11 +387,14 @@ A header names neither, because a header belongs to whichever language includes 
 `StaticAnalyzer`, `CoverageProvider`, `MutationTester`, `SecurityAnalyzer`, `DependencyAnalyzer`,
 `TestGenerator`, `GeneratedTestExecutor`) and register it in the composition root
 (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`, `GoAdapterBundle`,
-`TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle`, `KotlinAdapterBundle`
-and `CppAdapterBundle` are the examples).
+`TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle`, `KotlinAdapterBundle`,
+`CppAdapterBundle` and `PhpAdapterBundle` are the examples).
 Registration is data, not code paths. A `TestRunner` or `GeneratedTestExecutor` may also implement the
 optional replay-command methods, which is how a language supplies a reproducible command without the
-core knowing how tests are invoked.
+core knowing how tests are invoked. PHP is also where a test runner turns out to be a project
+dependency rather than a tool of the machine: PHPUnit does not exist until the build has installed it,
+so the adapter's runner resolves it after the build instead of trusting what inspection could see, and
+a `TestRunner` that has nothing to run says so rather than reporting a suite of zero tests.
 
 **Another verification strategy.** Implement `VerificationStrategy`. It receives the context, the
 requirement and its obligations, and returns evidence plus per-obligation outcomes. It cannot assign
@@ -369,7 +411,7 @@ security boundary.
 
 A run records everything needed to reproduce it: project identifier, source revision, CodeWitness
 version, runtime version (Java, Python, Rust, Go, Node for TypeScript and JavaScript, the .NET SDK for
-C#, the Kotlin release for Kotlin, or the CMake release for C and C++), build tool and version, configuration fingerprint, tool versions, language model identifier,
+C#, the Kotlin release for Kotlin, the CMake release for C and C++, or the PHP release for PHP), build tool and version, configuration fingerprint, tool versions, language model identifier,
 requirements hash, isolation level, timestamps, and every command. Run data is kept
 under `<project>/.codewitness/runs/<run-id>/`, with generated sources and raw reports copied into the
 artifact store so a counterexample can be reviewed and replayed after the run.
@@ -389,17 +431,19 @@ reports live in the artifact store on disk, not in the database.
   Java test to prove it is valid Java, rendering a Python scenario into a runnable module, rendering a
   Go scenario into a `_test.go` file, rendering a JavaScript scenario into a plain `node:test` module,
   rendering a C# scenario into an xUnit class in a project that compiles and rendering a C++ scenario
-  into a self-contained program with its compile and link commands). The Kotlin generator's
+  into a self-contained program with its compile and link commands, and a PHP scenario into a PHPUnit
+  `TestCase` class). The Kotlin generator's
   output is proved by the end-to-end test instead, which compiles and runs it with the real compiler
   rather than putting a second Kotlin compiler on a unit test classpath; the C++ generator's output is
   proved the same way, by compiling it with the compiler the fixture's own build records.
 - **Integration tests** drive each adapter against small projects and parse synthetic tool reports,
   including the DOCTYPE-carrying JaCoCo and PIT formats, pytest's JUnit XML, coverage.py's JSON,
-  Node's JUnit report, a BOM-prefixed TRX report and a CTest JUnit report with a failed test whose
-  `system-out` carries the counterexample line.
+  Node's JUnit report, a BOM-prefixed TRX report, a CTest JUnit report with a failed test whose
+  `system-out` carries the counterexample line and a PHPUnit JUnit report that names a test class twice,
+  in PHP's backslash spelling in `class` and in JUnit's dotted spelling in `classname`.
 - **End-to-end tests** (`-Pe2e`) run `./codewitness verify` against the fixture projects and assert the
   verdicts, the counterexample contents and the exit codes. The Java, Python, Rust, Go, TypeScript,
-  JavaScript, C#, Kotlin and C/C++ fixtures are all covered; the Python one uses only the standard library, the Rust
+  JavaScript, C#, Kotlin, C/C++ and PHP fixtures are all covered; the Python one uses only the standard library, the Rust
   one and the Go one have no dependencies and the TypeScript and JavaScript ones have no packages, so
   each needs an interpreter, a toolchain, the `go` tool or a Node runtime and nothing else. The C# one
   needs the .NET SDK and no network: its test host packages must already be in the machine's NuGet
@@ -408,7 +452,11 @@ reports live in the artifact store on disk, not in the database.
   Maven build with `kotlin-maven-plugin`: the compiler, the standard library and Surefire are resolved
   from a repository the way a dependency is, which is why it is not a Gradle project here. The C and
   C++ fixture needs CMake and CTest and nothing else: it fetches no package, so it configures, builds,
-  tests, covers and mutates with the toolchain the machine's compiler ships, and needs no network.
+  tests, covers and mutates with the toolchain the machine's compiler ships, and needs no network. The
+  PHP fixture needs an interpreter and Composer and nothing else installed, but it needs network access
+  the first time: PHPUnit is a Composer dependency rather than part of the toolchain, so the build must
+  resolve it from Packagist before any test can run, which is why the fixture's sandbox config allows
+  network and why the continuous-integration job warms the toolchain before the run.
 - **Fixtures** are projects with known defects — off-by-one boundaries, null handling, concurrency,
   security, weak tests, and a requirement that cannot be verified at all — used to prove that
   CodeWitness distinguishes them, in more than one language.

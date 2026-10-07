@@ -48,11 +48,11 @@ jobs:
       #
       # `./mvnw -Pe2e test` runs the fixture projects through their own toolchains: Maven for the
       # Java fixture, Python 3, Cargo, `go`, Node for the others (Node 22.18+ for TypeScript, where
-      # type stripping is on by default, and 18.17+ for JavaScript), the .NET SDK for the C# fixture
-      # and CMake for the C and C++ one.
-      # The Kotlin fixture is a Maven build with the Kotlin plugin, so its toolchain is the Maven and the
-      # network this job already has: the compiler, the standard library and Surefire are fetched the way
-      # a dependency is, and the step below warms them so that the fixture cannot silently skip.
+      # type stripping is on by default, and 18.17+ for JavaScript), the .NET SDK for the C# fixture,
+      # CMake for the C and C++ one and PHP with Composer for the PHP one.
+      # The Kotlin and PHP fixtures are the two whose test tool is not part of the language toolchain -
+      # Kotlin's compiler and Surefire and PHP's PHPUnit are all resolved as dependencies - so both are
+      # warmed below, and both need the network this job already has.
       # Each end-to-end test skips itself (a JUnit assumption) when its toolchain is absent, so a missing
       # tool produces a green build with those languages never having run. Installing each one here, then
       # asserting it below, is what keeps that from happening silently.
@@ -99,6 +99,18 @@ jobs:
         with:
           maven-version: 3.9.16
 
+      # PHP and Composer are what the PHP fixture drives. Composer is not optional here even though the
+      # adapter can build and analyse a tree without it: PHPUnit is a Composer dependency rather than part
+      # of the language toolchain, so a PHP project's tests only exist once `composer install` has run.
+      # `coverage: xdebug` is what makes the fixture's coverage measurable at all - PHPUnit has no coverage
+      # driver of its own, and the adapter reports coverage as not measured rather than as zero when none
+      # is loaded, so without this the coverage phase would be reported but never exercised.
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.3'
+          coverage: xdebug
+
       # CMake and the CTest that ships with it are what the C and C++ fixture drives, and they come from
       # the runner image rather than from an action. The version is therefore asserted in the step below
       # instead of trusted: the test phase reads the JUnit report `ctest --output-junit` writes, and that
@@ -113,6 +125,13 @@ jobs:
       # instead of failing one fixture's build.
       - name: Warm the Kotlin toolchain
         run: ./mvnw -B -ntp -f fixtures/kotlin-withdrawal-ledger/pom.xml -DskipTests test-compile
+
+      # Warm the PHP fixture's Composer install for the same reason. The fixture commits its
+      # composer.lock, so this resolves the exact tree the end-to-end run will resolve, and leaves it in
+      # Composer's cache: the run itself still installs into its own isolated workspace, which is what
+      # keeps the fixture honest about building from source rather than from a pre-populated vendor.
+      - name: Warm the PHP fixture's dependencies
+        run: composer install --no-interaction --no-progress --working-dir=fixtures/php-withdrawal-ledger
 
       # Fail loudly rather than trust the runner image. Absent tools make the end-to-end tests skip
       # themselves (a JUnit assumption), which is a green build with those languages never having run.
@@ -132,6 +151,13 @@ jobs:
           ctest --version
           # 3.21 is the first CMake whose ctest can write the JUnit report the C and C++ test phase reads.
           cmake --version | head -1 | grep -qE 'version (3\.(2[1-9]|[3-9][0-9])|[4-9]\.)'
+          php --version
+          composer --version
+          # 8.1 is the floor the fixture declares and the lowest PHPUnit 11 supports.
+          php -r 'exit(PHP_VERSION_ID >= 80100 ? 0 : 1);'
+          # The adapter reports coverage as not measured when no driver is loaded; assert the driver is
+          # here so that the coverage phase is exercised rather than silently skipped in the report.
+          php -m | grep -qi xdebug
 
       # Unit and integration tests. Surefire excludes the `e2e` group by default (pom.xml:
       # excluded.groups), so this is the fast suite.
@@ -139,6 +165,7 @@ jobs:
         run: ./mvnw -B test
 
       # The end-to-end suite, opt-in through the `e2e` profile, which clears excluded.groups. It
-      # builds the fixture projects with real Maven, Python, Cargo, Go, Node, .NET and CMake runs.
+      # builds the fixture projects with real Maven, Python, Cargo, Go, Node, .NET, CMake and Composer
+      # runs.
       - name: End-to-end tests (fixture projects)
         run: ./mvnw -B -Pe2e test

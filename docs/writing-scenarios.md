@@ -9,14 +9,15 @@ Scenarios live in `codewitness.yaml` under `scenarios:`. The fragments (`setup`,
 `observation`, `invariant`) are written in the **project's own language**: Java for a Java project,
 Python for a Python project, Rust for a Rust project, Go for a Go module, TypeScript for a TypeScript
 project, plain JavaScript for a JavaScript project, C# for a C#/.NET project, Kotlin for a Kotlin
-project, and C or C++ for a project whose sources are either — one adapter covers both, so the
-fragment is written in whichever language the code under test is written in. Everything else — modes,
+project, C or C++ for a project whose sources are either — one adapter covers both, so the
+fragment is written in whichever language the code under test is written in — and PHP for a PHP
+project. Everything else — modes,
 inputs, ranges, seeds, the counterexample protocol — is identical. The examples below are Java; the
-Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin and C/C++ forms are shown in
+Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++ and PHP forms are shown in
 [Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
 [TypeScript projects](#typescript-projects), [JavaScript projects](#javascript-projects),
-[C# projects](#c-projects), [Kotlin projects](#kotlin-projects) and
-[C and C++ projects](#c-and-c-projects).
+[C# projects](#c-projects), [Kotlin projects](#kotlin-projects),
+[C and C++ projects](#c-and-c-projects) and [PHP projects](#php-projects).
 
 ```yaml
 scenarios:
@@ -78,8 +79,8 @@ Each step declares the inputs it searches over:
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
-| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares. |
+| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`; in PHP it becomes the PHP variable `$name`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares, or a PHP type name such as `int`, `float`, `string` or `bool`. |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -116,7 +117,8 @@ That is the Java shape, and it is not the only one. Each language's section belo
 shape is: a standard-library `unittest` case for Python, a Cargo integration test for Rust, a
 `_test.go` file in the package under test for Go, a `node:test` module for TypeScript and JavaScript,
 an xUnit class in the tree's own test project for C#, a Kotlin JUnit 5 class in the tree's own test
-sources for Kotlin, and, for C and C++, one self-contained program with a `main` rather than a class
+sources for Kotlin, a PHPUnit `TestCase` class in the tree's own test root for PHP, and, for C and C++,
+one self-contained program with a `main` rather than a class
 in a framework — written into the run's artefact store, never into the tree.
 
 A failing case fails the test with one structured line:
@@ -700,6 +702,103 @@ failure by default. The fixture's `withdraw` returns `void` and reports a reject
 state it leaves, so `SC-NEGATIVE` records a withdrawal and then asserts on `totalWithinLast24Hours`; a
 step whose API returns a value can instead check it inline, because `call` is spliced in as a C++
 statement.
+
+## PHP projects
+
+For a PHP project the fragments are PHP statements and expressions, and the generated test is a PHPUnit
+`TestCase` class written into the project's own test root — a PHP project's autoloader and PHPUnit
+configuration are what make a class runnable, so there is nowhere else PHPUnit would find it.
+`${name}` is replaced textually by the PHP variable `$name`, exactly as the Python generator replaces it
+by the bare name, so a fragment writes `$ledger->withdraw(${t1}, ${a1})` and the variable the call sees is
+`$t1`:
+
+```yaml
+language:
+  adapter: php
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    description: Two withdrawals across midnight, one hour apart
+    mode: sequence
+    setup: |
+      $ledger = new \CodeWitness\Fixture\WithdrawalLedger();
+    steps:
+      - call: "$ledger->withdraw(${t1}, ${a1});"
+        inputs:
+          - {name: t1, type: int, domain: integer, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: int, domain: integer, values: ["70000"], range: {min: 100, max: 90000}}
+      - call: "$ledger->withdraw(${t2}, ${a2});"
+        inputs:
+          - {name: t2, type: int, domain: integer, values: ["90000000"]}
+          - {name: a2, type: int, domain: integer, values: ["70000"]}
+    observation: "$ledger->totalWithinLast24Hours(${t2})"
+    invariant: "$observation <= 100000"
+    cases: 200
+    seed: 42
+```
+
+That scenario is the fixture's own, from `fixtures/php-withdrawal-ledger/codewitness.yaml`, and it is
+what finds the calendar-day defect in the ledger: the boundary case is a withdrawal at 23:50 and
+another at 01:00, 70,000 cents each, checked against the rolling limit.
+
+Notes specific to PHP:
+
+- `setup` is PHP statements run once per case, before the steps. A fragment that needs a file the
+  project's autoloader does not cover can `require_once` it here; the generated class itself is written
+  into the project's own test root, which is where the project's PHPUnit configuration looks for it;
+- `observation` is a PHP expression assigned to `$observation`, and `invariant` is a PHP boolean
+  expression over `$observation` and the inputs — `$observation <= 100000` in the example above. The
+  invariant is checked after every step, exactly as it is in every other language;
+- `type` is a PHP type name the generator can produce: `int`, `float`, `string` or `bool`. PHP has no
+  typed local variables, so `type` describes the value the fragment receives rather than a declaration
+  the generated file carries, and the variable is the plain `$name` the fragment writes. Money is
+  usually integer minor units, as the PHP fixture does — cents — because PHP's `float` is binary
+  floating point and PHP has no built-in decimal type. `domain` chooses how values are drawn, as it does
+  everywhere else;
+- the generated file is a PHPUnit `TestCase` and each case is one test method, so a failure is attributed
+  by the ordinary JUnit report rather than by a line number the reader has to interpret. A generated
+  class is named after the scenario, `CwSc<ScenarioId>Test`, where every character of the id that is not
+  a letter or a digit becomes an underscore: `SC-ROLLING` generates the class `CwScSC_ROLLINGTest` in
+  `tests/CwScSC_ROLLINGTest.php`, which is the file the project's PHPUnit configuration discovers;
+- `mode: concurrent` is executed **sequentially**, and the generated file says so in a `LIMIT:` comment.
+  PHP's standard build has no threads, so there is no barrier to release and no race to run; the
+  alternative would be a generated test that names a concurrency check it never performed. Such a
+  scenario is evidence about the sequence of the steps and nothing about interleaving;
+- PHPUnit is a Composer dependency, not part of the toolchain: it exists only after the build phase has
+  run `composer install`. The adapter resolves it at test time for exactly that reason, and a project
+  that has none is reported as having no test runner rather than as passing — PHP has no
+  standard-library test framework to fall back on;
+- a failing case carries the single `CODEWITNESS_COUNTEREXAMPLE|case=…|seed=…|inputs={…}|…` line in its
+  failure message. That is what puts the structured line into the JUnit `<failure>` text, which is where
+  the engine reads it from — which is why a counterexample contains the exact inputs rather than only a
+  stack trace;
+- `CODEWITNESS_SEED` and `CODEWITNESS_CASE` in the environment pin one case for replay, and the
+  reproduction command is a real PHPUnit invocation rather than a description of one:
+
+```bash
+env CODEWITNESS_SEED=42 CODEWITNESS_CASE=0 php vendor/bin/phpunit --filter 'CwScSC_ROLLINGTest'
+```
+
+PHP rejection is expressed the same way, in PHP. A step that throws is a failure by default, so catch
+the exception yourself when throwing is the required behaviour — and catch the specific type, because a
+bare `catch (\Throwable $e)` throws away the distinction between "rejected as required" and "crashed
+for another reason":
+
+```yaml
+steps:
+  - call: |
+      try {
+          $ledger->withdraw(0, ${amount});
+      } catch (\InvalidArgumentException $expected) {
+          // required behaviour: the withdrawal is rejected by throwing
+      }
+    description: an amount above the limit must be rejected by throwing
+```
+
+If the implementation rejects by returning a value, the invariant handles it and no wrapper is needed;
+the PHP fixture's `withdraw` returns a boolean and its acceptance is observed through the state it
+leaves.
 
 ## Practical advice
 

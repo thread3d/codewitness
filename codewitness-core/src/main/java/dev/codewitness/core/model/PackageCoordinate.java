@@ -54,6 +54,14 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
      * which is the difference between "nothing is known" and "nothing is wrong".
      */
     public static final String CONAN_CENTER = "ConanCenter";
+    /**
+     * The Packagist ecosystem id, which covers Composer packages for PHP.
+     *
+     * <p>Spelled {@code Packagist} because that is the name the advisory service knows the ecosystem
+     * by, and because Packagist is where Composer actually resolves from: a PHP project's lock file
+     * names packages that exist in that ecosystem whether or not they were fetched through it.
+     */
+    public static final String PACKAGIST = "Packagist";
 
     public PackageCoordinate {
         Objects.requireNonNull(ecosystem, "ecosystem");
@@ -112,6 +120,16 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
     /** @return a Conan coordinate for a C or C++ package at the version a lock file resolved. */
     public static PackageCoordinate conan(String name, String version) {
         return new PackageCoordinate(CONAN_CENTER, name, version, null);
+    }
+
+    /**
+     * @return a Packagist coordinate for a Composer package.
+     *
+     * <p>The name is the {@code vendor/package} form Composer itself uses, which is also the form the
+     * advisory service matches on.
+     */
+    public static PackageCoordinate packagist(String name, String version) {
+        return new PackageCoordinate(PACKAGIST, name, version, null);
     }
 
     /** @return a coordinate in an arbitrary ecosystem, for sources this class has no shortcut for. */

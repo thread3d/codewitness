@@ -46,6 +46,7 @@
     <module>codewitness-adapter-csharp</module>
     <module>codewitness-adapter-kotlin</module>
     <module>codewitness-adapter-cpp</module>
+    <module>codewitness-adapter-php</module>
     <module>codewitness-cli</module>
   </modules>
 
@@ -163,6 +164,11 @@
       <dependency>
         <groupId>dev.codewitness</groupId>
         <artifactId>codewitness-adapter-cpp</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-adapter-php</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

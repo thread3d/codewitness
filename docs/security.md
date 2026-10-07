@@ -65,8 +65,8 @@ docker run --rm --network=none --cap-drop=ALL --security-opt=no-new-privileges \
 ```
 
 The container sees only the project mount, has no network, no capabilities and no host credentials.
-The Maven, Gradle, Python, Cargo, Go, Node and NuGet caches inside the container start empty, which is
-the honest trade-off of isolation: the first run has to download what it needs, and with `--network=none`
+The Maven, Gradle, Python, Cargo, Go, Node, NuGet and Composer caches inside the container start empty,
+which is the honest trade-off of isolation: the first run has to download what it needs, and with `--network=none`
 it cannot, so container mode is most useful with a pre-populated image.
 
 The image must contain the toolchain for the language under verification: a JDK image for Java (the
@@ -74,9 +74,10 @@ default), an image with Python 3 plus pytest and coverage.py if you want those p
 project, an image with the Rust toolchain for a Rust project, an image with the `go` tool for a Go
 module, an image with a Node runtime for a TypeScript project (22.6+) or a JavaScript project
 (18.17+), an image with the .NET SDK (8+) for a C# project, an image with CMake, a C or C++ compiler and
-`gcov` for a C or C++ project, or an image with a JVM and the project's own build tool for a Kotlin
-project — Kotlin needs no image of its own, because it is compiled by the same `kotlinc` the project's
-Maven or Gradle build already invokes. The local-process sandbox needs no image
+`gcov` for a C or C++ project, an image with PHP 8, Composer and a coverage driver (Xdebug or PCOV) for
+a PHP project, or an image with a JVM and the project's own build tool for a Kotlin project — Kotlin
+needs no image of its own, because it is compiled by the same `kotlinc` the project's Maven or Gradle
+build already invokes. The local-process sandbox needs no image
 and uses the interpreter or toolchain the project already has. A run whose `sandbox.allow_network` is
 false also sets `CARGO_NET_OFFLINE` for Cargo, `GOPROXY=off` for Go and the package-manager offline
 flags for Node, so a build that would need to download something fails loudly instead of reaching the
@@ -106,6 +107,19 @@ downloads a dependency will download it, and the report says which sandbox and w
 the run actually had rather than implying otherwise. The C and C++ dependency phase reads the inventory
 it can read — `conan.lock`, `vcpkg.json` and the CMake files — and says how many packages carry no
 resolved version, instead of treating an unknown as a clean result.
+
+Composer is in the same position as NuGet and CMake, for the same reason: CodeWitness sets no switch
+that forbids the network for it, so `allow_network: false` does not stop a `composer install` from
+reaching Packagist, and the report says which sandbox and which network position a run actually had
+rather than implying otherwise. What the PHP adapter does instead is give each run its own Composer
+state: `COMPOSER_HOME` and `COMPOSER_CACHE_DIR` are pointed under the run's artefact store, so a run
+cannot read or write a developer's global Composer files or make one run's downloads visible to the
+next. It also passes `COMPOSER_NO_AUDIT=1`, because CodeWitness runs its own advisory scan and a second
+one would only cost time; `COMPOSER_NO_INTERACTION=1` and `COMPOSER_ALLOW_SUPERUSER=1`, because a run is
+non-interactive and a container may run as root; and `COMPOSER_DISABLE_XDEBUG_WARN=1`, so Composer's Xdebug
+performance warning cannot appear in output a parser reads. The PHP dependency phase reads the inventory
+it can read — `composer.json` and, when it exists, `composer.lock` — and reports a version that is a
+range, a wildcard or a branch alias as unresolved rather than treating an unknown as a clean result.
 
 ## Recommendations
 

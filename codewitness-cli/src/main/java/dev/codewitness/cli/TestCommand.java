@@ -22,6 +22,7 @@ import dev.codewitness.go.GoAdapterBundle;
 import dev.codewitness.java.JavaAdapterBundle;
 import dev.codewitness.kotlin.KotlinAdapterBundle;
 import dev.codewitness.javascript.JavaScriptAdapterBundle;
+import dev.codewitness.php.PhpAdapterBundle;
 import dev.codewitness.python.PythonAdapterBundle;
 import dev.codewitness.rust.RustAdapterBundle;
 import dev.codewitness.typescript.TypeScriptAdapterBundle;
@@ -71,6 +72,7 @@ public final class TestCommand implements Callable<Integer> {
         CSharpAdapterBundle.register(languages, providers, true);
         KotlinAdapterBundle.register(languages, providers, true);
         CppAdapterBundle.register(languages, providers, true);
+        PhpAdapterBundle.register(languages, providers, true);
         JavaScriptAdapterBundle.register(languages, providers, true);
         TypeScriptAdapterBundle.register(languages, providers, true);
 

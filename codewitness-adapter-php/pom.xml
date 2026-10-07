@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>dev.codewitness</groupId>
+    <artifactId>codewitness-parent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>codewitness-adapter-php</artifactId>
+  <name>CodeWitness :: PHP Adapter</name>
+  <description>PHP language adapter: interpreter, Composer and PHPUnit resolution, a syntax build that
+    uses the interpreter's own parser, and PHPUnit tests read from the JUnit report PHPUnit writes.
+    Needs PHP and Composer; PHPUnit itself is a Composer dependency of the project under test.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-core</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-adapter-support</artifactId>
+    </dependency>
+
+    <!-- composer.json is JSON, and a version constraint misread as flat text would pin the wrong
+         interpreter or invent a module name. It is read with a real parser, the same managed Jackson
+         version the core and the C# adapter already depend on; nothing new is added to the build. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

@@ -43,6 +43,8 @@ class DetectorAdapterAgreementTest {
                 "the Kotlin adapter must be on the classpath of the CLI: " + adapters.ids());
         assertTrue(adapters.ids().contains("cpp"),
                 "the C and C++ adapter must be on the classpath of the CLI: " + adapters.ids());
+        assertTrue(adapters.ids().contains("php"),
+                "the PHP adapter must be on the classpath of the CLI: " + adapters.ids());
 
         for (LanguageDetector detector : detectors.all()) {
             detector.verifiedAsAdapterLanguage().ifPresent(language -> assertTrue(
@@ -126,8 +128,31 @@ class DetectorAdapterAgreementTest {
                 "a C++ project the adapter does not claim is still named: " + uncovered);
     }
 
-    private static void write(Path base, String relative, String content) throws IOException {
-        Path file = base.resolve(relative);
+    @Test
+    @DisplayName("a PHP project is verified rather than reported as present and unverifiable")
+    void phpIsNotReportedTwice(@TempDir Path project) throws IOException {
+        write(project, "composer.json", "{\"name\": \"example/ledger\"}\n");
+        write(project, "src/Ledger.php", "<?php\n\nfinal class Ledger\n{\n}\n");
+        LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
+
+        List<String> covered = detectors.detect(project, Set.of(LanguageId.PHP)).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(covered.isEmpty(),
+                "the adapter claimed this tree, so nothing about it is unverifiable: " + covered);
+
+        // Unlike C and C++, PHP has no build-system variant the adapter declines: it claims a tree that
+        // holds PHP source or a PHP descriptor, and this detector's evidence is a subset of that, so there
+        // is no PHP tree left for it to speak for. What it still exists for is a classpath without the
+        // adapter, which is why it is kept registered rather than deleted.
+        Path other = project.resolve("elixir");
+        write(other, "mix.exs", "defmodule Ledger.MixProject do\nend\n");
+        List<String> uncovered = detectors.detect(other, Set.of()).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(uncovered.contains("Elixir"),
+                "a language no adapter claimed is still named: " + uncovered);
+    }
+
+    private static void write(Path base, String relative, String content) throws IOException {        Path file = base.resolve(relative);
         Files.createDirectories(file.getParent());
         Files.writeString(file, content);
     }

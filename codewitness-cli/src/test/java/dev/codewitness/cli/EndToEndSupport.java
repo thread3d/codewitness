@@ -127,6 +127,24 @@ abstract class EndToEndSupport {
         return findExecutable("cmake");
     }
 
+    /**
+     * Skips the test when no PHP interpreter is available, instead of failing spuriously.
+     *
+     * <p>PHP is the one adapter whose test tool is not part of the language toolchain: PHPUnit is a
+     * Composer dependency, so the fixture's build has to resolve it from Packagist before a test can run.
+     * Only the interpreter is checked here; a Composer that cannot reach the network makes the build fail
+     * loudly, and the run reports that as {@code BLOCKED} rather than as a code defect.
+     */
+    static void assumePhpAvailable() {
+        Assumptions.assumeTrue(findPhp() != null,
+                "no php executable on PATH: PHP end-to-end verification cannot run");
+    }
+
+    /** @return the {@code php} executable on {@code PATH}, or {@code null}. */
+    static String findPhp() {
+        return findExecutable(isWindows() ? "php.exe" : "php");
+    }
+
     /** Skips the test when no .NET SDK is available, instead of failing spuriously. */
     static void assumeDotnetAvailable() {
         Assumptions.assumeTrue(findDotnet() != null,
