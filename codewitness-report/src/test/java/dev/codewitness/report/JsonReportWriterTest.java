@@ -2,6 +2,11 @@ package dev.codewitness.report;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.codewitness.core.model.CoverageReport;
+import dev.codewitness.core.model.LanguageId;
+import dev.codewitness.core.model.ProjectInfo;
+import dev.codewitness.core.model.ProjectRef;
+import dev.codewitness.core.requirements.RequirementSet;
 import dev.codewitness.core.result.VerificationReport;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -12,6 +17,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -204,11 +210,49 @@ class JsonReportWriterTest {
     void coverageBlockReportsPercentages() {
         JsonNode coverage = json.path("coverage");
         assertEquals(List.of("measured", "tool", "note", "lineCoveragePercent", "branchCoveragePercent",
-                "lineCovered", "lineTotal", "branchCovered", "branchTotal"), keys(coverage));
+                "lineCovered", "lineTotal", "branchCovered", "branchTotal", "perClassLineCoverage"),
+                keys(coverage));
         assertTrue(coverage.path("measured").asBoolean());
         assertEquals("jacoco", coverage.path("tool").asText());
         assertEquals(82.0, coverage.path("lineCoveragePercent").asDouble(), 0.001);
         assertEquals(100, coverage.path("lineTotal").asInt());
+        assertEquals(91.0, coverage.path("perClassLineCoverage").path("dev.example.Cart").asDouble(), 0.001);
+    }
+
+    @Test
+    void perFileCoverageIsSerialisedInAStableOrderWithAbsolutePathsMadeRelative() throws Exception {
+        VerificationReport custom = reportWithCoverage(new CoverageReport(true, "jacoco", "", 3, 4, 0, 0,
+                Map.of("/sandbox/project/src/b.ts", 50.0,
+                        "/sandbox/project/src/a.ts", 100.0,
+                        "src/c.ts", 25.0),
+                List.of()));
+
+        JsonNode perFile = MAPPER.readTree(new JsonReportWriter().render(custom))
+                .path("coverage").path("perClassLineCoverage");
+
+        // Sorted by the displayed key, and an absolute path below the project root is rendered relative.
+        assertEquals(List.of("src/a.ts", "src/b.ts", "src/c.ts"), keys(perFile));
+        assertEquals(100.0, perFile.path("src/a.ts").asDouble(), 0.001);
+        assertEquals(25.0, perFile.path("src/c.ts").asDouble(), 0.001);
+    }
+
+    @Test
+    void anEmptyPerFileCoverageMapIsOmittedRatherThanReportedAsEmpty() throws Exception {
+        VerificationReport custom = reportWithCoverage(CoverageReport.notMeasured("jacoco", "no report"));
+
+        JsonNode coverage = MAPPER.readTree(new JsonReportWriter().render(custom)).path("coverage");
+
+        assertFalse(coverage.has("perClassLineCoverage"), coverage.toString());
+    }
+
+    /** @return a minimal report whose coverage section is the supplied one. */
+    private static VerificationReport reportWithCoverage(CoverageReport coverage) {
+        ProjectInfo project = ProjectInfo.builder(ProjectRef.of(Path.of("/sandbox/project")))
+                .language(LanguageId.JAVA)
+                .build();
+        return VerificationReport.builder("run-coverage", project, new RequirementSet(List.of()))
+                .coverage(coverage)
+                .build();
     }
 
     @Test

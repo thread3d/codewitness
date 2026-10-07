@@ -67,6 +67,13 @@ public final class GoCoverageProvider implements VerificationTools.CoverageProvi
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(2_000_000)
                 .build());
+        if (result.timedOut()) {
+            // go test writes the profile as it goes, so a killed run leaves a partial one; it is
+            // refused before it is looked for or parsed.
+            return CoverageReport.notMeasured("go-cover", "go test -coverprofile was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; a partial coverage "
+                    + "profile is not a measurement");
+        }
 
         if (!Files.isRegularFile(report)) {
             // go test writes the profile only when it could build and run the package, so a missing

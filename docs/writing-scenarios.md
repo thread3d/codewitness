@@ -124,7 +124,7 @@ mvn -Dtest=Cw_SC_ROLLING_OB_001_Test -Dcodewitness.seed=42 -Dcodewitness.case=37
 or simply:
 
 ```bash
-codewitness reproduce <run-id> --counterexample CE-001
+./codewitness reproduce <run-id> --counterexample CE-001
 ```
 
 (For Gradle, which does not forward `-D` to the test JVM, the generated tests read the seed from

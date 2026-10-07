@@ -73,4 +73,17 @@ public record TestResult(
         }
         return total + " executed, " + passed + " passed, " + failures().size() + " failed, " + skipped + " skipped";
     }
+
+    /**
+     * @return {@link #describe()} plus the note, when there is one, for the places a human reads.
+     *
+     * <p>The counters alone are not the observation. A runner that could not build a package, or could
+     * not pair every case with its output, says so in the note; a report that prints only the counters
+     * shows an incomplete run as a clean one. Evidence records and reports use this; {@link #describe()}
+     * stays a stable summary of the counters for callers that only want the numbers.
+     */
+    public String describeWithNote() {
+        String summary = describe();
+        return !executed || note == null || note.isBlank() ? summary : summary + " (" + note + ")";
+    }
 }

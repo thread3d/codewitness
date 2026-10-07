@@ -118,7 +118,6 @@ public final class JavaGeneratedTestRunner implements VerificationTools.Generate
 
         List<Path> written = new ArrayList<>();
         List<Path> artifacts = new ArrayList<>();
-        GeneratedTestExecution lastResult = null;
         try {
             for (GeneratedTest test : tests) {
                 Path target = testRoot.resolve(test.relativePath());
@@ -160,8 +159,7 @@ public final class JavaGeneratedTestRunner implements VerificationTools.Generate
             if (reports.isEmpty()) {
                 String note = "the build tool produced no test reports for the generated tests ("
                         + result.describeOutcome() + "). Last output: " + tail(result.combinedOutput(), 4000);
-                lastResult = new GeneratedTestExecution(tests, TestResult.notExecuted(note), artifacts, note);
-                return lastResult;
+                return new GeneratedTestExecution(tests, TestResult.notExecuted(note), artifacts, note);
             }
 
             TestResult parsed = TestReportParser.parse(reports, "generated test run (" + result.describeOutcome() + ")");
@@ -169,29 +167,35 @@ public final class JavaGeneratedTestRunner implements VerificationTools.Generate
                     .filter(c -> c.suite() != null && c.suite().startsWith(GENERATED_PACKAGE))
                     .toList();
             if (generatedCases.isEmpty()) {
-                // The test class may be reported under a different name (for example a nested class
-                // naming scheme); fall back to everything the run produced.
-                generatedCases = parsed.cases();
+                // Every generated test carries a non-empty case list, and the build tool was asked to
+                // run exactly the generated classes. A parsed result that mentions none of them
+                // therefore means the generated tests did not run at all - it is not a pass with zero
+                // cases. Falling back to every parsed case would attribute unrelated tests, and their
+                // failures, to this obligation, so the batch is reported as not executed instead.
+                String note = "the build tool reported no test case for the generated tests ("
+                        + result.describeOutcome() + "): " + parsed.note()
+                        + ". Last output: " + tail(result.combinedOutput(), 2000);
+                return new GeneratedTestExecution(tests, TestResult.notExecuted(note), artifacts, note);
             }
             TestResult scoped = TestResult.from(generatedCases, parsed.duration(), reports, parsed.note());
-            lastResult = new GeneratedTestExecution(tests, scoped, artifacts, scoped.describe());
-            return lastResult;
+            return new GeneratedTestExecution(tests, scoped, artifacts, scoped.describe());
         } catch (IOException e) {
             throw new UncheckedIOException("cannot prepare generated tests", e);
         } finally {
-            if (context.config().report().keepGeneratedTests()) {
-                // report.keep_generated_tests=true: the sources stay in the project so that the
-                // reproduction command in the report can be run as printed.
-                return lastResult;
-            }
-            for (Path path : written) {
-                try {
-                    Files.deleteIfExists(path);
-                } catch (IOException _) {
-                    // leaving a generated file behind is untidy but not fatal
+            // Cleanup happens here, but nothing is returned from here: a return in a finally block
+            // would discard the in-flight UncheckedIOException above and could hand the caller null.
+            // With report.keep_generated_tests=true the sources stay in the project so that the
+            // reproduction command in the report can be run as printed.
+            if (!context.config().report().keepGeneratedTests()) {
+                for (Path path : written) {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (IOException _) {
+                        // leaving a generated file behind is untidy but not fatal
+                    }
                 }
+                cleanEmptyDirectories(testRoot.resolve(GENERATED_PACKAGE.replace('.', '/')));
             }
-            cleanEmptyDirectories(testRoot.resolve(GENERATED_PACKAGE.replace('.', '/')));
         }
     }
 

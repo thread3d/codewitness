@@ -1,5 +1,8 @@
 package dev.codewitness.cli;
 
+import dev.codewitness.core.exec.LocalProcessSandbox;
+import dev.codewitness.core.exec.ProcessResult;
+import dev.codewitness.core.exec.ProcessSpec;
 import dev.codewitness.storage.SqliteVerificationStore;
 
 import picocli.CommandLine.Command;
@@ -8,6 +11,7 @@ import picocli.CommandLine.Parameters;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -79,19 +83,43 @@ public final class ReproduceCommand implements Callable<Integer> {
         return runCommand(root, commands.getFirst());
     }
 
+    /**
+     * Runs a recorded reproduction command.
+     *
+     * <p>Ground rule 6 of {@code CONTRIBUTING.md} says all process execution goes through the sandbox,
+     * and this is process execution of a command string that came out of a stored report. It used to
+     * bypass the sandbox entirely: a raw shell with inherited stdio, no timeout, no output cap, no
+     * working-directory check and the caller's whole environment. It now runs through the same
+     * {@link LocalProcessSandbox} the verification phases use, so it gets a sanitised environment, a
+     * hard timeout and capped output.
+     *
+     * <p>The recorded command is a single string, so it is handed to the platform shell exactly as it
+     * was printed. The working directory must be inside the project, which the sandbox enforces.
+     */
     private static int runCommand(Path projectRoot, String command) {
-        try {
-            System.out.println();
-            System.out.println("$ " + command);
-            ProcessBuilder builder = new ProcessBuilder("/bin/sh", "-c", command);
-            builder.directory(projectRoot.toFile());
-            builder.inheritIO();
-            Process process = builder.start();
-            return process.waitFor();
-        } catch (Exception e) {
-            System.err.println("could not run the reproduction command: " + e.getMessage());
+        System.out.println();
+        System.out.println("$ " + command);
+        LocalProcessSandbox sandbox = new LocalProcessSandbox(List.of(projectRoot));
+        boolean windows = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("windows");
+        List<String> shell = windows
+                ? List.of("cmd", "/c", command)
+                : List.of("/bin/sh", "-c", command);
+        ProcessResult result = sandbox.runner().run(ProcessSpec.builder(shell, projectRoot)
+                .timeout(Duration.ofMinutes(30))
+                .maxOutputBytes(1_000_000)
+                .build());
+        if (!result.started()) {
+            System.err.println("could not run the reproduction command: " + result.failureReason());
             return 3;
         }
+        System.out.print(result.stdout());
+        System.err.print(result.stderr());
+        if (result.timedOut()) {
+            System.err.println("the reproduction command timed out after " + result.duration().toSeconds() + "s");
+            return 3;
+        }
+        System.out.println("exit code " + result.exitCode());
+        return result.exitCode();
     }
 
     /** @return the test class name inside a reproduction command, or {@code null}. */

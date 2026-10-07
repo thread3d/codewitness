@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Loads {@code codewitness.yaml}.
@@ -27,6 +28,70 @@ public final class ConfigLoader {
     }
 
     public static final String DEFAULT_FILE_NAME = "codewitness.yaml";
+
+    /** Keys understood at the root of {@code codewitness.yaml}. */
+    private static final Set<String> ROOT_KEYS = Set.of("project", "language", "verification", "tests",
+            "mutation", "property_testing", "static_analysis", "security", "llm", "report", "sandbox",
+            "scenarios");
+
+    /** Keys understood inside each top-level section. */
+    private static final Map<String, Set<String>> SECTION_KEYS = Map.ofEntries(
+            Map.entry("project", Set.of("name")),
+            Map.entry("language", Set.of("adapter")),
+            Map.entry("verification", Set.of("timeout", "max_duration", "max_test_generation_iterations",
+                    "max_generated_tests", "max_mutation_time", "fail_fast_on_counterexample")),
+            Map.entry("tests", Set.of("enabled")),
+            Map.entry("mutation", Set.of("enabled", "tool", "timeout", "target_classes")),
+            Map.entry("property_testing", Set.of("enabled", "max_scenarios", "concurrent")),
+            Map.entry("static_analysis", Set.of("enabled", "analyzers", "lint_all")),
+            Map.entry("security", Set.of("enabled", "vulnerabilities")),
+            Map.entry("llm", Set.of("enabled", "provider", "model", "base_url", "api_key_env", "max_calls",
+                    "temperature", "timeout")),
+            Map.entry("report", Set.of("html", "json", "output_directory", "keep_generated_tests")),
+            Map.entry("sandbox", Set.of("mode", "image", "allow_network", "container_workdir")));
+
+    /** Keys understood inside {@code security.vulnerabilities}. */
+    private static final Set<String> VULNERABILITY_KEYS = Set.of("enabled", "source", "endpoint", "timeout",
+            "max_dependencies", "fail_on");
+
+    /** Keys understood inside one entry of the {@code scenarios} list. */
+    private static final Set<String> SCENARIO_KEYS = Set.of("id", "requirement", "description", "mode",
+            "setup", "steps", "observation", "invariant", "cases", "seed", "timeout_seconds");
+
+    /** Keys understood inside one entry of a scenario's {@code steps} list. */
+    private static final Set<String> STEP_KEYS = Set.of("call", "inputs", "description");
+
+    /** Keys understood inside one declared scenario input. */
+    private static final Set<String> INPUT_KEYS = Set.of("name", "type", "domain", "values", "range");
+
+    /** Keys understood inside an input's {@code range}. */
+    private static final Set<String> RANGE_KEYS = Set.of("min", "max", "scale");
+
+    /**
+     * Rejects configuration keys that CodeWitness does not understand.
+     *
+     * <p>The loader used to ignore them. That is the wrong default for a verification tool: a typo
+     * such as {@code securty:} or {@code vulnerability.enabled:} silently leaves the conservative
+     * default in place, so the run looks like it did something the user did not ask for and the report
+     * is quietly weaker than the configuration suggests. A misspelled key is now a hard error that
+     * names the key and lists what is accepted here.
+     */
+    private static void rejectUnknownKeys(Map<String, Object> map, String path, Set<String> known) {
+        if (map == null || map.isEmpty()) {
+            return;
+        }
+        List<String> unknown = map.keySet().stream()
+                .filter(key -> !known.contains(key))
+                .sorted()
+                .toList();
+        if (!unknown.isEmpty()) {
+            throw new IllegalArgumentException("unknown configuration key(s) at " + path + ": "
+                    + String.join(", ", unknown) + ". Keys understood here: "
+                    + known.stream().sorted().collect(java.util.stream.Collectors.joining(", "))
+                    + ". CodeWitness refuses to ignore configuration it does not understand, because "
+                    + "ignoring a key silently keeps the default and would weaken verification.");
+        }
+    }
 
     /** Loads configuration from an explicit file, or returns defaults when the file does not exist. */
     public static Loaded load(Path configFile) {
@@ -62,14 +127,20 @@ public final class ConfigLoader {
         }
         Map<String, Object> map = (Map<String, Object>) root;
         List<String> warnings = new ArrayList<>();
+        rejectUnknownKeys(map, "the configuration root", ROOT_KEYS);
 
         VerificationConfig defaults = VerificationConfig.defaults();
 
+        Map<String, Object> projectMap = mapOf(map, "project");
+        Map<String, Object> languageMap = mapOf(map, "language");
+        rejectUnknownKeys(projectMap, "project", SECTION_KEYS.get("project"));
+        rejectUnknownKeys(languageMap, "language", SECTION_KEYS.get("language"));
+
         VerificationConfig.Project project = new VerificationConfig.Project(
-                string(mapOf(map, "project"), "name", defaults.project().name()));
+                string(projectMap, "name", defaults.project().name()));
 
         VerificationConfig.Language language = new VerificationConfig.Language(
-                string(mapOf(map, "language"), "adapter", defaults.language().adapter()));
+                string(languageMap, "adapter", defaults.language().adapter()));
 
         Map<String, Object> verificationMap = mapOf(map, "verification");
         Map<String, Object> testsMap = mapOf(map, "tests");
@@ -80,6 +151,14 @@ public final class ConfigLoader {
         Map<String, Object> llmMap = mapOf(map, "llm");
         Map<String, Object> reportMap = mapOf(map, "report");
         Map<String, Object> sandboxMap = mapOf(map, "sandbox");
+        for (Map.Entry<String, Set<String>> section : SECTION_KEYS.entrySet()) {
+            if (section.getKey().equals("project") || section.getKey().equals("language")) {
+                continue;
+            }
+            rejectUnknownKeys(mapOf(map, section.getKey()), section.getKey(), section.getValue());
+        }
+        rejectUnknownKeys(mapOf(securityMap, "vulnerabilities"), "security.vulnerabilities",
+                VULNERABILITY_KEYS);
 
         VerificationConfig.Limits limits = new VerificationConfig.Limits(
                 DurationParser.parse(string(verificationMap, "timeout", null), defaults.limits().timeout()),
@@ -160,6 +239,7 @@ public final class ConfigLoader {
                 continue;
             }
             Map<String, Object> map = (Map<String, Object>) element;
+            rejectUnknownKeys(map, "scenario " + string(map, "id", "(without an id)"), SCENARIO_KEYS);
             String id = string(map, "id", null);
             String requirement = string(map, "requirement", null);
             if (id == null || requirement == null) {
@@ -174,11 +254,23 @@ public final class ConfigLoader {
                         continue;
                     }
                     Map<String, Object> stepMap = (Map<String, Object>) stepElement;
+                    rejectUnknownKeys(stepMap, "a step of scenario " + id, STEP_KEYS);
                     steps.add(new Scenario.Step(
                             string(stepMap, "call", ""),
-                            parseInputs(stepMap.get("inputs")),
+                            parseInputs(stepMap.get("inputs"), "scenario " + id),
                             string(stepMap, "description", null)));
                 }
+            }
+            String observation = string(map, "observation", null);
+            String invariant = string(map, "invariant", null);
+            if (observation == null || invariant == null) {
+                // Not fatal - the scenario still executes its steps - but it asserts nothing, so it can
+                // never discharge an obligation. Saying so here is the difference between a user who
+                // knows their scenario proves nothing and one who reads VERIFIED and believes it.
+                warnings.add("scenario " + id + " declares "
+                        + (observation == null ? "no observation" : "an observation but no invariant")
+                        + ", so the generated test runs the steps but asserts nothing. It cannot make "
+                        + requirement + " VERIFIED; declare both `observation` and `invariant`.");
             }
             Scenario scenario = new Scenario(
                     id,
@@ -187,8 +279,8 @@ public final class ConfigLoader {
                     parseMode(string(map, "mode", "single")),
                     string(map, "setup", null),
                     steps,
-                    string(map, "observation", null),
-                    string(map, "invariant", null),
+                    observation,
+                    invariant,
                     integer(map, "cases", 100),
                     longValue(map, "seed", 42L),
                     integer(map, "timeout_seconds", 120));
@@ -198,7 +290,7 @@ public final class ConfigLoader {
     }
 
     @SuppressWarnings("unchecked")
-    private static List<Scenario.Input> parseInputs(Object value) {
+    private static List<Scenario.Input> parseInputs(Object value, String context) {
         if (!(value instanceof List<?> list)) {
             return List.of();
         }
@@ -210,13 +302,14 @@ public final class ConfigLoader {
             Map<String, Object> map = (Map<String, Object>) element;
             String name = string(map, "name", null);
             String type = string(map, "type", null);
+            rejectUnknownKeys(map, "an input of " + context, INPUT_KEYS);
             if (name == null || type == null) {
                 continue;
             }
             String domainName = string(map, "domain", null);
-            Scenario.Domain domain = domainName == null ? Scenario.Domain.fromType(type)
-                    : Scenario.Domain.valueOf(domainName.trim().toUpperCase(java.util.Locale.ROOT));
+            Scenario.Domain domain = Scenario.Domain.parse(domainName, Scenario.Domain.fromType(type));
             Map<String, Object> range = mapOf(map, "range");
+            rejectUnknownKeys(range, "the range of input \"" + name + "\" in " + context, RANGE_KEYS);
             inputs.add(new Scenario.Input(
                     name,
                     type,
@@ -233,7 +326,8 @@ public final class ConfigLoader {
         try {
             return Scenario.Mode.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
         } catch (RuntimeException e) {
-            return Scenario.Mode.SINGLE;
+            throw new IllegalArgumentException("unknown scenario mode \"" + value.trim()
+                    + "\"; known modes are single, sequence and concurrent", e);
         }
     }
 

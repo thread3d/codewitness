@@ -32,6 +32,12 @@ import java.util.Map;
  * reported as counterexamples, because a deterministic analyzer demonstrating the defect is exactly
  * as good as a failing test.
  *
+ * <p>That last sentence applies to <em>tools</em>: a compiler, a linter, a vet tool. The
+ * pattern-matching heuristic rule tables ship a documented false-positive profile, so a rule match
+ * is recorded as advisory evidence and a note, and never as a counterexample. A regular expression
+ * that thinks it recognises a hardcoded credential is not a demonstration that one exists, and a
+ * requirement must not fail because of it.
+ *
  * <p>When a requirement carries {@code STATIC} obligations and the analyzers ran over the
  * requirement's files without producing a high severity finding, those obligations are discharged.
  * That is a real observation - "the analyzer looked and found nothing" - and it is recorded as such,
@@ -66,6 +72,7 @@ public final class StaticAnalysisStrategy implements VerificationStrategy {
 
         List<Finding> relevant = new ArrayList<>();
         List<Finding> serious = new ArrayList<>();
+        List<Finding> heuristicSerious = new ArrayList<>();
         for (Finding finding : context.state().findings()) {
             boolean mapped = mapper.requirementsForFile(finding.file()).contains(requirement.id())
                     || mentions(finding.message(), requirement.id());
@@ -74,15 +81,26 @@ public final class StaticAnalysisStrategy implements VerificationStrategy {
             }
             relevant.add(finding);
             if (finding.severity().atLeastAsSevereAs(Severity.HIGH)) {
-                serious.add(finding);
+                if (finding.fromDeterministicTool()) {
+                    serious.add(finding);
+                } else {
+                    heuristicSerious.add(finding);
+                }
             }
         }
 
-        int analyzersRun = context.state().findings().isEmpty() ? 0 : 1;
+        // Whether an analyzer ran is a fact about the run, not an inference from its output. Deriving
+        // it from "are there any findings anywhere" got both directions wrong: a clean project looked
+        // like a project where nothing ran, and one unrelated finding discharged every requirement's
+        // STATIC obligations.
+        int analyzersRun = context.state().staticAnalysisRan() ? 1 : 0;
         if (!relevant.isEmpty()) {
             Evidence analysisEvidence = context.evidence().newEvidence(EvidenceType.STATIC_ANALYSIS)
                     .description("Static analysis produced " + relevant.size() + " finding(s) in files mapped to "
-                            + requirement.id() + " (" + serious.size() + " at HIGH or above)")
+                            + requirement.id() + " (" + serious.size() + " at HIGH or above from a deterministic "
+                            + "tool" + (heuristicSerious.isEmpty() ? ""
+                            : ", " + heuristicSerious.size() + " from a heuristic rule table and therefore "
+                                    + "advisory") + ")")
                     .source(id())
                     .confidence(EvidenceConfidence.DETERMINISTIC)
                     .status(serious.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.REFUTES)
@@ -94,6 +112,33 @@ public final class StaticAnalysisStrategy implements VerificationStrategy {
                     .build();
             context.evidence().add(analysisEvidence);
             evidence.add(analysisEvidence);
+        }
+
+        if (!heuristicSerious.isEmpty()) {
+            // Advisory: a rule match is a hypothesis for a human to check, not an observation that the
+            // requirement is violated. It is recorded with MEDIUM confidence so that it is visible and
+            // cannot qualify as deterministic proof.
+            Evidence advisory = context.evidence().newEvidence(EvidenceType.STATIC_ANALYSIS)
+                    .description("Heuristic rules matched " + heuristicSerious.size() + " time(s) at HIGH "
+                            + "severity or above in files mapped to " + requirement.id()
+                            + ". Heuristic findings have a known false-positive profile, so this is "
+                            + "advisory and does not change the verdict")
+                    .source(id())
+                    .confidence(EvidenceConfidence.MEDIUM)
+                    .status(EvidenceStatus.INCONCLUSIVE)
+                    .result(heuristicSerious.stream().limit(20)
+                            .map(f -> f.severity() + " " + f.ruleId() + " " + f.location() + " " + f.message())
+                            .collect(java.util.stream.Collectors.joining("\n")))
+                    .requirement(requirement.id())
+                    .metadata("advisory", true)
+                    .metadata("rules", heuristicSerious.stream().map(Finding::ruleId).distinct().toList())
+                    .build();
+            context.evidence().add(advisory);
+            evidence.add(advisory);
+            notes.add("Heuristic static analysis reported " + heuristicSerious.size() + " possible issue(s) at "
+                    + "HIGH severity or above in code mapped to " + requirement.id() + " ("
+                    + String.join(", ", heuristicSerious.stream().map(Finding::ruleId).distinct().toList())
+                    + "). Heuristic findings are advisory and never change a verdict; check them by hand.");
         }
 
         for (Finding finding : serious) {

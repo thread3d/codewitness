@@ -65,6 +65,13 @@ public final class JavaScriptTestProvider implements VerificationTools.TestRunne
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(1_000_000)
                 .build());
+        if (result.timedOut()) {
+            // A killed node run may still have written a JUnit report for the tests that finished
+            // before the kill, so the timeout is checked before that report is looked for or parsed.
+            return TestResult.notExecuted("node --test was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; the partial output "
+                    + "is not a complete test run: " + NodeRuntime.lastLines(result.combinedOutput(), 4));
+        }
         if (!result.started()) {
             return TestResult.notExecuted("node could not be started: " + result.failureReason());
         }

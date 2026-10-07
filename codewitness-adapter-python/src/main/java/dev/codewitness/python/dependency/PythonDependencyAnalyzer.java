@@ -6,6 +6,7 @@ import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,6 +25,8 @@ import java.util.regex.Pattern;
  * {@code pyproject.toml}, {@code requirements.txt}, {@code setup.py}, {@code setup.cfg} or
  * {@code Pipfile} - and reports the names. It never claims that a project is free of vulnerable
  * dependencies, because it does not consult a vulnerability database; the report says exactly that.
+ * A manifest that exists but cannot be read is reported as not analysed rather than as an empty
+ * inventory.
  */
 public final class PythonDependencyAnalyzer implements VerificationTools.DependencyAnalyzer {
 
@@ -51,32 +54,39 @@ public final class PythonDependencyAnalyzer implements VerificationTools.Depende
         Set<String> dependencies = new LinkedHashSet<>();
         boolean analysed = false;
 
-        for (Path requirements : requirementFiles(root)) {
-            analysed = true;
-            dependencies.addAll(fromRequirements(read(requirements)));
-        }
-        Path pyproject = root.resolve("pyproject.toml");
-        if (Files.isRegularFile(pyproject)) {
-            analysed = true;
-            String content = read(pyproject);
-            dependencies.addAll(fromQuotedArray(content, "dependencies"));
-            dependencies.addAll(fromSection(content, "[tool.poetry.dependencies]"));
-            dependencies.addAll(fromSection(content, "[tool.pdm.dev-dependencies]"));
-        }
-        Path setupCfg = root.resolve("setup.cfg");
-        if (Files.isRegularFile(setupCfg)) {
-            analysed = true;
-            dependencies.addAll(fromQuotedArray(read(setupCfg), "install_requires"));
-        }
-        Path setupPy = root.resolve("setup.py");
-        if (Files.isRegularFile(setupPy)) {
-            analysed = true;
-            dependencies.addAll(fromQuotedArray(read(setupPy), "install_requires"));
-        }
-        Path pipfile = root.resolve("Pipfile");
-        if (Files.isRegularFile(pipfile)) {
-            analysed = true;
-            dependencies.addAll(fromSection(read(pipfile), "[packages]"));
+        try {
+            for (Path requirements : requirementFiles(root)) {
+                analysed = true;
+                dependencies.addAll(fromRequirements(read(requirements)));
+            }
+            Path pyproject = root.resolve("pyproject.toml");
+            if (Files.isRegularFile(pyproject)) {
+                analysed = true;
+                String content = read(pyproject);
+                dependencies.addAll(fromQuotedArray(content, "dependencies"));
+                dependencies.addAll(fromSection(content, "[tool.poetry.dependencies]"));
+                dependencies.addAll(fromSection(content, "[tool.pdm.dev-dependencies]"));
+            }
+            Path setupCfg = root.resolve("setup.cfg");
+            if (Files.isRegularFile(setupCfg)) {
+                analysed = true;
+                dependencies.addAll(fromQuotedArray(read(setupCfg), "install_requires"));
+            }
+            Path setupPy = root.resolve("setup.py");
+            if (Files.isRegularFile(setupPy)) {
+                analysed = true;
+                dependencies.addAll(fromQuotedArray(read(setupPy), "install_requires"));
+            }
+            Path pipfile = root.resolve("Pipfile");
+            if (Files.isRegularFile(pipfile)) {
+                analysed = true;
+                dependencies.addAll(fromSection(read(pipfile), "[packages]"));
+            }
+        } catch (UncheckedIOException e) {
+            // A manifest that exists but cannot be read is not an empty dependency set: reporting an
+            // empty inventory here would be indistinguishable from "this project has no dependencies".
+            return DependencyReport.notAnalysed("python-manifest",
+                    "a dependency manifest exists but could not be read: " + e.getMessage());
         }
 
         if (!analysed) {
@@ -165,8 +175,10 @@ public final class PythonDependencyAnalyzer implements VerificationTools.Depende
     private static String read(Path file) {
         try {
             return Files.readString(file, StandardCharsets.UTF_8);
-        } catch (IOException _) {
-            return "";
+        } catch (IOException e) {
+            // Propagated rather than swallowed: a manifest that exists but cannot be read must not be
+            // reported as a successful, empty inventory.
+            throw new UncheckedIOException("cannot read " + file, e);
         }
     }
 }

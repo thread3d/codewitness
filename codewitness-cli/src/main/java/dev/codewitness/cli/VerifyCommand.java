@@ -86,6 +86,11 @@ public final class VerifyCommand implements Callable<Integer> {
     @Option(names = "--quiet", description = "Only print the final summary.")
     private boolean quiet;
 
+    @Option(names = "--fail-on-unverified",
+            description = "Exit 1 when any requirement is not VERIFIED. Without this, exit 0 means only "
+                    + "that nothing failed, which is not the same as everything passing.")
+    private boolean failOnUnverified;
+
     @Override
     public Integer call() {
         ProjectRef projectRef = CliSupport.projectRef(project);
@@ -166,7 +171,8 @@ public final class VerifyCommand implements Callable<Integer> {
             System.out.println("HTML report: " + htmlPath);
         }
 
-        return exitCode(report);
+        return exitCode(report.verdicts().stream().map(v -> v.status()).toList(), report.run().status(),
+                failOnUnverified);
     }
 
     private VerificationConfig applyOverrides(VerificationConfig config) {
@@ -211,14 +217,36 @@ public final class VerifyCommand implements Callable<Integer> {
                 result.scenarios());
     }
 
-    private static int exitCode(VerificationReport report) {
-        List<RequirementStatus> statuses = report.verdicts().stream().map(v -> v.status()).toList();
+    /**
+     * Maps a finished run onto the documented exit code.
+     *
+     * <p>Exit codes are part of the interface, so the decision is a pure function of the verdicts and
+     * the run status, and is tested directly rather than only through a full verification.
+     *
+     * @param statuses         one status per requirement
+     * @param runStatus        overall run status, or {@code null} when unknown
+     * @param failOnUnverified {@code true} to treat "not verified" as a failure
+     * @return {@code 1} on a counterexample (or, with the flag, on anything unverified), {@code 2} when
+     *     verification was blocked, otherwise {@code 0}
+     */
+    static int exitCode(
+            List<RequirementStatus> statuses,
+            dev.codewitness.core.result.RunStatus runStatus,
+            boolean failOnUnverified) {
+
         if (statuses.contains(RequirementStatus.FAILED)) {
             return 1;
         }
-        if (statuses.contains(RequirementStatus.BLOCKED) || report.run().status()
-                == dev.codewitness.core.result.RunStatus.BLOCKED) {
+        if (statuses.contains(RequirementStatus.BLOCKED)
+                || runStatus == dev.codewitness.core.result.RunStatus.BLOCKED) {
             return 2;
+        }
+        // By default exit 0 means "nothing failed", which is not the same as "everything passed": a run
+        // in which nothing could be verified is a legitimate result and still exits 0. Callers who need
+        // a gate on evidence rather than on failure ask for it explicitly.
+        if (failOnUnverified
+                && (statuses.isEmpty() || statuses.stream().anyMatch(status -> status != RequirementStatus.VERIFIED))) {
+            return 1;
         }
         return 0;
     }

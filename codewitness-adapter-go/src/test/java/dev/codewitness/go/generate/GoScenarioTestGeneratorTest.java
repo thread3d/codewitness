@@ -125,10 +125,54 @@ class GoScenarioTestGeneratorTest {
     }
 
     @Test
+    @DisplayName("inputs without boundary values still produce exactly one executed case")
+    void rendersOneDefaultCaseWhenNoInputHasBoundaryValues(@TempDir Path root, @TempDir Path runDirectory) {
+        Scenario scenario = new Scenario(
+                "SC-DEFAULTS", "R-001", "inputs without boundary values", Scenario.Mode.SINGLE,
+                "l := New()",
+                List.of(new Scenario.Step("l.Record(${label}, ${note})", List.of(
+                        new Scenario.Input("label", "string", Scenario.Domain.STRING, List.of("explicit"),
+                                null, null, 0),
+                        new Scenario.Input("note", "string", Scenario.Domain.STRING, List.of(),
+                                null, null, 0)), "record both")),
+                null, null, 1, 1L, 60);
+        Requirement requirement = Requirement.builder("R-001", "defaults").build();
+        VerificationContext context = GoTestContexts.context(root, runDirectory, List.of(scenario));
+
+        List<GeneratedTest> generated = new GoScenarioTestGenerator().generate(
+                context, requirement, List.of(obligation("OB-007", "R-001", "SC-DEFAULTS")));
+
+        assertEquals(1, generated.size());
+        String source = generated.getFirst().sourceCode();
+        assertEquals(1, countOccurrences(source, "(t *testing.T) {"),
+                "an empty test file reports nothing, so exactly one function must be emitted:\n" + source);
+        assertTrue(source.contains("func TestCwScDefaultsOb007Case0000(t *testing.T)"), source);
+        assertTrue(source.contains("var label string = \"explicit\""),
+                "the first declared value is used when there is one:\n" + source);
+        assertTrue(source.contains("var note string = \"\""),
+                "the type default is used when there is none:\n" + source);
+        assertTrue(source.contains("{\"label\", fmt.Sprintf(\"%v\", label)}"), source);
+        assertTrue(source.contains("{\"note\", fmt.Sprintf(\"%v\", note)}"), source);
+        assertFalse(source.contains("TestCwScDefaultsOb007Single(t *testing.T)"), source);
+        assertFalse(source.contains("TestCwScDefaultsOb007Random(t *testing.T)"), source);
+        assertFalse(source.contains("${"), source);
+    }
+
+    @Test
     @DisplayName("two scenarios generated into one package carry distinct helper names")
     void helpersAreNamespacedPerGeneratedTest() {
         assertEquals("ScRolling", GoScenarioTestGenerator.camel("SC-ROLLING"));
         assertEquals("Ob001", GoScenarioTestGenerator.camel("OB-001"));
         assertEquals("Case", GoScenarioTestGenerator.camel("---"));
+    }
+
+    private static int countOccurrences(String text, String needle) {
+        int count = 0;
+        int index = text.indexOf(needle);
+        while (index >= 0) {
+            count++;
+            index = text.indexOf(needle, index + needle.length());
+        }
+        return count;
     }
 }

@@ -50,6 +50,14 @@ public final class RustTestProvider implements VerificationTools.TestRunner {
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(1_000_000)
                 .build());
+        if (result.timedOut()) {
+            // A killed cargo test can still have printed complete-looking "test ... ok" lines for the
+            // tests that finished before the kill, so the timeout is checked before that output is
+            // parsed as a suite.
+            return TestResult.notExecuted("cargo test was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; the partial output "
+                    + "is not a complete test run: " + Cargo.lastLines(result.combinedOutput(), 4));
+        }
 
         List<Path> reports = new ArrayList<>();
         if (!result.combinedOutput().isBlank()) {

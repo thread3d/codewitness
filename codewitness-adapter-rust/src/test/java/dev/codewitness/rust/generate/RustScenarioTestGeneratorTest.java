@@ -128,4 +128,51 @@ class RustScenarioTestGeneratorTest {
         assertTrue(source.contains("let cw_inputs: Vec<(&str, String)> = Vec::new();"), source);
         assertFalse(source.contains("fn cw_random_search()"), "a single case needs no random search");
     }
+
+    @Test
+    @DisplayName("inputs without boundary values still produce exactly one executed case")
+    void rendersOneDefaultCaseWhenNoInputHasBoundaryValues(@TempDir Path root, @TempDir Path runDirectory) {
+        Scenario scenario = new Scenario(
+                "SC-DEFAULTS", "R-001", "inputs without boundary values", Scenario.Mode.SINGLE,
+                "let ledger = 0i64;",
+                List.of(new Scenario.Step("ledger.record(${label}, ${note});", List.of(
+                        new Scenario.Input("label", "String", Scenario.Domain.STRING, List.of("explicit"),
+                                null, null, 0),
+                        new Scenario.Input("note", "String", Scenario.Domain.STRING, List.of(),
+                                null, null, 0)), "record both")),
+                null, null, 1, 1L, 60);
+        Requirement requirement = Requirement.builder("R-001", "defaults").build();
+        VerificationObligation obligation = new VerificationObligation("OB-007", "R-001", "execute",
+                ObligationKind.PROPERTY, ObligationOrigin.USER_DECLARED, "SC-DEFAULTS",
+                Map.of("scenario", "SC-DEFAULTS"), false);
+        VerificationContext context = RustTestContexts.context(root, runDirectory, List.of(scenario));
+
+        List<GeneratedTest> generated = new RustScenarioTestGenerator()
+                .generate(context, requirement, List.of(obligation));
+
+        assertEquals(1, generated.size());
+        String source = generated.getFirst().sourceCode();
+        assertEquals(1, countOccurrences(source, "#[test]"),
+                "an empty test file reports nothing, so exactly one function must be emitted:\n" + source);
+        assertTrue(source.contains("fn cw_case0000()"), source);
+        assertTrue(source.contains("let label: String = \"explicit\";"),
+                "the first declared value is used when there is one:\n" + source);
+        assertTrue(source.contains("let note: String = \"\";"),
+                "the type default is used when there is none:\n" + source);
+        assertTrue(source.contains("(\"label\", label.to_string())"), source);
+        assertTrue(source.contains("(\"note\", note.to_string())"), source);
+        assertFalse(source.contains("fn cw_single_case()"), source);
+        assertFalse(source.contains("fn cw_random_search()"), source);
+        assertFalse(source.contains("${"), source);
+    }
+
+    private static int countOccurrences(String text, String needle) {
+        int count = 0;
+        int index = text.indexOf(needle);
+        while (index >= 0) {
+            count++;
+            index = text.indexOf(needle, index + needle.length());
+        }
+        return count;
+    }
 }

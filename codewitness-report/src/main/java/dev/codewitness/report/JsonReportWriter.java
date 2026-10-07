@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 
 /**
  * Writes the canonical, machine-readable CodeWitness report as JSON.
@@ -168,7 +169,7 @@ public final class JsonReportWriter {
         root.set("evidence", evidenceNode(report.evidence()));
         root.set("tests", testsNode(report.tests()));
         root.set("mutation", mutationNode(report.mutation()));
-        root.set("coverage", coverageNode(report.coverage()));
+        root.set("coverage", coverageNode(report));
         root.set("findings", findingsNode(report.findings()));
         root.set("security", securityNode(report.findings()));
         root.set("dependencies", dependenciesNode(report.dependencies()));
@@ -437,7 +438,8 @@ public final class JsonReportWriter {
         return node;
     }
 
-    private ObjectNode coverageNode(CoverageReport coverage) {
+    private ObjectNode coverageNode(VerificationReport report) {
+        CoverageReport coverage = report.coverage();
         ObjectNode node = mapper.createObjectNode();
         node.put("measured", coverage.measured());
         node.put("tool", coverage.tool());
@@ -448,7 +450,58 @@ public final class JsonReportWriter {
         node.put("lineTotal", coverage.lineTotal());
         node.put("branchCovered", coverage.branchCovered());
         node.put("branchTotal", coverage.branchTotal());
+        // Per-file coverage is computed and stored by several adapters; without this field the work only
+        // ever reached SQLite. It is emitted only when there is something to emit, and the keys are
+        // sorted so two reports of the same run diff textually like the rest of the document.
+        if (!coverage.perClassLineCoverage().isEmpty()) {
+            node.set("perClassLineCoverage",
+                    valueNode(perFileCoverage(report, coverage.perClassLineCoverage())));
+        }
         return node;
+    }
+
+    /**
+     * @return the per-file coverage map keyed by the path the report should display: sorted, and
+     *     relative to the project root when the recorded key is an absolute path below it
+     */
+    private static Map<String, Double> perFileCoverage(VerificationReport report, Map<String, Double> perClass) {
+        Map<String, Double> sorted = new TreeMap<>();
+        for (Map.Entry<String, Double> entry : perClass.entrySet()) {
+            String key = displayPath(report, entry.getKey());
+            if (sorted.containsKey(key)) {
+                // Never drop an entry to a relative-path collision: keep the key exactly as recorded.
+                key = entry.getKey();
+            }
+            sorted.put(key, entry.getValue());
+        }
+        return sorted;
+    }
+
+    /**
+     * Renders a path relative to the project root, for keys that are absolute sandbox paths.
+     *
+     * <p>This is a pure string operation on a path the report already holds: no symlink resolution, no
+     * existence check and no guessing, so it can only shorten a path that is genuinely below the root.
+     * Anything else is returned unchanged rather than invented.
+     */
+    private static String displayPath(VerificationReport report, String path) {
+        if (path == null || path.isBlank() || report.project() == null) {
+            return path;
+        }
+        try {
+            Path candidate = Path.of(path);
+            Path root = report.project().project().root();
+            if (root == null) {
+                return path;
+            }
+            Path absoluteRoot = root.toAbsolutePath().normalize();
+            if (candidate.isAbsolute() && candidate.normalize().startsWith(absoluteRoot)) {
+                return absoluteRoot.relativize(candidate.normalize()).toString().replace('\\', '/');
+            }
+        } catch (RuntimeException _) {
+            // not a usable path: keep the original text
+        }
+        return path;
     }
 
     // ------------------------------------------------------------------ findings / security

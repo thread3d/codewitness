@@ -80,7 +80,8 @@ public final class TypeScriptScenarioTestGenerator implements VerificationTools.
             String source = render(context, requirement, obligation, scenario);
             generated.add(new GeneratedTest(className, source, testMethod(scenario),
                     List.of(requirement.id()), List.of(obligation.id()),
-                    scenario.description(), scenario.seed(), null));
+                    scenario.description(), scenario.seed(), null,
+                    scenario.observation() != null && scenario.invariant() != null));
         }
         return generated;
     }
@@ -119,7 +120,7 @@ public final class TypeScriptScenarioTestGenerator implements VerificationTools.
         sb.append("// Scenario: ").append(scenario.id()).append(" (mode ").append(scenario.mode())
                 .append(", seed ").append(scenario.seed()).append(", cases ").append(scenario.cases()).append(")\n");
         sb.append("// This file is temporary: CodeWitness keeps it with the run so a counterexample can be replayed.\n");
-        sb.append("// It uses only Node's standard library, so it runs on any Node 22.6+ without a build step.\n\n");
+        sb.append("// It uses only Node's standard library, so it runs on any Node 22.18+ without a build step.\n\n");
         sb.append("import test from \"node:test\";\n");
         appendHoistedImports(sb, scenario.setup());
         sb.append('\n');

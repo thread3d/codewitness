@@ -80,7 +80,8 @@ public final class JavaScriptScenarioTestGenerator implements VerificationTools.
             String source = render(context, requirement, obligation, scenario);
             generated.add(new GeneratedTest(className, source, testMethod(scenario),
                     List.of(requirement.id()), List.of(obligation.id()),
-                    scenario.description(), scenario.seed(), null));
+                    scenario.description(), scenario.seed(), null,
+                    scenario.observation() != null && scenario.invariant() != null));
         }
         return generated;
     }

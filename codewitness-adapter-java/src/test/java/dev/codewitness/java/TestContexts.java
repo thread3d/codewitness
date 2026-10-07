@@ -80,16 +80,22 @@ public final class TestContexts {
      * would find nothing to run.
      */
     public static VerificationContext context(ProjectInfo info, Path runDirectory, List<Scenario> scenarios) {
+        Path root = info.project().root();
+        return context(info, runDirectory, config(scenarios),
+                new LocalProcessSandbox(List.of(root, runDirectory)));
+    }
+
+    /**
+     * A context whose configuration and sandbox the caller supplies.
+     *
+     * <p>Needed by the generated-test executor's tests: they exercise the execution path itself, so
+     * they must be able to substitute the process runner and to switch individual report options on.
+     */
+    public static VerificationContext context(
+            ProjectInfo info, Path runDirectory, VerificationConfig config, ExecutionSandbox sandbox) {
         ProjectRef projectRef = info.project();
-        Path root = projectRef.root();
         WorkspaceManager.Workspace workspace =
                 WorkspaceManager.prepare(projectRef, runDirectory, WorkspaceManager.Mode.IN_PLACE);
-        ExecutionSandbox sandbox = new LocalProcessSandbox(List.of(root, runDirectory));
-        VerificationConfig defaults = VerificationConfig.defaults();
-        VerificationConfig config = new VerificationConfig(
-                defaults.project(), defaults.language(), defaults.limits(), defaults.tests(),
-                defaults.mutation(), defaults.propertyTesting(), defaults.staticAnalysis(),
-                defaults.security(), defaults.llm(), defaults.report(), defaults.sandbox(), scenarios);
         return VerificationContext.builder()
                 .runId("CW-2026-01-01-TEST0")
                 .projectRef(projectRef)
@@ -101,5 +107,14 @@ public final class TestContexts {
                 .sandbox(sandbox)
                 .evidenceLedger(new EvidenceLedger("CW-2026-01-01-TEST0"))
                 .build();
+    }
+
+    /** @return the default configuration with the given scenarios declared in code. */
+    public static VerificationConfig config(List<Scenario> scenarios) {
+        VerificationConfig defaults = VerificationConfig.defaults();
+        return new VerificationConfig(
+                defaults.project(), defaults.language(), defaults.limits(), defaults.tests(),
+                defaults.mutation(), defaults.propertyTesting(), defaults.staticAnalysis(),
+                defaults.security(), defaults.llm(), defaults.report(), defaults.sandbox(), scenarios);
     }
 }

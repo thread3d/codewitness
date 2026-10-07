@@ -74,13 +74,39 @@ public final class GoTestProvider implements VerificationTools.TestRunner {
     public List<String> replayCommand(VerificationContext context, TestCaseResult testCase) {
         String go = GoTool.go(context.projectInfo(), context);
         // Go selects a test by a regular expression on its name, and -count=1 keeps the replay from
-        // being answered out of the test cache.
-        List<String> command = new ArrayList<>(List.of(go, "test", "-count=1", "-run", "^" + testCase.name() + "$"));
+        // being answered out of the test cache. The name is quoted first: a Go test name is not
+        // regex-safe (a subtest is named TestX/case(1)), and an unquoted metacharacter would make the
+        // replay select nothing instead of the test that failed.
+        List<String> command = new ArrayList<>(
+                List.of(go, "test", "-count=1", "-run", "^" + quoteMeta(testCase.name()) + "$"));
         if (testCase.suite() != null && !testCase.suite().isBlank()) {
             command.add(testCase.suite());
         } else {
             command.add("./...");
         }
         return List.copyOf(command);
+    }
+
+    /**
+     * Quotes every Go regular-expression metacharacter in {@code value}, as {@code regexp.QuoteMeta}
+     * does.
+     *
+     * <p>{@code -run} takes a regular expression, so a test name must be escaped before it is
+     * interpolated. The escaped set is Go's own and is written out here by hand because this adapter
+     * depends on the core only, never on a third-party regex library.
+     *
+     * @param value the literal text to match
+     * @return the text with Go's metacharacters ({@code \.+*?()|[]{}^$}) backslash-escaped
+     */
+    static String quoteMeta(String value) {
+        StringBuilder quoted = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if ("\\.+*?()|[]{}^$".indexOf(c) >= 0) {
+                quoted.append('\\');
+            }
+            quoted.append(c);
+        }
+        return quoted.toString();
     }
 }

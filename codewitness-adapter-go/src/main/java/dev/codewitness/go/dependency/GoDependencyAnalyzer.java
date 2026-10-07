@@ -27,6 +27,9 @@ import java.util.List;
  * dependency of the program, so it is deliberately absent from the inventory. A module that exists
  * but requires nothing is still an analysed module, so an empty project reports "0 dependencies"
  * rather than pretending the analysis could not run.
+ *
+ * <p>A {@code go.mod} that exists but cannot be read is the opposite case: it is reported as not
+ * analysed, because an empty inventory would be indistinguishable from a module with no dependencies.
  */
 public final class GoDependencyAnalyzer implements VerificationTools.DependencyAnalyzer {
 
@@ -47,7 +50,15 @@ public final class GoDependencyAnalyzer implements VerificationTools.DependencyA
             return DependencyReport.notAnalysed("go-module",
                     "no go.mod was found, so no module manifest could be read");
         }
-        String content = read(manifest);
+        String content;
+        try {
+            content = Files.readString(manifest, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            // A manifest that exists but cannot be read is not an empty module graph: reporting an empty
+            // inventory here would be indistinguishable from "this project has no dependencies".
+            return DependencyReport.notAnalysed("go-module",
+                    "go.mod exists but could not be read: " + e);
+        }
         List<String> all = parse(content);
         List<String> direct = direct(content);
         return new DependencyReport(true, "go-module",
@@ -121,13 +132,5 @@ public final class GoDependencyAnalyzer implements VerificationTools.DependencyA
             return;
         }
         modules.add(parts[0]);
-    }
-
-    private static String read(Path file) {
-        try {
-            return Files.readString(file, StandardCharsets.UTF_8);
-        } catch (IOException _) {
-            return "";
-        }
     }
 }

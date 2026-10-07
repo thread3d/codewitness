@@ -90,4 +90,52 @@ class PythonScenarioTestGeneratorTest {
         assertTrue(source.contains("threading.Barrier(8)"), source);
         assertTrue(source.contains("threading.Thread"), source);
     }
+
+    @Test
+    @DisplayName("inputs without boundary values still produce exactly one executed case")
+    void rendersOneDefaultCaseWhenNoInputHasBoundaryValues(@TempDir Path root, @TempDir Path runDirectory) {
+        Scenario scenario = new Scenario(
+                "SC-DEFAULTS", "R-001", "inputs without boundary values", Scenario.Mode.SINGLE,
+                "ledger = object()",
+                List.of(new Scenario.Step("ledger.record(${label}, ${note})", List.of(
+                        new Scenario.Input("label", "str", Scenario.Domain.STRING, List.of("explicit"),
+                                null, null, 0),
+                        new Scenario.Input("note", "str", Scenario.Domain.STRING, List.of(),
+                                null, null, 0)), "record both")),
+                null, null, 1, 1L, 60);
+        Requirement requirement = Requirement.builder("R-001", "defaults").build();
+        VerificationObligation obligation = new VerificationObligation("OB-007", "R-001", "execute scenario",
+                ObligationKind.PROPERTY, ObligationOrigin.USER_DECLARED, "SC-DEFAULTS",
+                Map.of("scenario", "SC-DEFAULTS"), false);
+        VerificationContext context = PythonTestContexts.context(root, runDirectory, List.of(scenario));
+
+        List<GeneratedTest> generated = new PythonScenarioTestGenerator()
+                .generate(context, requirement, List.of(obligation));
+
+        assertEquals(1, generated.size());
+        String source = generated.getFirst().sourceCode();
+        assertEquals(1, countOccurrences(source, "    def test_"),
+                "an empty class reports nothing, so exactly one case must be emitted:\n" + source);
+        assertTrue(source.contains("def test_case0000(self):"), source);
+        assertTrue(source.contains("label = \"explicit\""),
+                "the first declared value is used when there is one:\n" + source);
+        assertTrue(source.contains("note = \"\""),
+                "the type default is used when there is none:\n" + source);
+        assertTrue(source.contains("\"label\": label"), source);
+        assertTrue(source.contains("\"note\": note"), source);
+        assertFalse(source.contains("def test_single_case(self)"), source);
+        assertFalse(source.contains("def test_random_search(self):"),
+                "a SINGLE scenario with one case has nothing to search over");
+        assertFalse(source.contains("${"), source);
+    }
+
+    private static int countOccurrences(String text, String needle) {
+        int count = 0;
+        int index = text.indexOf(needle);
+        while (index >= 0) {
+            count++;
+            index = text.indexOf(needle, index + needle.length());
+        }
+        return count;
+    }
 }

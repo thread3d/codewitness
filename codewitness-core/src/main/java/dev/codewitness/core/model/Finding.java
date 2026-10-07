@@ -1,6 +1,7 @@
 package dev.codewitness.core.model;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -49,6 +50,20 @@ public record Finding(
             return "<unknown>";
         }
         return line == null ? file : file + ":" + line;
+    }
+
+    /**
+     * @return {@code true} when a deterministic tool produced this finding.
+     *
+     * <p>A compiler, a linter or a vet tool reports a fact about the code, so a serious finding from
+     * one may refute a requirement. The pattern-matching heuristic rule tables are a different kind
+     * of thing: they are documented as having a known false-positive profile, so their findings are
+     * advisory and must never fail a requirement on their own. The heuristic analyzers identify
+     * themselves with an analyzer id containing {@code heuristic} (for example
+     * {@code python-heuristics}, {@code go-heuristics}); anything else is a real tool.
+     */
+    public boolean fromDeterministicTool() {
+        return !analyzer.toLowerCase(Locale.ROOT).contains("heuristic");
     }
 
     /** Stable identity used for de-duplication across analyzers. */

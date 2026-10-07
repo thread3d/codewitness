@@ -77,6 +77,13 @@ public final class RustCoverageProvider implements VerificationTools.CoveragePro
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(1_000_000)
                 .build());
+        if (result.timedOut()) {
+            // The killed exporter may have written a partial JSON file, so the timeout is checked
+            // before that file is looked for or parsed.
+            return CoverageReport.notMeasured("cargo-llvm-cov", "cargo llvm-cov was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; a partial coverage "
+                    + "report is not a measurement");
+        }
 
         if (!Files.isRegularFile(report)) {
             return CoverageReport.notMeasured("cargo-llvm-cov", "cargo llvm-cov produced no JSON report ("

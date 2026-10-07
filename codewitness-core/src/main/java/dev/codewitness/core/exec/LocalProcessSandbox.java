@@ -29,7 +29,15 @@ import java.util.concurrent.TimeUnit;
  */
 public final class LocalProcessSandbox implements ExecutionSandbox {
 
-    /** Environment variables that are safe to forward to a build process. */
+    /**
+     * Environment variables that are safe to forward to a build process.
+     *
+     * <p>The child environment is <em>replaced</em> with these, not filtered, so anything not listed -
+     * API keys, cloud credentials, tokens, proxy settings - is absent by construction.
+     * {@code JAVA_TOOL_OPTIONS} is the deliberate exception: it is the only channel through which a
+     * toolchain redirect reaches a forked JVM (Maven strips {@code MAVEN_OPTS}), and it routinely carries
+     * {@code -Dhttps.proxyHost}. It is forwarded on purpose, and the sandbox description says so.
+     */
     private static final List<String> PASSTHROUGH = List.of(
             "PATH", "JAVA_HOME", "LANG", "LC_ALL", "TZ", "TMPDIR", "HOME", "GRADLE_USER_HOME",
             "MAVEN_OPTS", "JAVA_TOOL_OPTIONS", "SDKMAN_DIR");
@@ -52,7 +60,9 @@ public final class LocalProcessSandbox implements ExecutionSandbox {
                 env.put(key, value);
             }
         }
-        // Never forward credentials, tokens or proxy configuration to project code by default.
+        // The environment is replaced rather than filtered, so credentials and proxy configuration are
+        // absent by default. MAVEN_OPTS is dropped on purpose; JAVA_TOOL_OPTIONS is not, which is why the
+        // description below names it instead of claiming no proxy setting can reach the child.
         env.put("CODEWITNESS_SANDBOX", "local-process");
         env.remove("MAVEN_OPTS");
         this.baseEnvironment = Map.copyOf(env);
@@ -70,8 +80,11 @@ public final class LocalProcessSandbox implements ExecutionSandbox {
 
     @Override
     public String description() {
-        return "child process with sanitised environment (credentials and proxy variables removed), "
-                + "hard timeout and capped output; network access is " + (allowNetwork ? "allowed" : "not blocked")
+        return "child process whose environment is replaced by an allow-list (PATH, JAVA_HOME, LANG, "
+                + "LC_ALL, TZ, TMPDIR, HOME, GRADLE_USER_HOME, JAVA_TOOL_OPTIONS, SDKMAN_DIR; MAVEN_OPTS is "
+                + "removed), so credentials and proxy variables are absent unless they are in that list - "
+                + "note that JAVA_TOOL_OPTIONS is forwarded and commonly carries proxy settings. "
+                + "Hard timeout and capped output; network access is " + (allowNetwork ? "allowed" : "not blocked")
                 + ". This is a resource-safety boundary, NOT a security boundary: a hostile build can still "
                 + "read anything the current user can read. Use sandbox.mode=docker for a real boundary.";
     }

@@ -4,6 +4,10 @@ This is a transcript of CodeWitness verifying a project that contains deliberate
 with a note on what to look at in each part of the output. Everything below is copied from an actual
 run on this repository; the only editing is removing the progress lines.
 
+Every `codewitness` command shown here is the repository's `./codewitness` launcher, run from the
+repository root. `./build.sh` builds the jar it needs; it does not install a `codewitness` command on
+`PATH`.
+
 ## Prerequisites
 
 ```bash
@@ -18,7 +22,7 @@ sections at the end need Python 3, Cargo, the `go` tool and a Node runtime (22.6
 
 ## 1. What is in the project?
 
-`codewitness inspect` looks at the project without executing anything:
+`./codewitness inspect` looks at the project without executing anything:
 
 ```text
 CODEWITNESS  inspect
@@ -46,7 +50,7 @@ CodeWitness thinks it is looking at, before anything is executed.
 ## 2. Verification
 
 ```bash
-codewitness verify fixtures/withdrawal-ledger \
+./codewitness verify fixtures/withdrawal-ledger \
     --requirements fixtures/withdrawal-ledger/requirements.md \
     --max-duration 10m
 ```
@@ -146,7 +150,7 @@ The evidence is not a screenshot. The generated test is kept in the run's artifa
 `reproduce` puts it back and runs the exact failing case:
 
 ```bash
-codewitness reproduce CW-2026-10-06-CWZBF --counterexample CE-005 --project fixtures/withdrawal-ledger --run
+./codewitness reproduce CW-2026-10-06-CWZBF --counterexample CE-005 --project fixtures/withdrawal-ledger --run
 ```
 
 ```text
@@ -195,16 +199,16 @@ fixtures/withdrawal-ledger/.codewitness/
 ```
 
 The project itself is untouched: generated tests are written into the copy, run there, and removed.
-`codewitness report` lists stored runs; `codewitness clean` removes old ones.
+`./codewitness report` lists stored runs; `./codewitness clean` removes old ones.
 
 ## 7. Trying it on your own project
 
 ```bash
 cd /path/to/my-project
-codewitness init .                                   # writes starter config and requirements
+/path/to/the/codewitness/checkout/codewitness init .   # the launcher is not installed on PATH
 $EDITOR requirements.md                              # describe what the code must do
 $EDITOR codewitness.yaml                            # declare how each requirement can be executed
-codewitness verify . --requirements requirements.md
+/path/to/the/codewitness/checkout/codewitness verify . --requirements requirements.md
 ```
 
 Start with one requirement and one scenario. If CodeWitness reports `UNVERIFIED`, read the rationale:

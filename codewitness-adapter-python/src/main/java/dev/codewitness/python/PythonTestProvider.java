@@ -67,6 +67,13 @@ public final class PythonTestProvider implements VerificationTools.TestRunner {
                 .maxOutputBytes(1_000_000)
                 .build();
         ProcessResult result = context.runner().run(spec);
+        if (result.timedOut()) {
+            // The killed runner may still have written a report for the tests that finished before the
+            // kill, so the timeout is checked before that report is looked for or parsed.
+            return TestResult.notExecuted((pytest ? "pytest" : "unittest") + " was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; the partial output "
+                    + "is not a complete test run: " + lastLines(result.combinedOutput(), 6));
+        }
 
         if (!Files.isRegularFile(report)) {
             return TestResult.notExecuted("the Python test runner produced no JUnit report ("

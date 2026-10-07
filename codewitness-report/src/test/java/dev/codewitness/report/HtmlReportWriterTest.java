@@ -1,8 +1,13 @@
 package dev.codewitness.report;
 
+import dev.codewitness.core.model.CoverageReport;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.FindingCategory;
+import dev.codewitness.core.model.LanguageId;
+import dev.codewitness.core.model.ProjectInfo;
+import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.Severity;
+import dev.codewitness.core.requirements.RequirementSet;
 import dev.codewitness.core.result.VerificationReport;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -12,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -111,6 +117,10 @@ class HtmlReportWriterTest {
         assertTrue(html.contains("id=\"coverage\""));
         assertTrue(html.contains("jacoco"));
         assertTrue(html.contains("82.0%"));
+        assertTrue(html.contains("Per-file line coverage"),
+                "per-file coverage must be shown, not only stored");
+        assertTrue(html.contains("dev.example.Cart"), "the per-file key must be listed");
+        assertTrue(html.contains("91.0%"), "the per-file percentage must be listed");
         assertTrue(html.contains("id=\"findings\""));
         assertTrue(html.contains("SQL_INJECTION"));
         assertTrue(html.contains("User input is concatenated into a SQL statement."));
@@ -121,6 +131,26 @@ class HtmlReportWriterTest {
         assertTrue(html.contains("generated-tests"), "phase records must be shown");
         assertTrue(html.contains("id=\"limitations\""));
         assertTrue(html.contains(ReportFixtures.LIMITATION), "limitations must be shown");
+    }
+
+    @Test
+    void perFileCoverageRendersAbsoluteSandboxPathsRelativeToTheProjectRoot() {
+        ProjectInfo project = ProjectInfo.builder(ProjectRef.of(Path.of("/sandbox/project")))
+                .language(LanguageId.JAVA)
+                .build();
+        VerificationReport custom = VerificationReport.builder("run-coverage", project, new RequirementSet(List.of()))
+                .coverage(new CoverageReport(true, "jacoco", "", 3, 4, 0, 0,
+                        Map.of("/sandbox/project/src/a.ts", 100.0, "src/b.ts", 50.0), List.of()))
+                .build();
+
+        String rendered = new HtmlReportWriter().render(custom);
+
+        assertFalse(rendered.contains("/sandbox/project/src/a.ts"),
+                "an absolute path below the project root must be shown relative to it");
+        assertTrue(rendered.contains("<code>src/a.ts</code>"), rendered);
+        assertTrue(rendered.contains("<code>src/b.ts</code>"), rendered);
+        // Sorted by displayed key: src/a.ts before src/b.ts.
+        assertTrue(rendered.indexOf("src/a.ts") < rendered.indexOf("src/b.ts"), rendered);
     }
 
     @Test

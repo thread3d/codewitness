@@ -105,6 +105,13 @@ public final class PythonCoverageProvider implements VerificationTools.CoverageP
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(1_000_000)
                 .build());
+        if (runResult.timedOut()) {
+            // The killed run may have written a partial data file, so the timeout is checked before any
+            // report is exported or parsed.
+            return CoverageReport.notMeasured("coverage.py", "coverage.py was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; a partial coverage "
+                    + "report is not a measurement");
+        }
 
         List<String> export = List.of(interpreter, "-m", "coverage", "json", "-o", jsonReport.toString());
         ProcessResult exportResult = context.runner().run(ProcessSpec.builder(export, context.projectRoot())
@@ -112,6 +119,13 @@ public final class PythonCoverageProvider implements VerificationTools.CoverageP
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(200_000)
                 .build());
+        if (exportResult.timedOut()) {
+            // The JSON export can be interrupted mid-write, leaving a truncated file that parses into
+            // invented numbers, so it is refused before it is read.
+            return CoverageReport.notMeasured("coverage.py", "coverage.py json was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; a partial coverage "
+                    + "report is not a measurement");
+        }
 
         if (!Files.isRegularFile(jsonReport)) {
             return CoverageReport.notMeasured("coverage.py", "coverage produced no JSON report ("

@@ -21,9 +21,9 @@ import java.util.Locale;
  * Runs a TypeScript project's existing tests with Node's own test runner.
  *
  * <p>The command is {@code node --test}, which needs no dependency, discovers the conventional test
- * files, and executes {@code .ts} sources directly by stripping their type annotations (Node 22.6 and
- * later). Results are read from the JUnit report the runner writes, not from console output, and the
- * raw report and console output are stored as artefacts.
+ * files, and executes {@code .ts} sources directly by stripping their type annotations (Node 22.18 and
+ * later, where type stripping is enabled by default). Results are read from the JUnit report the runner
+ * writes, not from console output, and the raw report and console output are stored as artefacts.
  *
  * <p>The files are named explicitly rather than left to discovery, so a compiled copy of the tests
  * under {@code dist} cannot be run a second time and be mistaken for a second test suite. A {@code .tsx}
@@ -66,6 +66,13 @@ public final class TypeScriptTestProvider implements VerificationTools.TestRunne
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(1_000_000)
                 .build());
+        if (result.timedOut()) {
+            // A killed node run may still have written a JUnit report for the tests that finished
+            // before the kill, so the timeout is checked before that report is looked for or parsed.
+            return TestResult.notExecuted("node --test was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; the partial output "
+                    + "is not a complete test run: " + NodeRuntime.lastLines(result.combinedOutput(), 4));
+        }
         if (!result.started()) {
             return TestResult.notExecuted("node could not be started: " + result.failureReason());
         }

@@ -20,8 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The loader is forgiving about unknown keys but hard-fails on a malformed file: a configuration
- * mistake must never quietly weaken verification.
+ * The loader rejects configuration it does not understand and hard-fails on a malformed file: a
+ * configuration mistake must never quietly weaken verification.
  */
 class ConfigLoaderTest {
 
@@ -316,21 +316,130 @@ class ConfigLoaderTest {
     }
 
     @Test
-    @DisplayName("unknown keys are ignored rather than rejected")
-    void unknownKeysAreIgnored() {
+    @DisplayName("an unknown key is rejected instead of silently keeping the default")
+    void unknownKeysAreRejected() {
+        // A typo used to leave the conservative default in place, so the run looked like it did
+        // something the user never asked for and the report was quietly weaker than the configuration
+        // suggested. A misspelled key is now an error that names it.
+        IllegalArgumentException atRoot = assertThrows(IllegalArgumentException.class,
+                () -> load("something_new:\n  deeply:\n    nested: true\n"));
+        assertTrue(atRoot.getMessage().contains("something_new"), atRoot.getMessage());
+
+        IllegalArgumentException inSection = assertThrows(IllegalArgumentException.class,
+                () -> load("project:\n  name: demo\n  future_setting: whatever\n"));
+        assertTrue(inSection.getMessage().contains("future_setting"), inSection.getMessage());
+        assertTrue(inSection.getMessage().contains("project"), inSection.getMessage());
+
+        IllegalArgumentException inVerification = assertThrows(IllegalArgumentException.class,
+                () -> load("verification:\n  another_future_key: 3\n"));
+        assertTrue(inVerification.getMessage().contains("another_future_key"), inVerification.getMessage());
+    }
+
+    @Test
+    @DisplayName("a misspelled key inside a nested section is rejected too")
+    void nestedUnknownKeysAreRejected() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> load("""
+                        security:
+                          enabled: true
+                          vulnerabilities:
+                            enable: true
+                        """));
+
+        assertTrue(error.getMessage().contains("enable"), error.getMessage());
+        assertTrue(error.getMessage().contains("security.vulnerabilities"), error.getMessage());
+    }
+
+    @Test
+    @DisplayName("the documented instantMillis domain parses, as does its underscored spelling")
+    void instantMillisDomainParses() {
+        // The scenario reference and the init template both teach `instantMillis`, but the enum constant
+        // is INSTANT_MILLIS and a bare valueOf rejected it with a stack trace.
+        for (String spelling : List.of("instantMillis", "instant_millis", "INSTANT_MILLIS")) {
+            VerificationConfig config = load("""
+                    scenarios:
+                      - id: SC-1
+                        requirement: R-001
+                        observation: "ledger.total()"
+                        invariant: "observation > 0"
+                        steps:
+                          - call: "ledger.at(${t})"
+                            inputs:
+                              - name: t
+                                type: long
+                                domain: %s
+                    """.formatted(spelling)).config();
+
+            assertEquals(Scenario.Domain.INSTANT_MILLIS,
+                    config.scenarios().get(0).steps().get(0).inputs().get(0).domain(), spelling);
+        }
+    }
+
+    @Test
+    @DisplayName("an unknown input domain names the domain and lists the valid ones")
+    void unknownDomainIsRejectedWithTheValidValues() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> load("""
+                        scenarios:
+                          - id: SC-1
+                            requirement: R-001
+                            steps:
+                              - call: "ledger.run(${n})"
+                                inputs:
+                                  - name: n
+                                    type: long
+                                    domain: intger
+                        """));
+
+        assertTrue(error.getMessage().contains("intger"), error.getMessage());
+        assertTrue(error.getMessage().contains("integer"), error.getMessage());
+    }
+
+    @Test
+    @DisplayName("an unknown scenario mode is rejected rather than silently becoming single")
+    void unknownModeIsRejected() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> load("""
+                        scenarios:
+                          - id: SC-1
+                            requirement: R-001
+                            mode: sequential
+                            steps:
+                              - call: "ledger.run()"
+                        """));
+
+        assertTrue(error.getMessage().contains("sequential"), error.getMessage());
+        assertTrue(error.getMessage().contains("concurrent"), error.getMessage());
+    }
+
+    @Test
+    @DisplayName("a scenario with no oracle warns that it cannot make its requirement verified")
+    void scenarioWithoutAnOracleWarns() {
         ConfigLoader.Loaded loaded = load("""
-                project:
-                  name: demo
-                  future_setting: whatever
-                something_new:
-                  deeply:
-                    nested: true
-                verification:
-                  another_future_key: 3
+                scenarios:
+                  - id: SC-1
+                    requirement: R-001
+                    steps:
+                      - call: "ledger.run()"
+                  - id: SC-2
+                    requirement: R-002
+                    observation: "ledger.total()"
+                    steps:
+                      - call: "ledger.run()"
+                  - id: SC-3
+                    requirement: R-003
+                    observation: "ledger.total()"
+                    invariant: "observation >= 0"
+                    steps:
+                      - call: "ledger.run()"
                 """);
 
-        assertEquals("demo", loaded.config().project().name());
-        assertTrue(loaded.warnings().isEmpty());
+        assertEquals(2, loaded.warnings().size(), loaded.warnings().toString());
+        assertTrue(loaded.warnings().get(0).contains("SC-1"), loaded.warnings().toString());
+        assertTrue(loaded.warnings().get(0).contains("VERIFIED"), loaded.warnings().toString());
+        assertTrue(loaded.warnings().get(1).contains("SC-2"), loaded.warnings().toString());
+        assertEquals(3, loaded.config().scenarios().size(),
+                "the scenarios still load: they execute their steps, they just assert nothing");
     }
 
     @Test

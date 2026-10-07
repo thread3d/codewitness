@@ -20,7 +20,7 @@ import java.util.Map;
  * the runtime can do.
  *
  * <p>Node is resolved once, during inspection, and recorded in the project attributes so every phase
- * uses the same one. Node 22.6 and later can execute TypeScript directly by stripping the type
+ * uses the same one. Node 22.18 and later can execute TypeScript directly by stripping the type
  * annotations, which is what lets this adapter run tests and generated tests with no build step and no
  * third-party package; the optional TypeScript compiler is only used for type checking when a project
  * already has one installed.
@@ -39,8 +39,16 @@ public final class NodeRuntime {
     public static final String ATTR_TSC_SOURCE = "tscSource";
     public static final String ATTR_TYPE_SCRIPT_VERSION = "typescriptVersion";
 
-    /** Node versions before this cannot execute TypeScript sources at all. */
-    public static final String MINIMUM_TYPE_STRIPPING_VERSION = "22.6.0";
+    /**
+     * Node versions before this cannot execute TypeScript sources without a build step.
+     *
+     * <p>{@code --experimental-strip-types} appeared in Node 22.6.0 and
+     * {@code module.stripTypeScriptTypes} — which the build helper calls — in 22.13.0, but type stripping
+     * is only enabled <em>by default</em> from Node 22.18.0. This adapter runs {@code node --test} over
+     * {@code .ts} files with no flag, so 22.18.0 is the first release that supports what the adapter
+     * actually does.
+     */
+    public static final String MINIMUM_TYPE_STRIPPING_VERSION = "22.18.0";
 
     private NodeRuntime() {
     }
@@ -160,6 +168,24 @@ public final class NodeRuntime {
             }
         }
         return true;
+    }
+
+    /**
+     * Explains why a runtime that reported {@code version} cannot run TypeScript without a build step.
+     *
+     * <p>The message names the missing capability and the version that provides it, so a blocked build
+     * says what to change rather than just that something is wrong.
+     *
+     * @param version the string printed by {@code node --version}, or {@code null}
+     * @return a one-sentence explanation for the report
+     */
+    public static String typeStrippingWarning(String version) {
+        String reported = version == null || version.isBlank() ? "unknown" : version;
+        return "this Node runtime (" + reported + ") cannot execute TypeScript by stripping types: "
+                + "type stripping is enabled by default only from Node " + MINIMUM_TYPE_STRIPPING_VERSION
+                + " (and module.stripTypeScriptTypes, which the build helper imports, requires 22.13.0), "
+                + "so Node " + MINIMUM_TYPE_STRIPPING_VERSION + " or later is required to run TypeScript "
+                + "tests without a build step";
     }
 
     private static int[] parseVersion(String version) {

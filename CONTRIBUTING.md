@@ -156,8 +156,8 @@ outcomes. You cannot assign a verdict; the engine does that from your evidence. 
 
 - [ ] `mvn -Pe2e test` passes.
 - [ ] `./demo.sh` still finds the four defects in `fixtures/withdrawal-ledger`, and
-      `codewitness verify fixtures/python-withdrawal-ledger` still reports R-001 and R-003 as `FAILED`
-      and R-002 as `VERIFIED`, and `codewitness verify fixtures/rust-withdrawal-ledger`,
+      `./codewitness verify fixtures/python-withdrawal-ledger` still reports R-001 and R-003 as `FAILED`
+      and R-002 as `VERIFIED`, and `./codewitness verify fixtures/rust-withdrawal-ledger`,
       `fixtures/go-withdrawal-ledger`, `fixtures/typescript-withdrawal-ledger` and
       `fixtures/javascript-withdrawal-ledger` still report R-001 and R-003 as `FAILED`, R-002 as
       `VERIFIED` and R-004 as `UNVERIFIED`.

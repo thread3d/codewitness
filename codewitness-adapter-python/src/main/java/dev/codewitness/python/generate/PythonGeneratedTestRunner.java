@@ -109,6 +109,15 @@ public final class PythonGeneratedTestRunner implements VerificationTools.Genera
         }
         TestResult parsed = PythonTestReportParser.parse(List.of(report), generatedDirectory,
                 "generated test run (" + result.describeOutcome() + ")");
+        if (parsed.cases().isEmpty()) {
+            // A report that carries no case for the generated modules is not a pass: the modules either
+            // never ran or were not collected. Report the batch as not executed so that silence is never
+            // mistaken for a successful run.
+            String note = "the Python runner reported no test case for the generated tests ("
+                    + result.describeOutcome() + "); last output: "
+                    + PythonTestProvider.lastLines(result.combinedOutput(), 6);
+            return new GeneratedTestExecution(tests, TestResult.notExecuted(note), artifacts, note);
+        }
         return new GeneratedTestExecution(tests, parsed, artifacts, parsed.describe());
     }
 

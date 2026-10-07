@@ -15,7 +15,7 @@ import java.util.Objects;
  * error prone: boundary enumeration, seeded random search, execution, and reproducible
  * counterexamples.
  *
- * <p>Every Java fragment in a scenario is authored by the user and is recorded as
+ * <p>Every fragment in a scenario is authored by the user and is recorded as
  * {@link dev.codewitness.core.requirements.ObligationOrigin#USER_DECLARED}. A scenario never marks a
  * requirement verified on its own; it produces evidence that the engine weighs like any other.
  *
@@ -156,6 +156,40 @@ public record Scenario(
                 case "java.time.Instant" -> INSTANT_MILLIS;
                 default -> RAW;
             };
+        }
+
+        /**
+         * Parses a {@code domain:} value case-insensitively, ignoring underscores, hyphens and spaces.
+         *
+         * <p>The domain is written by hand in YAML, so the spelling has to be forgiving in the
+         * direction the documentation uses it: {@code instantMillis} and {@code instant_millis} both
+         * mean {@link #INSTANT_MILLIS}. A bare {@code Enum.valueOf} on the upper-cased text rejected
+         * {@code instantMillis} - the spelling the scenario reference and the {@code init} template
+         * both teach - and the {@link IllegalArgumentException} escaped as a stack trace rather than a
+         * configuration error. An unknown domain is still an error, but a stated one.
+         *
+         * @param value    text from the configuration, or {@code null}
+         * @param fallback domain to use when {@code value} is absent or blank
+         * @return the parsed domain
+         */
+        public static Domain parse(String value, Domain fallback) {
+            if (value == null || value.isBlank()) {
+                return fallback;
+            }
+            String normalized = normalize(value);
+            for (Domain domain : values()) {
+                if (normalize(domain.name()).equals(normalized)) {
+                    return domain;
+                }
+            }
+            throw new IllegalArgumentException("unknown input domain \"" + value.trim() + "\"; known domains are "
+                    + java.util.Arrays.stream(values())
+                            .map(domain -> domain.name().toLowerCase(java.util.Locale.ROOT))
+                            .collect(java.util.stream.Collectors.joining(", ")));
+        }
+
+        private static String normalize(String value) {
+            return value.trim().toLowerCase(java.util.Locale.ROOT).replace("_", "").replace("-", "").replace(" ", "");
         }
     }
 

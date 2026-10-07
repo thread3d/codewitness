@@ -138,14 +138,17 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
                 .findFirst().orElse(null);
         List<String> batchReplay = executor.reproductionCommand(context, generated, batchSeed, null);
 
+        boolean anyOracle = generated.stream().anyMatch(GeneratedTest::checksInvariant);
         Evidence batch = context.evidence().newEvidence(EvidenceType.GENERATED_TEST)
-                .description("Executed " + execution.executed().size() + " generated tests for "
-                        + requirement.id() + ": " + (result.executed() ? result.describe() : execution.note()))
+                .description("Executed " + execution.executed().size() + " generated test(s) for "
+                        + requirement.id() + ": " + (result.executed() ? result.describeWithNote() : execution.note())
+                        + (anyOracle ? "" : ". No scenario declares both an observation and an invariant, so "
+                        + "the generated tests ran the declared steps but asserted nothing about the requirement"))
                 .source(id())
                 .confidence(EvidenceConfidence.DETERMINISTIC)
-                .status(!result.executed() ? EvidenceStatus.INCONCLUSIVE
+                .status(!result.executed() || !anyOracle ? EvidenceStatus.INCONCLUSIVE
                         : (result.anyFailure() ? EvidenceStatus.REFUTES : EvidenceStatus.SUPPORTS))
-                .result(result.executed() ? result.describe() : "not executed: " + execution.note())
+                .result(result.executed() ? result.describeWithNote() : "not executed: " + execution.note())
                 .output(execution.note() == null ? "" : execution.note())
                 .requirement(requirement.id())
                 .metadata("generated_classes", generated.stream().map(GeneratedTest::className).toList())
@@ -187,18 +190,34 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
         }
 
         for (VerificationObligation obligation : attemptable) {
-            List<TestCaseResult> relevant = new ArrayList<>();
-            boolean covered = false;
-            for (GeneratedTest test : generated) {
-                if (!test.obligationIds().contains(obligation.id())) {
-                    continue;
-                }
-                covered = true;
-                relevant.addAll(resultsByClass.getOrDefault(test.className(), List.of()));
-            }
-            if (!covered) {
+            List<GeneratedTest> covering = generated.stream()
+                    .filter(test -> test.obligationIds().contains(obligation.id()))
+                    .toList();
+            if (covering.isEmpty()) {
                 outcomes.add(new ObligationOutcome(obligation.id(), RequirementStatus.UNVERIFIED,
                         "No generated test covered this obligation.", List.of(batch.id()), List.of(), 0));
+                continue;
+            }
+            if (covering.stream().noneMatch(GeneratedTest::checksInvariant)) {
+                outcomes.add(new ObligationOutcome(obligation.id(), RequirementStatus.UNVERIFIED,
+                        "The scenario declared for this obligation specifies no observation and invariant, so "
+                                + "the generated test executed the steps but asserted nothing about the "
+                                + "requirement. A test that cannot fail is not evidence.",
+                        List.of(batch.id()), List.of(), 0));
+                continue;
+            }
+            List<TestCaseResult> relevant = new ArrayList<>();
+            for (GeneratedTest test : covering) {
+                relevant.addAll(resultsByClass.getOrDefault(test.className(), List.of()));
+            }
+            // "No failing case was reported" is only evidence of support if a case was reported at all.
+            // Without this check a generated test that the runner never reported (a class with no test
+            // methods, a dropped case, a filter that matched nothing) would be scored as discharged.
+            if (relevant.isEmpty()) {
+                outcomes.add(new ObligationOutcome(obligation.id(), RequirementStatus.UNVERIFIED,
+                        "A generated test was prepared for this obligation but the test runner reported no "
+                                + "case for it, so nothing was executed and nothing is verified.",
+                        List.of(batch.id()), List.of(), 0));
                 continue;
             }
             long failures = relevant.stream().filter(tc -> tc.outcome().isFailure()).count();
@@ -208,7 +227,8 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
                     anyFailure ? RequirementStatus.FAILED : RequirementStatus.VERIFIED,
                     anyFailure
                             ? failures + " generated test case(s) violated this obligation."
-                            : relevant.size() + " generated test case(s) executed and all passed.",
+                            : relevant.size() + " generated test case(s) executed, asserted the declared "
+                                    + "invariant and all passed.",
                     List.of(batch.id()),
                     counterexamples.stream().map(Counterexample::id).toList(),
                     relevant.size()));

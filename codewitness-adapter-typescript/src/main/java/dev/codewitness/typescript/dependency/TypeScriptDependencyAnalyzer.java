@@ -27,7 +27,8 @@ import java.util.regex.Pattern;
  * <p>The manifest is not parsed with a general JSON parser because the adapter depends on the core
  * only. The extractor is deliberately narrow: it reads each dependency table's own brace-balanced body,
  * so a package named in a script, an {@code engines} constraint or another nested object cannot be
- * mistaken for a dependency.
+ * mistaken for a dependency. A manifest that exists but cannot be read is reported as not analysed
+ * rather than as an empty inventory.
  */
 public final class TypeScriptDependencyAnalyzer implements VerificationTools.DependencyAnalyzer {
 
@@ -54,7 +55,16 @@ public final class TypeScriptDependencyAnalyzer implements VerificationTools.Dep
             return DependencyReport.notAnalysed("package-json",
                     "no package.json was found, so no dependency manifest could be read");
         }
-        List<String> direct = List.copyOf(new LinkedHashSet<>(parse(read(manifest))));
+        String content;
+        try {
+            content = Files.readString(manifest, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            // A manifest that exists but cannot be read is not an empty dependency set: reporting an
+            // empty inventory here would be indistinguishable from "this project has no dependencies".
+            return DependencyReport.notAnalysed("package-json",
+                    "package.json exists but could not be read: " + e);
+        }
+        List<String> direct = List.copyOf(new LinkedHashSet<>(parse(content)));
         return new DependencyReport(true, "package-json",
                 "inventory only: CodeWitness does not consult a vulnerability database, so it cannot claim "
                         + "these dependencies are free of known vulnerabilities",
@@ -120,13 +130,5 @@ public final class TypeScriptDependencyAnalyzer implements VerificationTools.Dep
             }
         }
         return -1;
-    }
-
-    private static String read(Path file) {
-        try {
-            return Files.readString(file, StandardCharsets.UTF_8);
-        } catch (IOException _) {
-            return "";
-        }
     }
 }

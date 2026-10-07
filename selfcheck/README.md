@@ -36,7 +36,7 @@ not pass by default; leaving one claim unexecuted keeps that behaviour in the se
 
 ## Result
 
-Run `CW-2026-10-06-KS35J` (isolated-copy mode, `--no-mutation`), after both defects below were fixed:
+Run `CW-2026-10-07-SP7DE` (isolated-copy mode, `--no-mutation`), after both defects below were fixed:
 
 ```
 CWR-001  VERIFIED    CWR-005  VERIFIED
@@ -44,8 +44,8 @@ CWR-002  VERIFIED    CWR-006  VERIFIED
 CWR-003  VERIFIED    CWR-007  UNVERIFIED
 CWR-004  VERIFIED
 
-427 existing tests executed, 427 passed, 0 failed
-coverage line 63.7% (5037/7909), branch 53.8% (1935/3597)
+711 existing tests executed, 711 passed, 0 failed
+coverage line 70.1% (11215/15991), branch 59.0% (4980/8438)
 overall status PARTIALLY_VERIFIED (6 verified, 0 failed, 1 unverified)
 verify exit code 0
 ```
@@ -59,7 +59,7 @@ kept coverage from being measured. Both are fixed.
 
 1. **`WorkspaceManager` excluded source packages named like build output (fixed).**
    The copy step matched excluded directory *names* at any depth, so it skipped
-   `codewitness-core/src/main/java/dev/codewitness/java/build/` — a real package — and the copied
+   `codewitness-adapter-java/src/main/java/dev/codewitness/java/build/` — a real package — and the copied
    project could not compile. The fix only skips an excluded name outside a `src` tree; the path is
    checked relative to the copied project, so a project that merely lives under a directory called
    `src` is unaffected. Regression test:
@@ -120,10 +120,15 @@ count.
 
 ## Known false positives in the report
 
-The static-analysis section reports 18 findings (1 high, 17 medium). They are heuristic and do not
-change any verdict:
+The static-analysis section reports 25 findings (1 high, 24 medium). They are heuristic and cannot
+change any verdict: a finding only refutes a requirement when a deterministic tool produced it
+(`Finding.fromDeterministicTool`), and every rule in the heuristic table identifies itself as
+`*-heuristics`. A rule match is recorded as advisory evidence with a note instead.
 
 - the `HIGH` finding is `ProcessBuilder` use in `LocalProcessSandbox` — that class *is* the sandbox
   boundary, and the README documents this rule's false-positive profile;
 - the `CW-CONC-001` medium findings fire on immutable value types/builder fields that are never
-  shared, which the README calls out as advisory by design.
+  shared, which the README calls out as advisory by design;
+- the `CW-TEST-001` medium findings fire on test methods whose assertions live in a helper method the
+  source heuristic cannot follow; a method that calls `assertFindings(...)` looks assertion-free to a
+  regex, and the rule is advisory for the same reason as the others.

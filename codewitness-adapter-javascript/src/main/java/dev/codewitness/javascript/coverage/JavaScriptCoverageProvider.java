@@ -69,6 +69,13 @@ public final class JavaScriptCoverageProvider implements VerificationTools.Cover
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(1_000_000)
                 .build());
+        if (result.timedOut()) {
+            // The killed run may have written a partial LCOV file, so the timeout is checked before
+            // that file is looked for or parsed.
+            return CoverageReport.notMeasured(id(), "node --test with V8 coverage was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; a partial coverage "
+                    + "report is not a measurement");
+        }
         if (!Files.isRegularFile(report)) {
             return CoverageReport.notMeasured(id(), "node produced no LCOV report (" + result.describeOutcome()
                     + "); last output: " + NodeRuntime.lastLines(result.combinedOutput(), 4));

@@ -55,7 +55,7 @@ public final class ConsoleReporter {
                     .append(String.format(Locale.ROOT, "%-20s %d%n", status, counts.getOrDefault(status, 0L)));
         }
 
-        sb.append("\nTests\n  ").append(report.tests().describe()).append('\n');
+        sb.append("\nTests\n  ").append(report.tests().describeWithNote()).append('\n');
         sb.append("\nCoverage\n  ").append(report.coverage().describe()).append('\n');
         sb.append("\nMutation testing\n  ").append(report.mutation().describe()).append('\n');
 

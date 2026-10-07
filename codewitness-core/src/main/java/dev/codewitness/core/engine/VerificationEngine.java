@@ -210,7 +210,7 @@ public final class VerificationEngine {
                 requirements, llm(config), scoped, sandbox, state, ledger, startedAt);
 
         // ---------------------------------------------------------------- build
-        if (adapter.get().capabilities().contains(Capability.BUILD)) {
+        if (adapter.get().capabilities().contains(Capability.BUILD) && withinBudget(budget)) {
             phases.add(runPhase("build", listener, () -> {
                 BuildResult build = firstCompiler(context)
                         .map(c -> c.build(context))
@@ -249,7 +249,8 @@ public final class VerificationEngine {
         }
 
         // ---------------------------------------------------------------- existing tests
-        if (!buildBlocked && config.tests().enabled() && adapter.get().capabilities().contains(Capability.TEST)) {
+        if (!buildBlocked && config.tests().enabled()
+                && adapter.get().capabilities().contains(Capability.TEST) && withinBudget(budget)) {
             phases.add(runPhase("tests", listener, () -> {
                 Optional<VerificationTools.TestRunner> testRunner = firstTestRunner(context);
                 TestResult tests = testRunner
@@ -260,13 +261,15 @@ public final class VerificationEngine {
                 // invocation that cannot have yielded the result below.
                 List<String> testCommand = testRunner.map(r -> r.testCommand(context)).orElseGet(List::of);
                 state.existingTests(tests);
+                // describeWithNote, not describe: the note is how the runner says that what it parsed is
+                // not the whole story, and this record is what the report shows.
                 Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.TEST)
-                        .description("Existing tests: " + tests.describe())
+                        .description("Existing tests: " + tests.describeWithNote())
                         .command(testCommand)
                         .confidence(EvidenceConfidence.DETERMINISTIC)
                         .status(!tests.executed() ? EvidenceStatus.INCONCLUSIVE
                                 : (tests.anyFailure() ? EvidenceStatus.REFUTES : EvidenceStatus.SUPPORTS))
-                        .result(tests.describe())
+                        .result(tests.describeWithNote())
                         .output(tail(renderFailures(tests), 8000))
                         .metadata("reports", tests.reports().stream().map(Path::toString).toList())
                         .build());
@@ -279,16 +282,28 @@ public final class VerificationEngine {
         }
 
         // ---------------------------------------------------------------- static analysis
-        if (!buildBlocked && config.staticAnalysis().enabled()) {
+        if (!buildBlocked && config.staticAnalysis().enabled() && withinBudget(budget)) {
             phases.add(runPhase("static-analysis", listener, () -> {
-                List<Finding> findings = new ArrayList<>(adapter.get().analyze(context));
-                for (var analyzer : providers.staticAnalyzers(info)) {
-                    findings.addAll(analyzer.analyze(context));
+                // Registered providers are the extension point, and every bundled adapter registers
+                // one. Calling adapter.analyze() as well ran the whole pass twice - including a second
+                // -Xlint:all compile - for findings that were then deduplicated away. The adapter level
+                // entry point is kept as a fallback for an adapter that registers no provider.
+                List<Finding> findings = new ArrayList<>();
+                var analyzers = providers.staticAnalyzers(info);
+                if (analyzers.isEmpty()) {
+                    findings.addAll(adapter.get().analyze(context));
+                } else {
+                    for (var analyzer : analyzers) {
+                        findings.addAll(analyzer.analyze(context));
+                    }
                 }
                 // The adapter and the registered providers may report the same rule through different
                 // paths; a finding is reported once, keyed by analyzer, rule, location and message.
                 findings = deduplicateFindings(findings);
                 state.addFindings(findings);
+                // Record that the phase ran, not just what it found: a clean run and a run where nothing
+                // could execute must not look the same to the strategies.
+                state.staticAnalysisRan(true);
                 Path report = artifacts.write("static-analysis/findings.json", renderFindings(findings));
                 Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.STATIC_ANALYSIS)
                         .description("Static analysis: " + findings.size() + " finding(s)")
@@ -303,7 +318,7 @@ public final class VerificationEngine {
             }));
         }
 
-        if (!buildBlocked && config.security().enabled()) {
+        if (!buildBlocked && config.security().enabled() && withinBudget(budget)) {
             phases.add(runPhase("security", listener, () -> {
                 List<Finding> findings = new ArrayList<>();
                 for (var analyzer : providers.securityAnalyzers(info)) {
@@ -322,7 +337,7 @@ public final class VerificationEngine {
             }));
         }
 
-        if (!buildBlocked) {
+        if (!buildBlocked && withinBudget(budget)) {
             phases.add(runPhase("dependencies", listener, () -> {
                 List<VerificationTools.DependencyAnalyzer> analyzers = providers.dependencyAnalyzers(info);
                 DependencyReport report = analyzers.isEmpty()
@@ -366,7 +381,8 @@ public final class VerificationEngine {
         }
 
         // ---------------------------------------------------------------- coverage
-        if (!buildBlocked && adapter.get().capabilities().contains(Capability.COVERAGE)) {
+        if (!buildBlocked && adapter.get().capabilities().contains(Capability.COVERAGE)
+                && withinBudget(budget)) {
             phases.add(runPhase("coverage", listener, () -> {
                 List<VerificationTools.CoverageProvider> coverageProviders = providers.coverageProviders(info);
                 CoverageReport coverage = coverageProviders.isEmpty()
@@ -391,7 +407,8 @@ public final class VerificationEngine {
         }
 
         // ---------------------------------------------------------------- mutation
-        if (!buildBlocked && config.mutation().enabled() && state.existingTests().executed()) {
+        if (!buildBlocked && config.mutation().enabled() && state.existingTests().executed()
+                && withinBudget(budget)) {
             phases.add(runPhase("mutation", listener, () -> {
                 List<VerificationTools.MutationTester> testers = providers.mutationTesters(info);
                 MutationReport report = testers.isEmpty()
@@ -502,12 +519,18 @@ public final class VerificationEngine {
 
         if (budget.snapshot().exhausted()) {
             limitations.add("The verification budget was exhausted: " + budget.snapshot().exhaustedReason()
-                    + ". Anything not yet verified stays unverified.");
+                    + ". Anything not yet verified stays unverified, and the run is reported as blocked so "
+                    + "that a truncated run cannot look like a completed one.");
         }
         limitations.addAll(state.infrastructureNotes());
 
-        RunStatus runStatus = buildBlocked ? RunStatus.BLOCKED
-                : (budget.snapshot().exhausted() ? RunStatus.ABORTED : RunStatus.COMPLETED);
+        // An exhausted budget means the pipeline did not finish what it set out to do; the README lists
+        // that under BLOCKED, and BLOCKED is what makes a truncated run exit non-zero instead of looking
+        // like a clean pass. A run that had already verified everything is unaffected: there was nothing
+        // left to truncate.
+        boolean budgetBlocked = budget.snapshot().exhausted()
+                && verdicts.stream().anyMatch(v -> v.status() != RequirementStatus.VERIFIED);
+        RunStatus runStatus = buildBlocked || budgetBlocked ? RunStatus.BLOCKED : RunStatus.COMPLETED;
         Instant finishedAt = Instant.now();
 
         VerificationRun run = new VerificationRun(runId.value(), project, runStatus, phases,
@@ -533,6 +556,23 @@ public final class VerificationEngine {
     // ------------------------------------------------------------------ helpers
 
     private record PhaseOutcome(boolean success, String summary, List<String> evidenceIds, String note) {
+    }
+
+    /**
+     * @return {@code true} when the run still has time for another phase.
+     *
+     * <p>{@code max_duration} is a deadline for the whole run, so a phase that would begin after it has
+     * passed must not begin at all. Before this check the budget was consulted only once, after every
+     * phase had already run, which made it a description of the past rather than a limit: a build, a
+     * test run, a coverage run and a mutation run could each consume their own timeout and the run
+     * would still claim to have finished.
+     */
+    private static boolean withinBudget(BudgetUsage.Tracker budget) {
+        if (budget.timeExpired()) {
+            budget.markExhausted("max_duration reached before a further verification phase could start");
+            return false;
+        }
+        return true;
     }
 
     private PhaseRecord runPhase(String name, ProgressListener listener, java.util.function.Supplier<PhaseOutcome> body) {

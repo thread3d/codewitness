@@ -98,7 +98,8 @@ public final class GoScenarioTestGenerator implements VerificationTools.TestGene
             String source = render(context, requirement, obligation, scenario, className);
             generated.add(new GeneratedTest(className, source, className,
                     List.of(requirement.id()), List.of(obligation.id()),
-                    scenario.description(), scenario.seed(), null));
+                    scenario.description(), scenario.seed(), null,
+                    scenario.observation() != null && scenario.invariant() != null));
         }
         return generated;
     }
@@ -196,6 +197,13 @@ public final class GoScenarioTestGenerator implements VerificationTools.TestGene
         for (Map<String, String> values : boundaryCases) {
             sb.append(boundaryCase(scenario, className, suffix, index, inputs, values));
             index++;
+        }
+        if (boundaryCases.isEmpty() && !inputs.isEmpty()) {
+            // Every input has a declared type but none declares a boundary value, so there is nothing
+            // to enumerate. Run the declared defaults once instead of emitting a file with no test
+            // functions at all: an empty test file reports nothing, and a scenario that reports
+            // nothing must not be mistaken for one that ran and passed.
+            sb.append(boundaryCase(scenario, className, suffix, 0, inputs, defaultValues(inputs)));
         }
         if (boundaryCases.isEmpty() && inputs.isEmpty()) {
             sb.append(singleCase(scenario, className, suffix));
@@ -399,6 +407,19 @@ public final class GoScenarioTestGenerator implements VerificationTools.TestGene
             }
         }
         return List.copyOf(byName.values());
+    }
+
+    /**
+     * @return one value per input, taken from the declared values when there are any and from the
+     *     type's default otherwise. Used when a scenario declares inputs but no boundary values, so
+     *     that it still produces an executed case.
+     */
+    private static Map<String, String> defaultValues(List<Scenario.Input> inputs) {
+        Map<String, String> values = new LinkedHashMap<>();
+        for (Scenario.Input input : inputs) {
+            values.put(input.name(), input.values().isEmpty() ? defaultLiteral(input) : input.values().getFirst());
+        }
+        return values;
     }
 
     private static List<Map<String, String>> boundaryCases(List<Scenario.Input> inputs) {

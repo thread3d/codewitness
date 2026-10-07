@@ -126,7 +126,7 @@ public final class TestCommand implements Callable<Integer> {
         TestResult result = adapter.runTests(context);
         System.out.println();
         System.out.println("Tests");
-        System.out.println("  " + result.describe());
+        System.out.println("  " + result.describeWithNote());
         for (TestCaseResult failure : result.failures()) {
             System.out.println("  FAILED " + failure.displayName() + ": " + oneLine(failure.failureMessage()));
         }

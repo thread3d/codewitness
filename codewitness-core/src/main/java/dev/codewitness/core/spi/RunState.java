@@ -26,6 +26,7 @@ public final class RunState {
     private MutationReport mutation = MutationReport.notMeasured("none", "mutation phase has not run");
     private DependencyReport dependencies = DependencyReport.notAnalysed("none", "dependency phase has not run");
     private final List<Finding> findings = new ArrayList<>();
+    private boolean staticAnalysisRan;
     private final List<String> infrastructureNotes = new ArrayList<>();
     private final java.util.concurrent.atomic.AtomicInteger counterexampleCounter =
             new java.util.concurrent.atomic.AtomicInteger();
@@ -81,6 +82,22 @@ public final class RunState {
 
     public void addFindings(List<Finding> value) {
         this.findings.addAll(value);
+    }
+
+    /**
+     * @return {@code true} when the static-analysis phase actually ran.
+     *
+     * <p>This is deliberately separate from {@link #findings()}: a clean run produces no findings, and
+     * "the analyzers found nothing" must never be confused with "no analyzer ran". The two lead to
+     * opposite verdicts, so the fact is recorded rather than inferred.
+     */
+    public boolean staticAnalysisRan() {
+        return staticAnalysisRan;
+    }
+
+    /** Records that the static-analysis phase completed, whether or not it reported any finding. */
+    public void staticAnalysisRan(boolean value) {
+        this.staticAnalysisRan = value;
     }
 
     /** Notes about infrastructure problems that affected the run; surfaced in the report. */

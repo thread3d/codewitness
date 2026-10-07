@@ -523,6 +523,23 @@ public final class HtmlReportWriter {
         if (!coverage.note().isBlank()) {
             html.append("<p class=\"muted\">Note: ").append(esc(coverage.note())).append("</p>\n");
         }
+        // Per-file coverage is computed and stored by several adapters, so it is shown here rather than
+        // only reaching SQLite. The table says what it lists and how its keys are displayed.
+        if (!coverage.perClassLineCoverage().isEmpty()) {
+            html.append("<h3>Per-file line coverage</h3>\n")
+                    .append("<p class=\"muted\">Line coverage for each file or class the coverage tool ")
+                    .append("reported. Keys are shown relative to the project root when the report records ")
+                    .append("an absolute path below it, and exactly as recorded otherwise.</p>\n")
+                    .append("<table>\n<thead><tr><th>File or class</th><th class=\"num\">Line coverage</th>")
+                    .append("</tr></thead>\n<tbody>\n");
+            coverage.perClassLineCoverage().entrySet().stream()
+                    .map(entry -> Map.entry(displayPath(report, entry.getKey()), entry.getValue()))
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(entry -> html.append("<tr><td><code>").append(esc(entry.getKey()))
+                            .append("</code></td><td class=\"num\">").append(percent(entry.getValue()))
+                            .append("</td></tr>\n"));
+            html.append("</tbody>\n</table>\n");
+        }
         html.append("</section>\n");
     }
 
@@ -843,6 +860,34 @@ public final class HtmlReportWriter {
 
     private static String percent(double value) {
         return String.format(Locale.ROOT, "%.1f%%", value);
+    }
+
+    /**
+     * Renders a coverage key relative to the project root when it is an absolute path below it.
+     *
+     * <p>This is a pure string operation on a path the report already holds: no symlink resolution, no
+     * existence check and no guessing, so it can only shorten a path that is genuinely below the root.
+     * Anything else is returned unchanged rather than invented. Several adapters key per-file coverage
+     * by the absolute sandbox path the tool printed, which is what this fixes at render time only.
+     */
+    private static String displayPath(VerificationReport report, String path) {
+        if (path == null || path.isBlank() || report.project() == null) {
+            return path;
+        }
+        try {
+            Path candidate = Path.of(path);
+            Path root = report.project().project().root();
+            if (root == null) {
+                return path;
+            }
+            Path absoluteRoot = root.toAbsolutePath().normalize();
+            if (candidate.isAbsolute() && candidate.normalize().startsWith(absoluteRoot)) {
+                return absoluteRoot.relativize(candidate.normalize()).toString().replace('\\', '/');
+            }
+        } catch (RuntimeException _) {
+            // not a usable path: keep the original text
+        }
+        return path;
     }
 
     private static EnvironmentSnapshot environment(VerificationReport report) {

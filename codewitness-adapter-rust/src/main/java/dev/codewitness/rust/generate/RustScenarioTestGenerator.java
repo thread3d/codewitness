@@ -81,7 +81,8 @@ public final class RustScenarioTestGenerator implements VerificationTools.TestGe
             String source = render(context, requirement, obligation, scenario);
             generated.add(new GeneratedTest(className, source, testMethod(scenario),
                     List.of(requirement.id()), List.of(obligation.id()),
-                    scenario.description(), scenario.seed(), null));
+                    scenario.description(), scenario.seed(), null,
+                    scenario.observation() != null && scenario.invariant() != null));
         }
         return generated;
     }
@@ -133,6 +134,13 @@ public final class RustScenarioTestGenerator implements VerificationTools.TestGe
         for (Map<String, String> values : boundaryCases) {
             sb.append(boundaryCase(scenario, index, inputs, values));
             index++;
+        }
+        if (boundaryCases.isEmpty() && !inputs.isEmpty()) {
+            // Every input has a declared type but none declares a boundary value, so there is nothing
+            // to enumerate. Run the declared defaults once instead of emitting a file with no test
+            // functions at all: an empty test file reports nothing, and a scenario that reports
+            // nothing must not be mistaken for one that ran and passed.
+            sb.append(boundaryCase(scenario, 0, inputs, defaultValues(inputs)));
         }
         if (boundaryCases.isEmpty() && inputs.isEmpty()) {
             sb.append(singleCase(scenario));
@@ -317,6 +325,19 @@ public final class RustScenarioTestGenerator implements VerificationTools.TestGe
             }
         }
         return List.copyOf(byName.values());
+    }
+
+    /**
+     * @return one value per input, taken from the declared values when there are any and from the
+     *     type's default otherwise. Used when a scenario declares inputs but no boundary values, so
+     *     that it still produces an executed case.
+     */
+    private static Map<String, String> defaultValues(List<Scenario.Input> inputs) {
+        Map<String, String> values = new LinkedHashMap<>();
+        for (Scenario.Input input : inputs) {
+            values.put(input.name(), input.values().isEmpty() ? defaultLiteral(input) : input.values().getFirst());
+        }
+        return values;
     }
 
     private static List<Map<String, String>> boundaryCases(List<Scenario.Input> inputs) {

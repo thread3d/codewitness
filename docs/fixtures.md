@@ -5,8 +5,9 @@ code that is right. Every fixture in `fixtures/` is deliberately broken in a spe
 deliberately correct — and the end-to-end tests assert that CodeWitness reaches the expected verdict.
 
 The results below were produced by `tools/verify-all-fixtures.sh`, which runs
-`codewitness verify <fixture> --requirements <fixture>/requirements.md --max-duration 10m` for each
-fixture and prints the outcome.
+`./codewitness verify <fixture> --requirements <fixture>/requirements.md --max-duration 10m` for each
+fixture and prints the outcome. `./codewitness` is the launcher in the repository root; the build does
+not install a `codewitness` command on `PATH`.
 
 | Fixture | Type of defect | Overall | Requirements | What it proves |
 | --- | --- | --- | --- | --- |
@@ -294,20 +295,21 @@ export PATH=/path/to/apache-maven/bin:$PATH
 ./tools/verify-all-fixtures.sh
 ```
 
-Each fixture is a standalone project and can also be verified one at a time:
+Each fixture is a standalone project and can also be verified one at a time, from the repository root
+with the `./codewitness` launcher:
 
 ```bash
-codewitness verify fixtures/withdrawal-ledger --requirements fixtures/withdrawal-ledger/requirements.md
-codewitness verify fixtures/python-withdrawal-ledger --requirements fixtures/python-withdrawal-ledger/requirements.md
-codewitness verify fixtures/rust-withdrawal-ledger --requirements fixtures/rust-withdrawal-ledger/requirements.md
-codewitness verify fixtures/go-withdrawal-ledger --requirements fixtures/go-withdrawal-ledger/requirements.md
-codewitness verify fixtures/typescript-withdrawal-ledger --requirements fixtures/typescript-withdrawal-ledger/requirements.md
-codewitness verify fixtures/javascript-withdrawal-ledger --requirements fixtures/javascript-withdrawal-ledger/requirements.md
-codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
+./codewitness verify fixtures/withdrawal-ledger --requirements fixtures/withdrawal-ledger/requirements.md
+./codewitness verify fixtures/python-withdrawal-ledger --requirements fixtures/python-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/rust-withdrawal-ledger --requirements fixtures/rust-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/go-withdrawal-ledger --requirements fixtures/go-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/typescript-withdrawal-ledger --requirements fixtures/typescript-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/javascript-withdrawal-ledger --requirements fixtures/javascript-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 
 Run data is written under `<fixture>/.codewitness/` and is ignored by git; remove it with
-`codewitness clean <fixture> --all`.
+`./codewitness clean <fixture> --all`.
 
 ## Adding a fixture
 

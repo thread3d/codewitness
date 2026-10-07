@@ -70,7 +70,8 @@ public final class PythonScenarioTestGenerator implements VerificationTools.Test
             String source = render(context, requirement, obligation, scenario, className);
             generated.add(new GeneratedTest(className, source, testMethod(scenario),
                     List.of(requirement.id()), List.of(obligation.id()),
-                    scenario.description(), scenario.seed(), null));
+                    scenario.description(), scenario.seed(), null,
+                    scenario.observation() != null && scenario.invariant() != null));
         }
         return generated;
     }
@@ -133,6 +134,21 @@ public final class PythonScenarioTestGenerator implements VerificationTools.Test
             sb.append("        self.run_case(").append(index).append(", None, ")
                     .append(inputsLiteral(inputs)).append(inputsSuffix(inputs)).append(")\n\n");
             index++;
+        }
+
+        if (boundaryCases.isEmpty() && !inputs.isEmpty()) {
+            // Every input has a declared type but none declares a boundary value, so there is nothing
+            // to enumerate. Run the declared defaults once instead of emitting a class with no test
+            // methods at all: an empty test class reports nothing, and a scenario that reports nothing
+            // must not be mistaken for one that ran and passed.
+            Map<String, String> values = defaultValues(inputs);
+            sb.append("    def test_case0000(self):\n");
+            for (Scenario.Input input : inputs) {
+                sb.append("        ").append(input.name()).append(" = ")
+                        .append(literal(input, values.get(input.name()))).append('\n');
+            }
+            sb.append("        self.run_case(0, None, ").append(inputsLiteral(inputs))
+                    .append(inputsSuffix(inputs)).append(")\n\n");
         }
 
         if (boundaryCases.isEmpty() && inputs.isEmpty()) {
@@ -368,6 +384,19 @@ public final class PythonScenarioTestGenerator implements VerificationTools.Test
         return List.copyOf(byName.values());
     }
 
+    /**
+     * @return one value per input, taken from the declared values when there are any and from the
+     *     type's default otherwise. Used when a scenario declares inputs but no boundary values, so
+     *     that it still produces an executed case.
+     */
+    private static Map<String, String> defaultValues(List<Scenario.Input> inputs) {
+        Map<String, String> values = new LinkedHashMap<>();
+        for (Scenario.Input input : inputs) {
+            values.put(input.name(), input.values().isEmpty() ? defaultLiteral(input) : input.values().getFirst());
+        }
+        return values;
+    }
+
     private static List<Map<String, String>> boundaryCases(List<Scenario.Input> inputs) {
         List<Map<String, String>> cases = new ArrayList<>();
         if (inputs.isEmpty()) {
@@ -421,7 +450,8 @@ public final class PythonScenarioTestGenerator implements VerificationTools.Test
 
     private static String defaultLiteral(Scenario.Input input) {
         return switch (input.domain()) {
-            case DECIMAL, STRING -> "";
+            case DECIMAL -> "0";
+            case STRING -> "";
             case INTEGER, LONG, INSTANT_MILLIS, DOUBLE -> "0";
             case BOOLEAN -> "false";
             case NULL, RAW -> "null";

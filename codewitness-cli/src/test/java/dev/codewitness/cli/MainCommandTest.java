@@ -1,8 +1,15 @@
 package dev.codewitness.cli;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -59,5 +66,34 @@ class MainCommandTest {
         assertEquals("\u2713", CliSupport.marker(dev.codewitness.core.requirements.RequirementStatus.VERIFIED));
         assertEquals("\u2717", CliSupport.marker(dev.codewitness.core.requirements.RequirementStatus.FAILED));
         assertEquals("?", CliSupport.marker(dev.codewitness.core.requirements.RequirementStatus.UNVERIFIED));
+    }
+
+    @Test
+    void anUnknownOptionIsAUsageErrorAndExitsThree() {
+        CliTestSupport.Result result = CliTestSupport.run("verify", "--not-an-option");
+
+        assertEquals(3, result.exitCode(),
+                "3 is documented as 'usage error'; picocli's default 2 would collide with BLOCKED");
+    }
+
+    @Test
+    void aMissingRequiredParameterIsAUsageErrorAndExitsThree() {
+        CliTestSupport.Result result = CliTestSupport.run("reproduce");
+
+        assertEquals(3, result.exitCode());
+    }
+
+    @Test
+    void aBadConfigurationExitsThreeWithAMessageRatherThanAStackTrace(@TempDir Path tmp) throws IOException {
+        Path config = tmp.resolve("broken.yaml");
+        Files.writeString(config, "verification:\n  max_durationn: 5m\n", StandardCharsets.UTF_8);
+
+        CliTestSupport.Result result = CliTestSupport.run("verify", tmp.toString(), "--config", config.toString());
+
+        assertEquals(3, result.exitCode(), result.stdout() + result.stderr());
+        assertTrue(result.stderr().contains("max_durationn"),
+                "the message must name the offending key: " + result.stderr());
+        assertFalse(result.stderr().contains("\tat dev.codewitness"),
+                "a configuration mistake is not a stack trace: " + result.stderr());
     }
 }

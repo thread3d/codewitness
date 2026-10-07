@@ -148,6 +148,35 @@ class ScenarioTestGeneratorTest {
     }
 
     @Test
+    void aScenarioWithInputsButNoBoundaryValuesProducesExactlyOneCase() throws IOException {
+        Scenario scenario = new Scenario(
+                "SC-004", "R-001", "inputs without boundary values",
+                Scenario.Mode.SINGLE, null,
+                List.of(new Scenario.Step(
+                        "java.util.Objects.requireNonNull(label); java.util.Objects.requireNonNull(note);",
+                        List.of(
+                                new Scenario.Input("label", "String", Scenario.Domain.STRING,
+                                        List.of("explicit"), null, null, 0),
+                                new Scenario.Input("note", "String", Scenario.Domain.STRING,
+                                        List.of(), null, null, 0)), "record both")),
+                null, null, 1, 1L, 60);
+        GeneratedTest generated = generate(scenario, obligation("OB-004", "SC-004"));
+
+        String source = generated.sourceCode();
+        assertEquals(1, countOccurrences(source, "@org.junit.jupiter.api.Test"),
+                "an empty test class reports nothing, so exactly one case must be emitted:\n" + source);
+        assertTrue(source.contains("void case0000()"), source);
+        assertTrue(source.contains("String label = \"explicit\";"),
+                "the first declared value is used when there is one:\n" + source);
+        assertTrue(source.contains("String note = \"\";"),
+                "the type default is used when there is none:\n" + source);
+        assertTrue(source.contains("runCase(0, null, label, note);"), source);
+        assertFalse(source.contains("void singleCase()"), source);
+        assertFalse(source.contains("void randomSearch()"), source);
+        compile(generated);
+    }
+
+    @Test
     void anObligationWithoutAScenarioProducesNothing() throws IOException {
         VerificationContext context = TestContexts.context(tmp.resolve("empty"), tmp.resolve("empty-run"));
         Requirement requirement = requirement();

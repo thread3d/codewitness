@@ -67,10 +67,7 @@ public final class TypeScriptLanguageAdapter implements LanguageAdapter {
         if (!probe.available()) {
             builder.attribute("nodeProbeFailure", probe.failureReason());
         } else if (!probe.typeStripping()) {
-            builder.attribute("runtimeWarning",
-                    "this Node runtime (" + probe.version() + ") cannot execute TypeScript by stripping types; "
-                            + "Node " + NodeRuntime.MINIMUM_TYPE_STRIPPING_VERSION + " or later is required to "
-                            + "run TypeScript tests without a build step");
+            builder.attribute("runtimeWarning", NodeRuntime.typeStrippingWarning(probe.version()));
         }
         String tsc = NodeRuntime.resolveTsc(context.projectRoot(), System.getenv());
         if (tsc != null) {

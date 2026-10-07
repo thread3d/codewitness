@@ -1,0 +1,93 @@
+name: CI
+
+# Push to main and every pull request. Nothing here needs a repository secret, and the optional
+# language-model feature is never enabled: no step passes --llm or sets an API key.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The workflow only reads the repository.
+permissions:
+  contents: read
+
+# A new push to the same ref cancels the previous in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test (Java 25)
+    runs-on: ubuntu-latest
+    # The end-to-end suite builds six fixture projects from scratch; give it room, but do not let a
+    # hung nested build occupy a runner forever.
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      # The project targets release 25 (pom.xml: maven.compiler.release=25), so the JDK must be 25.
+      # cache: maven caches ~/.m2/repository keyed on the poms and the wrapper properties.
+      - name: Set up Temurin JDK 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # ---------------------------------------------------------------------------------------
+      # Toolchains for the end-to-end suite.
+      #
+      # `./mvnw -Pe2e test` runs the fixture projects through their own toolchains: Maven for the
+      # Java fixture, Python 3, Cargo, `go` and Node for the others (Node 22.18+ for TypeScript, where
+      # type stripping is on by default, and 18.17+ for JavaScript). Each end-to-end test skips itself
+      # (a JUnit assumption) when its toolchain is absent, so a missing tool produces a green build with
+      # those languages never having run. Installing each one here, then asserting it below, is what
+      # keeps that from happening silently.
+      # ---------------------------------------------------------------------------------------
+      - name: Set up Python 3
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+
+      - name: Set up Cargo
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: 'stable'
+
+      # Node 22 resolves to the latest 22.x, which satisfies the TypeScript adapter's 22.18 floor
+      # (type stripping is only on by default from 22.18) and the JavaScript adapter's 18.17 floor.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Fail loudly rather than trust the runner image. In particular `mvn` is not installed by
+      # setup-java: the Java fixture's build resolves Maven through MAVEN_HOME/M2_HOME and then
+      # PATH (BuildToolLauncher.resolve), and GitHub's Ubuntu image ships Maven there. If that ever
+      # stops being true this step fails with a named tool instead of the e2e tests quietly
+      # skipping.
+      - name: Assert every toolchain is present
+        run: |
+          set -euo pipefail
+          java -version
+          mvn -v
+          python3 --version
+          cargo --version
+          go version
+          node --version
+
+      # Unit and integration tests. Surefire excludes the `e2e` group by default (pom.xml:
+      # excluded.groups), so this is the fast suite.
+      - name: Unit and integration tests
+        run: ./mvnw -B test
+
+      # The end-to-end suite, opt-in through the `e2e` profile, which clears excluded.groups. It
+      # builds the fixture projects with real Maven, Python, Cargo, Go and Node runs.
+      - name: End-to-end tests (fixture projects)
+        run: ./mvnw -B -Pe2e test

@@ -26,7 +26,9 @@ import java.util.regex.Pattern;
  * dependencies, because it does not consult a vulnerability database; the report says exactly that.
  *
  * <p>A manifest that exists but declares nothing is still an analysed manifest, so an empty project
- * reports "0 dependencies" rather than pretending the analysis could not run.
+ * reports "0 dependencies" rather than pretending the analysis could not run. A manifest that exists
+ * but cannot be read is reported as not analysed, because an empty inventory would be
+ * indistinguishable from a project with no dependencies.
  */
 public final class RustDependencyAnalyzer implements VerificationTools.DependencyAnalyzer {
 
@@ -52,7 +54,16 @@ public final class RustDependencyAnalyzer implements VerificationTools.Dependenc
             return DependencyReport.notAnalysed("cargo-manifest",
                     "no Cargo.toml was found, so no dependency manifest could be read");
         }
-        Set<String> dependencies = new LinkedHashSet<>(parse(read(manifest)));
+        String content;
+        try {
+            content = Files.readString(manifest, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            // A manifest that exists but cannot be read is not an empty dependency set: reporting an
+            // empty inventory here would be indistinguishable from "this project has no dependencies".
+            return DependencyReport.notAnalysed("cargo-manifest",
+                    "Cargo.toml exists but could not be read: " + e);
+        }
+        Set<String> dependencies = new LinkedHashSet<>(parse(content));
         List<String> direct = List.copyOf(dependencies);
         return new DependencyReport(true, "cargo-manifest",
                 "inventory only: CodeWitness does not consult a vulnerability database, so it cannot claim "
@@ -99,14 +110,6 @@ public final class RustDependencyAnalyzer implements VerificationTools.Dependenc
             if (key.find()) {
                 names.add(key.group(1));
             }
-        }
-    }
-
-    private static String read(Path file) {
-        try {
-            return Files.readString(file, StandardCharsets.UTF_8);
-        } catch (IOException _) {
-            return "";
         }
     }
 }

@@ -11,8 +11,12 @@ verification as hostile, and it is explicit about how far that protection goes.
   across the code.
 - **A sanitised environment.** The child process does not inherit the host environment. Only a
   small allow-list is forwarded (`PATH`, `JAVA_HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`, `HOME`,
-  `GRADLE_USER_HOME`, `SDKMAN_DIR`). Credentials, tokens and proxy settings are dropped, so a build
-  script that prints `$AWS_SECRET_ACCESS_KEY` prints nothing.
+  `GRADLE_USER_HOME`, `JAVA_TOOL_OPTIONS`, `SDKMAN_DIR`), so a build script that prints
+  `$AWS_SECRET_ACCESS_KEY` prints nothing. Two details matter: `MAVEN_OPTS` is explicitly removed,
+  but `JAVA_TOOL_OPTIONS` is forwarded and routinely carries proxy settings (`-Dhttps.proxyHost`,
+  `-Dhttp.proxyHost`), so proxy configuration can still reach the build; and the allow-list is what
+  the sandbox applies, so anything not named above — credentials, tokens, `HTTP_PROXY` and friends —
+  is dropped rather than filtered.
 - **An isolated working directory.** A build may only run inside the run workspace or the run
   directory. A command that names any other working directory is refused, not executed.
 - **A pristine copy by default.** The project is copied into `<run-dir>/workspace` before anything

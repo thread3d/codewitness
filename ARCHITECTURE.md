@@ -84,8 +84,10 @@ Enforced by module boundaries, not by convention:
 
 The core holds no build-tool logic: it selects an adapter, asks it to inspect, build, test and
 analyse, and reads the source extensions the adapter declares when it must find source or test files.
-Language-specific code lives in the adapter modules; the Java vocabulary appears only in
-`codewitness-adapter-java`.
+Language-specific code lives in the adapter modules. A few platform defaults do remain in core — the
+`LanguageId` and `BuildSystemId` constants, `PackageCoordinate.parseMaven` for advisory lookups, and
+`WorkspaceManager`'s excluded-directory and build-wrapper names — but the engine never branches on
+them.
 
 ## 3. The pipeline
 
@@ -252,7 +254,7 @@ artifact store so a counterexample can be reviewed and replayed after the run.
 SQLite (`<project>/.codewitness/codewitness.db`) holds `projects`, `verification_runs`,
 `requirements`, `obligations`, `evidence`, `test_results`, `test_cases`, `findings`,
 `counterexamples` and `tool_runs`, with the canonical JSON document stored verbatim on the run row so
-that `codewitness report <run-id>` reproduces exactly what was written. Generated sources and raw
+that `./codewitness report <run-id>` reproduces exactly what was written. Generated sources and raw
 reports live in the artifact store on disk, not in the database.
 
 ## 10. Testing strategy
@@ -265,7 +267,7 @@ reports live in the artifact store on disk, not in the database.
 - **Integration tests** drive each adapter against small projects and parse synthetic tool reports,
   including the DOCTYPE-carrying JaCoCo and PIT formats, pytest's JUnit XML, coverage.py's JSON and
   Node's JUnit report.
-- **End-to-end tests** (`-Pe2e`) run `codewitness verify` against the fixture projects and assert the
+- **End-to-end tests** (`-Pe2e`) run `./codewitness verify` against the fixture projects and assert the
   verdicts, the counterexample contents and the exit codes. The Java, Python, Rust, Go, TypeScript and
   JavaScript fixtures are all covered; the Python one uses only the standard library, the Rust one and
   the Go one have no dependencies and the TypeScript and JavaScript ones have no packages, so each

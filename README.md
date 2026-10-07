@@ -46,48 +46,55 @@ R-001 fails because the ledger applies the limit per calendar day: two withdrawa
 apart, across midnight, total 1,400 in a rolling 24-hour window. R-005 has no way to be executed, so
 it is `UNVERIFIED` — which is the honest answer, not a failure.
 
+The launcher is `./codewitness` in the repository root. `./build.sh` builds the jar it needs but does
+not install a `codewitness` command on `PATH`, so run it from the checkout (or set `CODEWITNESS_JAR`
+and call it by path).
+
 Verify a Java project:
 
 ```bash
-codewitness verify ./my-java-project --requirements requirements.md
+./codewitness verify ./my-java-project --requirements requirements.md
 ```
 
 or a Python project:
 
 ```bash
-codewitness verify ./my-python-project --requirements requirements.md
+./codewitness verify ./my-python-project --requirements requirements.md
 ```
 
 or a Rust project:
 
 ```bash
-codewitness verify ./my-rust-crate --requirements requirements.md
+./codewitness verify ./my-rust-crate --requirements requirements.md
 ```
 
 or a Go module:
 
 ```bash
-codewitness verify ./my-go-module --requirements requirements.md
+./codewitness verify ./my-go-module --requirements requirements.md
 ```
 
 or a TypeScript project:
 
 ```bash
-codewitness verify ./my-typescript-project --requirements requirements.md
+./codewitness verify ./my-typescript-project --requirements requirements.md
 ```
 
 or a JavaScript project:
 
 ```bash
-codewitness verify ./my-javascript-project --requirements requirements.md
+./codewitness verify ./my-javascript-project --requirements requirements.md
 ```
 
 The language is detected; `language.adapter: java`, `python`, `rust`, `go`, `typescript` or
-`javascript` forces it. Python support needs only an interpreter: it uses `pytest` when the project
-has it and the standard library `unittest` runner otherwise, so a project with no third-party
-packages can still be verified. Rust support needs only `cargo`: a dependency-free crate is built,
-tested, analysed and mutated by the toolchain it already has, and generated scenarios become ordinary
-Cargo integration tests. Go support needs only the `go` tool: a dependency-free module is built,
+`javascript` only *prefers* that adapter. It is not forced: `LanguageAdapterRegistry.select` uses the
+named adapter when it exists and actually claims the project, and otherwise falls back to
+auto-detection — an unknown id is silently ignored rather than reported. Python support needs only an
+interpreter: it uses `pytest` when the project has it and the standard library `unittest` runner
+otherwise, so a project with no third-party packages can still be verified. Rust support needs only
+`cargo`: a dependency-free crate is built, tested, analysed and mutated by the toolchain it already
+has, and generated scenarios become ordinary Cargo integration tests. Go support needs only the `go`
+tool: a dependency-free module is built,
 tested, analysed and mutated by the toolchain it already has, coverage comes from
 `go test -coverprofile`, and generated scenarios become ordinary `_test.go` files in the package
 under test. TypeScript support needs only Node 22.6 or later: a project with no `node_modules` is
@@ -122,28 +129,31 @@ Every requirement ends up in exactly one state:
 | `PARTIALLY_VERIFIED` | Some obligations were discharged; significant cases remain unverified. |
 | `FAILED` | An executed experiment (or a deterministic analyzer) reproduced a violation. The evidence contains the exact input. |
 | `UNVERIFIED` | CodeWitness could not establish sufficient evidence either way. This is a legitimate and common result. |
-| `BLOCKED` | Verification could not proceed because of an infrastructure or project problem: a failed build, a missing build tool, an exhausted budget. **A failed build is reported as `BLOCKED`, never as `FAILED`.** |
+| `BLOCKED` | Verification could not proceed because of an infrastructure or project problem: a failed build or a missing build tool. **A failed build is reported as `BLOCKED`, never as `FAILED`.** |
 
 An overall run status is derived from the individual verdicts, and it is deliberately conservative: a
-single counterexample makes the whole run `FAILED`; blocked verification never becomes a pass.
+single counterexample makes the whole run `FAILED`; blocked verification never becomes a pass. If the
+budget runs out before every requirement is discharged, the run as a whole is reported `BLOCKED` and
+exits non-zero: the requirements it did reach keep their own verdicts, the ones it never reached stay
+`UNVERIFIED`, and a truncated run never reports zero failures as success.
 
 ---
 
 ## Command line
 
 ```bash
-codewitness verify <project>      # the full pipeline, producing report.html and report.json
-codewitness inspect <project>     # detection only: language, build system, modules, sources, tests
-codewitness test <project>        # compile and run the existing test suite only
-codewitness report <run-id>       # print a stored run, or list recent runs
-codewitness reproduce <run-id>    # print (or with --run, execute) the command that replays a counterexample
-codewitness clean <project>       # delete stored run data
-codewitness init <project>        # write starter codewitness.yaml and requirements.md
-codewitness version
+./codewitness verify <project>      # the full pipeline, producing report.html and report.json
+./codewitness inspect <project>     # detection only: language, build system, modules, sources, tests
+./codewitness test <project>        # compile and run the existing test suite only
+./codewitness report <run-id>       # print a stored run, or list recent runs
+./codewitness reproduce <run-id>    # print (or with --run, execute) the command that replays a counterexample
+./codewitness clean <project>       # delete stored run data
+./codewitness init <project>        # write starter codewitness.yaml and requirements.md
+./codewitness version
 ```
 
 Useful `verify` flags: `--requirements <file>`, `--config <file>`, `--output <dir>`,
-`--max-duration 10m`, `--max-generated-tests 100`, `--in-place`,
+`--max-duration 10m`, `--max-generated-tests 100`, `--in-place`, `--fail-on-unverified`,
 `--no-tests`, `--no-mutation`, `--no-generated-tests`, `--no-static-analysis`, `--no-security`,
 `--llm`, `--json`, `--quiet`.
 
@@ -151,10 +161,10 @@ Exit codes are part of the interface:
 
 | Code | Meaning |
 | --- | --- |
-| `0` | The run completed and no requirement has a counterexample. |
-| `1` | At least one requirement is `FAILED`. |
-| `2` | Verification was `BLOCKED` (build failure, missing tool). |
-| `3` | Usage error or an internal failure. |
+| `0` | The run completed and no requirement is `FAILED` or `BLOCKED`. By default an `UNVERIFIED` requirement does not change this: exit `0` means "nothing failed", not "everything passed". |
+| `1` | At least one requirement is `FAILED`, or `--fail-on-unverified` was given and some requirement is not `VERIFIED`. |
+| `2` | Verification was `BLOCKED` (failed build, missing build tool, exhausted budget). `inspect` and `test` also use `2` when no adapter or build tool can be found, and `report`/`reproduce` when a stored run is unknown. |
+| `3` | The command could not be used, or failed before it could report: a command-line or configuration error, an unhandled internal failure, a `--requirements` file that does not exist, a `clean` that could not delete, or a `reproduce --run` that could not start its command. The `./codewitness` launcher also exits `3` when no built jar is found. |
 
 ---
 
@@ -466,8 +476,12 @@ records carry their command and inputs, and counterexamples carry a replayable c
 
 CodeWitness executes project code, so it treats the project as hostile:
 
-- all execution goes through one sandbox abstraction, with a sanitised environment (credentials and
-  proxy variables removed), an isolated working directory, capped output and hard timeouts;
+- all execution goes through one sandbox abstraction. The child does not inherit the host
+  environment: only an allow-list is forwarded (`PATH`, `JAVA_HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`,
+  `HOME`, `GRADLE_USER_HOME`, `JAVA_TOOL_OPTIONS`, `SDKMAN_DIR`), so credentials and tokens are
+  dropped. `MAVEN_OPTS` is explicitly removed, but `JAVA_TOOL_OPTIONS` is forwarded and routinely
+  carries proxy settings such as `-Dhttps.proxyHost`, so a proxy variable can still reach the build.
+  There is also an isolated working directory, capped output and hard timeouts;
 - the project is copied into the run workspace by default, so generated tests and build output never
   touch your working tree;
 - `sandbox.mode: docker` runs everything in a container with no network and dropped capabilities;
@@ -515,9 +529,12 @@ codewitness/
 └── fixtures/                  deliberately defective projects used to test all of this
 ```
 
-The verification core contains no reference to Java, Maven or JUnit: language support is entirely in
-adapters. Adding a language means adding a module that implements
-`dev.codewitness.core.spi.LanguageAdapter` and registering its providers — not editing the engine.
+Language support lives entirely in the adapters: adding a language means adding a module that
+implements `dev.codewitness.core.spi.LanguageAdapter` and registering its providers — not editing the
+engine. A few platform defaults do remain in core — the `LanguageId` and `BuildSystemId` constants
+(`JAVA`, `MAVEN`, `CARGO`, `GO`, `NODE` and the rest), `PackageCoordinate.parseMaven` for advisory
+lookups, and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
+vocabulary and platform defaults, not language logic, and the engine never switches on a language.
 
 ---
 
@@ -663,7 +680,9 @@ The TypeScript adapter is implemented and exercised end to end as well
   types;
 - existing tests through Node's built-in runner (`node --test`), read from the JUnit report the runner
   writes rather than from console output, with the raw report stored as an artefact;
-- heuristic correctness rules and a separate security rule set for TypeScript;
+- heuristic correctness rules and a separate security rule set for TypeScript (`CW-TS-SEC-001..007`,
+  `CW-TS-REL-001..004`, `CW-TS-TYPE-001..002`, `CW-TS-BUG-001..002`, `CW-TS-NUM-001..002`,
+  `CW-TS-DATE-001` and `CW-TS-TEST-001`);
 - coverage through V8 (`node --test --experimental-test-coverage`), read from its LCOV export;
 - mutation testing through a bounded, built-in source mutator (arithmetic, comparison boundaries,
   equality, boolean operators and boolean constants) that flips one operator at a time and re-runs the
@@ -709,8 +728,9 @@ The JavaScript adapter is implemented and exercised end to end as well
   artefact; Node 18.17 or later is required for that reporter;
 - heuristic correctness rules and a separate security rule set for JavaScript (`CW-JS-SEC-001..007`,
   `CW-JS-REL-001..004`, `CW-JS-BUG-001..002`, `CW-JS-NUM-001..002`, `CW-JS-DATE-001` and
-  `CW-JS-TEST-001`). The TypeScript-only escape-hatch rules for `any`, non-null assertions and
-  `@ts-ignore` have no JavaScript equivalent and are deliberately absent;
+  `CW-JS-TEST-001`). The TypeScript-only escape-hatch rules — `CW-TS-TYPE-001` for `any`,
+  `CW-TS-TYPE-002` for a non-null assertion, and `CW-TS-REL-002` for `@ts-ignore`, `@ts-nocheck` and
+  `@ts-expect-error` — have no JavaScript equivalent and are deliberately absent;
 - coverage through V8 (`node --test --experimental-test-coverage --test-reporter=lcov`), read from
   its LCOV export;
 - mutation testing through a bounded, built-in source mutator (provider id `javascript-text-mutation`,
@@ -769,10 +789,13 @@ Implemented but limited, and reported as such:
 - **Mutation testing** needs the project to give PIT a test-framework plugin (the exact snippet is
   printed when it is missing). CodeWitness does not modify the project to add it.
 - **Heuristic analysis** is a small, explicitly documented rule table with a known false-positive
-  profile; findings are `MEDIUM`/`LOW` confidence and a clean run is weak evidence. One rule in
-  particular, `CW-CONC-001`, fires on any class that reads a mutable private field in a condition and
-  writes it in the same file without synchronisation, even when the object is never shared. It is
-  advisory: it never changes a verdict.
+  profile; a clean run is weak evidence. Its rules carry real severities — `CW-SEC-001` is `CRITICAL`
+  and `CW-SEC-002`, `CW-SEC-004` and `CW-NUM-001/002` are `HIGH` — but a rule match is not a
+  demonstration: findings from the heuristic tables are recorded as advisory evidence with a note,
+  and only a finding from a deterministic tool (a compiler, a linter, `go vet`) may refute a
+  requirement. One rule in particular, `CW-CONC-001`, fires on any class that reads a mutable private
+  field in a condition and writes it in the same file without synchronisation, even when the object is
+  never shared. It is advisory: it never changes a verdict.
 - **Language model support** is an advisory provider abstraction with one HTTP implementation. It is
   off by default, and no automatic conversion of suggestions into executable tests is implemented.
 - **Concurrency** verification depends on the declared scenario; CodeWitness does not infer

@@ -114,7 +114,7 @@ public final class ExistingTestsStrategy implements VerificationStrategy {
                 .source(id())
                 .confidence(EvidenceConfidence.HIGH)
                 .status(failedMapped.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.REFUTES)
-                .result(tests.describe())
+                .result(tests.describeWithNote())
                 .requirement(requirement.id())
                 .metadata("mapped_test_classes", mappedClasses)
                 .metadata("passing", passedMapped.stream().map(TestCaseResult::displayName).toList())
@@ -173,13 +173,25 @@ public final class ExistingTestsStrategy implements VerificationStrategy {
         }
 
         if (failedMapped.isEmpty()) {
-            outcomes.add(new ObligationOutcome(
-                    mappedClasses.getFirst(),
-                    dev.codewitness.core.requirements.RequirementStatus.PARTIALLY_VERIFIED,
-                    "The mapped tests pass, which supports the requirement but does not falsify it.",
-                    List.of(evidenceRecord.id()),
-                    List.of(),
-                    passedMapped.size()));
+            // Report against the requirement's own obligations. This used to be keyed by a test class
+            // name, which is not an obligation id, so the outcome could never be merged into the
+            // obligation table: "the mapped tests pass" showed up as evidence while the obligations it
+            // bears on stayed silently unaddressed. A passing mapped test supports an obligation; it
+            // never discharges one, because tests written by the same process that wrote the code are
+            // not independent verification.
+            for (VerificationObligation obligation : obligations) {
+                if (obligation.kind() == dev.codewitness.core.requirements.ObligationKind.MANUAL) {
+                    continue;
+                }
+                outcomes.add(new ObligationOutcome(
+                        obligation.id(),
+                        dev.codewitness.core.requirements.RequirementStatus.PARTIALLY_VERIFIED,
+                        "The " + mappedClasses.size() + " test class(es) mapped to " + requirement.id()
+                                + " pass, which supports this obligation but does not discharge it.",
+                        List.of(evidenceRecord.id()),
+                        List.of(),
+                        passedMapped.size()));
+            }
         }
         return new StrategyOutcome(id(), requirement.id(), evidence, counterexamples, List.copyOf(outcomes), notes);
     }

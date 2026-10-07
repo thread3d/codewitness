@@ -54,6 +54,13 @@ public final class JavaTestProvider implements VerificationTools.TestRunner {
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(1_000_000)
                 .build());
+        if (result.timedOut()) {
+            // A killed build can still have written reports for the tests that finished before the
+            // kill, so the timeout is checked before the reports are looked for or parsed.
+            return TestResult.notExecuted(buildSystem.id() + " was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; the partial output "
+                    + "is not a complete test run: " + lastLines(result.combinedOutput(), 5));
+        }
 
         List<Path> reports = TestReportParser.findReportFiles(project);
         if (reports.isEmpty()) {

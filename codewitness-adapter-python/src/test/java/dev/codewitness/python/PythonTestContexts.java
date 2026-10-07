@@ -53,10 +53,21 @@ public final class PythonTestContexts {
 
     /** A context with the given scenarios declared in code. */
     public static VerificationContext context(Path root, Path runDirectory, List<Scenario> scenarios) {
-        ProjectRef projectRef = ProjectRef.of(root);
+        return context(projectInfo(root), runDirectory, scenarios,
+                new LocalProcessSandbox(List.of(root, runDirectory)));
+    }
+
+    /**
+     * A context whose project info and sandbox the caller supplies.
+     *
+     * <p>Needed by the generated-test executor's tests: they exercise the execution path itself, so
+     * they must be able to substitute the process runner instead of starting a real interpreter.
+     */
+    public static VerificationContext context(
+            ProjectInfo info, Path runDirectory, List<Scenario> scenarios, ExecutionSandbox sandbox) {
+        ProjectRef projectRef = info.project();
         WorkspaceManager.Workspace workspace =
                 WorkspaceManager.prepare(projectRef, runDirectory, WorkspaceManager.Mode.IN_PLACE);
-        ExecutionSandbox sandbox = new LocalProcessSandbox(List.of(root, runDirectory));
         VerificationConfig defaults = VerificationConfig.defaults();
         VerificationConfig config = new VerificationConfig(
                 defaults.project(), defaults.language(), defaults.limits(), defaults.tests(),
@@ -65,7 +76,7 @@ public final class PythonTestContexts {
         return VerificationContext.builder()
                 .runId("CW-2026-01-01-TEST0")
                 .projectRef(projectRef)
-                .projectInfo(projectInfo(root))
+                .projectInfo(info)
                 .config(config)
                 .workspace(workspace)
                 .artifacts(new ArtifactStore(runDirectory))

@@ -62,7 +62,13 @@ public final class JacocoCoverageProvider implements VerificationTools.CoverageP
         String note = null;
         if (reports.isEmpty()) {
             if (project.buildSystem().id().equals("maven")) {
-                note = attemptJacocoRun(context);
+                JacocoRun run = attemptJacocoRun(context);
+                if (run.timedOut()) {
+                    // A killed Maven run may still have written a partial JaCoCo XML report, which would
+                    // parse into a percentage that describes an unfinished test run.
+                    return CoverageReport.notMeasured(id(), run.note());
+                }
+                note = run.note();
                 reports = findReports(project);
             } else {
                 note = "no JaCoCo report found; for Gradle add the jacoco plugin to the project";
@@ -74,11 +80,15 @@ public final class JacocoCoverageProvider implements VerificationTools.CoverageP
         return parse(reports);
     }
 
-    private String attemptJacocoRun(VerificationContext context) {
+    /** What the agent-attached run reported: its note, and whether it was killed at the timeout. */
+    private record JacocoRun(String note, boolean timedOut) {
+    }
+
+    private JacocoRun attemptJacocoRun(VerificationContext context) {
         ProjectInfo project = context.projectInfo();
         List<String> executable = launcher.resolve(project, project.buildRoot());
         if (executable == null) {
-            return "no Maven executable found, so coverage could not be measured";
+            return new JacocoRun("no Maven executable found, so coverage could not be measured", false);
         }
         List<String> goals = new ArrayList<>(executable);
         goals.add("-B");
@@ -92,11 +102,18 @@ public final class JacocoCoverageProvider implements VerificationTools.CoverageP
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(1_000_000)
                 .build());
-        if (!result.started()) {
-            return "coverage could not be measured: " + result.failureReason();
+        if (result.timedOut()) {
+            // The killed run may have written a partial JaCoCo XML report, so the timeout is reported
+            // before any report file is looked for or parsed.
+            return new JacocoRun("maven was killed after the "
+                    + context.config().limits().timeout().toSeconds() + "s timeout; a partial JaCoCo "
+                    + "report is not a measurement", true);
         }
-        return "coverage was measured with the JaCoCo agent attached to the test run ("
-                + result.describeOutcome() + ")";
+        if (!result.started()) {
+            return new JacocoRun("coverage could not be measured: " + result.failureReason(), false);
+        }
+        return new JacocoRun("coverage was measured with the JaCoCo agent attached to the test run ("
+                + result.describeOutcome() + ")", false);
     }
 
     private static List<Path> findReports(ProjectInfo project) {
