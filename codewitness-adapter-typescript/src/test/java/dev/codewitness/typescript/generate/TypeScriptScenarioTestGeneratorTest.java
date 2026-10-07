@@ -80,6 +80,9 @@ class TypeScriptScenarioTestGeneratorTest {
         assertTrue(source.contains("const cwSeedValue: number | null = cwSeed(42);"), source);
         assertTrue(source.contains("cwFail(cwCase, cwSeedValue, cwInputs,"), source);
         assertTrue(source.contains("CODEWITNESS_COUNTEREXAMPLE"), source);
+        assertTrue(source.contains("value.replace(/\\|/g, \"/\")"),
+                "a counterexample field carrying the protocol's delimiter must be sanitised, or the "
+                        + "engine cannot split the line: " + source);
         assertFalse(source.contains("#{"), "no placeholder may survive into generated code:\n" + source);
         // Template literals are legitimate TypeScript, so a `${...}` in a helper must be left alone.
         assertTrue(source.contains("return `cw-${this.next() % 10000n}`;"), source);

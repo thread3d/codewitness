@@ -80,6 +80,9 @@ class JavaScriptScenarioTestGeneratorTest {
         assertTrue(source.contains("const cwSeedValue = cwSeed(42);"), source);
         assertTrue(source.contains("cwFail(cwCase, cwSeedValue, cwInputs,"), source);
         assertTrue(source.contains("CODEWITNESS_COUNTEREXAMPLE"), source);
+        assertTrue(source.contains("value.replace(/\\|/g, \"/\")"),
+                "a counterexample field carrying the protocol's delimiter must be sanitised, or the "
+                        + "engine cannot split the line: " + source);
         assertFalse(source.contains("#{"), "no placeholder may survive into generated code:\n" + source);
         // The generated module is plain JavaScript: no TypeScript type annotation may appear anywhere.
         assertFalse(source.contains(": bigint"), "the generator must not emit a type annotation:\n" + source);
