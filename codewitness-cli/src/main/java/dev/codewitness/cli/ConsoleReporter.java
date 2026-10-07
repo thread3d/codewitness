@@ -32,7 +32,8 @@ public final class ConsoleReporter {
         // A polyglot run is several languages, and which ones it verified is the first thing a reader of a
         // report about one needs to know.
         for (var language : report.languages()) {
-            sb.append("  language   ").append(language.describe()).append('\n');
+            sb.append(language.verified() ? "  language   " : "  NOT VERIFIED ").append(language.describe())
+                    .append('\n');
         }
         sb.append("revision     ").append(report.run().environment().sourceRevision()).append('\n');
         sb.append("overall      ").append(report.overallStatus()).append('\n');

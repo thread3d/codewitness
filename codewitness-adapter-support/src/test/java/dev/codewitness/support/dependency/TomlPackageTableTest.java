@@ -126,6 +126,31 @@ class TomlPackageTableTest {
     }
 
     @Test
+    @DisplayName("only a package that names its registry is a dependency, when the caller asks for that")
+    void skipsTheWorkspaceCrateWhenOnlyPublishedPackagesAreWanted() {
+        // A Cargo.lock lists the crate being built alongside its dependencies, and the difference is that
+        // the crate itself has no source: nothing fetched it, so no advisory can ever be about it.
+        String lock = """
+                [[package]]
+                name = "the-project-itself"
+                version = "0.1.0"
+                dependencies = [ "serde" ]
+
+                [[package]]
+                name = "serde"
+                version = "1.0.193"
+                source = "registry+https://github.com/rust-lang/crates.io-index"
+                """;
+
+        assertEquals(List.of("the-project-itself@0.1.0", "serde@1.0.193"),
+                TomlPackageTable.parse(lock, PackageCoordinate.CRATES_IO).stream()
+                        .map(PackageCoordinate::display).toList());
+        assertEquals(List.of("serde@1.0.193"),
+                TomlPackageTable.parse(lock, PackageCoordinate.CRATES_IO, true).stream()
+                        .map(PackageCoordinate::display).toList());
+    }
+
+    @Test
     @DisplayName("an empty or absent lock file declares nothing")
     void handlesEmptyInput() {
         assertTrue(TomlPackageTable.parse("", PackageCoordinate.CRATES_IO).isEmpty());

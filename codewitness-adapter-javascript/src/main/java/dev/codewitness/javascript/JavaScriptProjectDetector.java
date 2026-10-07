@@ -61,9 +61,6 @@ public final class JavaScriptProjectDetector {
     /** Source extensions this adapter owns. */
     static final Set<String> SOURCE_EXTENSIONS = Set.of("js", "mjs", "cjs");
 
-    /** TypeScript extensions, which this adapter refuses to claim. */
-    private static final Set<String> TYPESCRIPT_EXTENSIONS = Set.of("ts", "tsx", "mts", "cts");
-
     /** Conventional test directories, in the order they are preferred. */
     private static final List<String> TEST_DIRECTORIES = List.of(
             "tests", "test", "__tests__", "src/__tests__", "spec");
@@ -82,15 +79,26 @@ public final class JavaScriptProjectDetector {
     private JavaScriptProjectDetector() {
     }
 
-    /** @return {@code true} when the directory looks like a JavaScript project this adapter can handle. */
+    /**
+     * @return {@code true} when the directory contains JavaScript this adapter should verify.
+     *
+     * <p>This used to refuse the whole project as soon as {@code tsconfig.json} or any TypeScript source
+     * appeared, which kept a TypeScript project from being claimed twice - but it also meant a repository
+     * holding a TypeScript frontend next to plain-JavaScript tooling lost the JavaScript entirely, without
+     * the report saying so. The two adapters do not actually overlap: this one owns {@code js}, {@code mjs}
+     * and {@code cjs}, and the TypeScript adapter owns {@code ts}, {@code tsx}, {@code mts} and
+     * {@code cts}. Disjoint file sets mean both can run over one tree without either reading a file the
+     * other owns, so the split belongs at the file level, which the extensions already give, and not at the
+     * project level.
+     *
+     * <p>What is still asked for is evidence that there is a JavaScript <em>project</em> here rather than a
+     * stray script: either a Node test file, or a {@code package.json} to declare what the code is. A
+     * TypeScript project that happens to ship a compiled-looking {@code .js} config may therefore now get a
+     * second, small JavaScript pass. That is the cost of not hiding JavaScript, and it is the cheaper of
+     * the two mistakes: a redundant pass is visible in the report and can be read past, whereas a language
+     * the run never looked at cannot.
+     */
     public static boolean looksLikeJavaScriptProject(Path root) {
-        if (Files.isRegularFile(root.resolve("tsconfig.json"))
-                || Files.isRegularFile(root.resolve("tsconfig.base.json"))) {
-            return false;
-        }
-        if (containsTypeScriptSource(root, 4)) {
-            return false;
-        }
         if (containsJavaScriptTest(root, 4)) {
             return true;
         }
@@ -261,12 +269,6 @@ public final class JavaScriptProjectDetector {
     /** @return {@code true} when a shallow walk finds a Node test file below {@code root}. */
     static boolean containsJavaScriptTest(Path root, int maxDepth) {
         return containsMatch(root, maxDepth, path -> isTestFileName(path.getFileName().toString()));
-    }
-
-    /** @return {@code true} when a shallow walk finds any TypeScript source file below {@code root}. */
-    static boolean containsTypeScriptSource(Path root, int maxDepth) {
-        return containsMatch(root, maxDepth, path -> TYPESCRIPT_EXTENSIONS.contains(extensionOf(
-                path.getFileName().toString())));
     }
 
     private static boolean containsMatch(Path root, int maxDepth, java.util.function.Predicate<Path> matches) {

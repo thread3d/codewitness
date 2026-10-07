@@ -76,15 +76,17 @@ class RustDependencyAnalyzerTest {
                 [[package]]
                 name = "serde_derive"
                 version = "1.0.193"
+                source = "registry+https://github.com/rust-lang/crates.io-index"
                 """);
         VerificationContext context = RustTestContexts.context(root, runDirectory);
 
         DependencyReport report = new RustDependencyAnalyzer().analyseDependencies(context);
 
         assertEquals("cargo-lock", report.tool());
-        assertEquals(3, report.totalDependencies());
-        assertEquals(List.of("sample@0.1.0", "serde@1.0.193", "serde_derive@1.0.193"),
-                report.directDependencies());
+        // The fixture's own crate is in the lock file too, and it is not a dependency of itself: a
+        // [[package]] with no source is built from this tree rather than fetched from a registry.
+        assertEquals(2, report.totalDependencies());
+        assertEquals(List.of("serde@1.0.193", "serde_derive@1.0.193"), report.directDependencies());
         assertEquals("crates.io", report.coordinates().getFirst().ecosystem());
         assertTrue(report.coordinates().stream().allMatch(coordinate -> coordinate.resolved()),
                 "every coordinate from a lock file must be queryable: " + report.coordinates());

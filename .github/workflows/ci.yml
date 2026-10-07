@@ -20,8 +20,8 @@ jobs:
   test:
     name: Build and test (Java 25)
     runs-on: ubuntu-latest
-    # The end-to-end suite builds six fixture projects from scratch; give it room, but do not let a
-    # hung nested build occupy a runner forever.
+    # The end-to-end suite builds every fixture project from scratch, several of them through their own
+    # toolchain; give it room, but do not let a hung nested build occupy a runner forever.
     timeout-minutes: 60
 
     steps:

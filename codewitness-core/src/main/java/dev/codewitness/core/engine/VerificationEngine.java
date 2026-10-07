@@ -57,6 +57,7 @@ import dev.codewitness.core.result.VerificationReport;
 import dev.codewitness.core.result.VerificationRun;
 import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
+import dev.codewitness.core.spi.LanguageDetectorRegistry;
 import dev.codewitness.core.spi.ProgressListener;
 import dev.codewitness.core.spi.RunState;
 import dev.codewitness.core.spi.StrategyOutcome;
@@ -102,16 +103,31 @@ public final class VerificationEngine {
 
     private final LanguageAdapterRegistry languages;
     private final VerificationProviderRegistry providers;
+    private final LanguageDetectorRegistry detectors;
     private final ProcessRunner hostRunner;
 
     public VerificationEngine(LanguageAdapterRegistry languages, VerificationProviderRegistry providers) {
-        this(languages, providers, new dev.codewitness.core.exec.LocalProcessSandbox(List.of(Path.of("."))).runner());
+        this(languages, providers, LanguageDetectorRegistry.of(), new dev.codewitness.core.exec
+                .LocalProcessSandbox(List.of(Path.of("."))).runner());
     }
 
     public VerificationEngine(
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, ProcessRunner hostRunner) {
+        this(languages, providers, LanguageDetectorRegistry.of(), hostRunner);
+    }
+
+    /**
+     * @param detectors recognition for languages no adapter can verify. Without them a run still verifies
+     *     every language it has an adapter for; it just cannot say anything about the ones it does not.
+     */
+    public VerificationEngine(
+            LanguageAdapterRegistry languages,
+            VerificationProviderRegistry providers,
+            LanguageDetectorRegistry detectors,
+            ProcessRunner hostRunner) {
         this.languages = languages;
         this.providers = providers;
+        this.detectors = detectors;
         this.hostRunner = hostRunner;
     }
 
@@ -169,8 +185,8 @@ public final class VerificationEngine {
             limitations.add("No language adapter supports this project. Registered adapters: " + languages.ids());
             // With no adapter at all the run says nothing about any language, so naming the ones it can see
             // is the most useful thing it can still do.
-            limitations.addAll(UncoveredLanguages.limitations(
-                    UncoveredLanguages.detect(workspace.root(), Set.of()), List.of("no language")));
+            limitations.addAll(UncoveredLanguages.limitations(detectors, workspace.root(), Set.of(),
+                    List.of()));
             listener.onEvent("inspect", "no language adapter matched");
             Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.PROJECT_INSPECTION)
                     .description("No language adapter supports " + project.root())
@@ -209,10 +225,10 @@ public final class VerificationEngine {
         }
         // Running every adapter that claims the project still leaves any language nothing can verify. Saying
         // so is the difference between an incomplete report and a misleading one.
-        limitations.addAll(UncoveredLanguages.limitations(
-                UncoveredLanguages.detect(workspace.root(), inspections.stream()
-                        .map(inspection -> inspection.info().language())
-                        .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new))),
+        List<LanguageDetectorRegistry.Detection> uncovered = detectors.detect(workspace.root(),
+                inspections.stream().map(inspection -> inspection.info().language())
+                        .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new)));
+        limitations.addAll(UncoveredLanguages.limitations(uncovered,
                 inspections.stream().map(inspection -> inspection.info().language().id()).toList()));
         // One description of the whole tree, for mapping requirements to files and for the report. Without
         // it the languages other than the first would be invisible to both.
@@ -723,15 +739,7 @@ public final class VerificationEngine {
 
         return VerificationReport.builder(runId.value(), info, plannedSet)
                 .verdicts(verdicts)
-                .languages(inspections.stream()
-                        .map(inspection -> new VerificationReport.LanguageSummary(
-                                inspection.adapter().id(),
-                                inspection.info().language(),
-                                inspection.info().buildSystem(),
-                                inspection.info().modules().size(),
-                                builds.containsKey(inspection.adapter().id()),
-                                builtSuccessfully(builds.get(inspection.adapter().id()))))
-                        .toList())
+                .languages(languageSummaries(inspections, builds, uncovered))
                 .evidence(ledger.all())
                 .counterexamples(counterexamplesByRequirement.values().stream().flatMap(List::stream).toList())
                 .build(buildSummary(state.build()))
@@ -798,6 +806,33 @@ public final class VerificationEngine {
             inspections.add(new Inspection(adapter, adapter.inspect(project, inspectContext)));
         }
         return inspections;
+    }
+
+    /**
+     * @return one report entry per language the run accounted for: every language an adapter verified, then
+     *     every language a detector recognised and nothing could verify. Both kinds are in one list so that a
+     *     reader cannot see the verified set without also seeing what was left out of it.
+     */
+    private static List<VerificationReport.LanguageSummary> languageSummaries(
+            List<Inspection> inspections,
+            Map<String, BuildResult> builds,
+            List<LanguageDetectorRegistry.Detection> uncovered) {
+        List<VerificationReport.LanguageSummary> summaries = new ArrayList<>();
+        for (Inspection inspection : inspections) {
+            summaries.add(new VerificationReport.LanguageSummary(
+                    inspection.adapter().id(),
+                    inspection.info().language(),
+                    inspection.info().buildSystem(),
+                    inspection.info().modules().size(),
+                    builds.containsKey(inspection.adapter().id()),
+                    builtSuccessfully(builds.get(inspection.adapter().id())),
+                    ""));
+        }
+        for (LanguageDetectorRegistry.Detection detection : uncovered) {
+            summaries.add(VerificationReport.LanguageSummary.recognisedOnly(
+                    detection.language(), detection.evidence()));
+        }
+        return List.copyOf(summaries);
     }
 
     /** @return the inspections whose adapter declares the given capability, in selection order. */
@@ -1107,8 +1142,8 @@ public final class VerificationEngine {
             coordinates.addAll(report.coordinates());
             vulnerabilities.addAll(report.vulnerabilities());
             tools.add(report.tool());
-            if (report.analysed() && !report.note().isBlank()) {
-                notes.add(report.tool() + ": " + report.note());
+            if (report.analysed()) {
+                notes.add(report.tool());
             }
             report.dependenciesByModule().forEach((module, dependencies) ->
                     byModule.merge(DependencyReport.moduleKey(language, module),
@@ -1126,9 +1161,14 @@ public final class VerificationEngine {
                                 + "what each one covered")
                 : AdvisoryScan.notPerformed("no language's inventory carried a resolved coordinate, so no "
                         + "advisory source was consulted");
+        // One inventory per language, so the merged note names the languages rather than concatenating
+        // what each of them said: five paragraphs of the same explanatory sentence is not a report, and
+        // the per-language wording is already in the evidence ledger where it can be read one at a time.
+        String note = "inventory only: the resolved dependencies of " + inventories.size()
+                + " language(s), read from " + String.join(", ", new java.util.LinkedHashSet<>(notes))
+                + "; what each of those inventories covers is recorded in its own dependency evidence";
         return new DependencyReport(analysed, String.join("+", new java.util.LinkedHashSet<>(tools)),
-                String.join("; ", notes), distinct.size(),
-                distinct.stream().map(PackageCoordinate::display).toList(),
+                note, distinct.size(), distinct.stream().map(PackageCoordinate::display).toList(),
                 byMap(byModule), distinct, distinctFindings, scan);
     }
 

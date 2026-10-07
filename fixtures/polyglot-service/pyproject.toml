@@ -1,0 +1,5 @@
+[project]
+name = "polyglot-ledger"
+version = "0.1.0"
+dynamic = ["dependencies"]
+requires-python = ">=3.9"

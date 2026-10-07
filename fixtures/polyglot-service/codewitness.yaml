@@ -1,0 +1,81 @@
+# CodeWitness configuration for the polyglot fixture.
+#
+# This fixture is one directory containing six languages, and its subject is the thing that makes that
+# work: `language.adapter: auto` selects every adapter that claims part of the tree, so all six are
+# built, tested and analysed in a single run, and each language appears in the report in its own right.
+# It also holds a Gemfile, which no adapter understands, so the report has to name Ruby as present and
+# not verified rather than leaving it out.
+#
+# One scenario, for the Python half. The other five requirements carry no scenario and stay UNVERIFIED,
+# which is the honest answer for a requirement nobody has said how to execute. This one is here because it
+# proves something the per-language fixtures cannot: that a generated test executes against the right
+# language when six of them are present in the same tree, rather than being handed to whichever adapter ran
+# first.
+project:
+  name: polyglot-service
+
+language:
+  adapter: auto
+
+verification:
+  timeout: 10m
+  max_duration: 15m
+  max_test_generation_iterations: 2
+  max_generated_tests: 20
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: false
+
+property_testing:
+  enabled: true
+  max_scenarios: 5
+
+static_analysis:
+  enabled: true
+  analyzers: [heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: false
+
+scenarios:
+  # R-002: the running total of a list of amounts. The fragment is Python and is executed by the Python
+  # adapter's generated-test runner; the other five languages are reading the same directory.
+  - id: SC-TOTAL
+    requirement: R-002
+    description: The total of two amounts is their sum
+    mode: single
+    setup: |
+      import ledger
+    steps:
+      - call: "ledger.total([${a}, ${b}])"
+        description: total two amounts
+        inputs:
+          - name: a
+            type: int
+            domain: integer
+            values: ["100", "250"]
+            range: {min: 0, max: 100000}
+          - name: b
+            type: int
+            domain: integer
+            values: ["250", "100"]
+            range: {min: 0, max: 100000}
+    observation: "ledger.total([${a}, ${b}])"
+    invariant: "observation == ${a} + ${b}"
+    cases: 25
+    seed: 7

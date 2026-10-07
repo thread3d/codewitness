@@ -17,6 +17,7 @@ not install a `codewitness` command on `PATH`.
 | `go-withdrawal-ledger` | Go: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for Go: module detection, `go build`, `go test -json` parsing, scenario-generated `_test.go` files in the package under test, counterexamples, built-in coverprofile coverage and bounded source mutation, with no third-party module. |
 | `typescript-withdrawal-ledger` | TypeScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language executed by Node's type stripper: detection, syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
 | `javascript-withdrawal-ledger` | JavaScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for plain JavaScript, with no compiler and no type check anywhere: detection, `node --check` syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
+| `polyglot-service` | six languages in one directory, plus a `Gemfile` nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
 | `security-vulnerability` | hardcoded credential, SQL built by concatenation | `FAILED` | 2 `FAILED` | Static security rules produce counterexamples with file, line and rule id, without any test running. |
@@ -207,6 +208,46 @@ Unlike the TypeScript fixture, nothing here is type checked: the JavaScript adap
 and its build is a syntax check with the runtime's own parser. The two adapters are exclusive — a
 project with a `tsconfig.json` or any TypeScript source belongs to the TypeScript adapter — so a
 JavaScript run never implies a type check happened.
+
+### `polyglot-service`
+
+One directory holding six languages' projects and a `Gemfile`: a Maven project, a Python package with a
+`poetry.lock`, a Cargo crate, a Go module, a TypeScript ledger and a plain-JavaScript tool. Nothing
+arranges the sharing - each adapter finds its own files by extension and ignores the rest - which is the
+property the fixture exists to demonstrate. JavaScript and TypeScript own disjoint extensions
+(`js`/`mjs`/`cjs` against `ts`/`tsx`/`mts`/`cts`), so both are verified rather than one stepping aside
+for the other.
+
+One scenario is declared, for the Python half. The other five requirements have no scenario and stay
+`UNVERIFIED`, which is the honest answer for a requirement nobody has said how to execute. That one
+scenario is what proves the thing the per-language fixtures cannot: a generated test executed against the
+right language while six of them share a tree.
+
+The `Gemfile` is not decoration either. It is the case that running more adapters cannot fix - a language
+present in the tree that nothing understands - and the report names it, with the file that gave it away,
+instead of computing verdicts as though the code were not there.
+
+```text
+project      polyglot-service (polyglot, polyglot)
+  language   java via java (maven, 1 module(s), build succeeded)
+  language   python via python (python, 1 module(s), build succeeded)
+  language   rust via rust (cargo, 1 module(s), build succeeded)
+  language   go via go (go, 1 module(s), build succeeded)
+  language   javascript via javascript (node, 1 module(s), build succeeded)
+  language   typescript via typescript (node, 1 module(s), build succeeded)
+  NOT VERIFIED ruby - present (Gemfile), but no adapter in this run can verify it
+
+Requirements
+  ? R-001  The Java ledger totals a list of amounts      UNVERIFIED
+  ✓ R-002  The Python ledger totals a list of amounts    VERIFIED
+  ? R-003  The Rust ledger totals a list of amounts      UNVERIFIED
+  ? R-004  The Go ledger totals a list of amounts        UNVERIFIED
+  ? R-005  The TypeScript ledger totals a list of amounts UNVERIFIED
+  ? R-006  The JavaScript tool formats minor units       UNVERIFIED
+
+Tests
+  8 executed, 8 passed, 0 failed, 0 skipped (Python 2, Rust 2, Go 2, JavaScript 1, TypeScript 1)
+```
 
 ### `off-by-one-boundary`
 

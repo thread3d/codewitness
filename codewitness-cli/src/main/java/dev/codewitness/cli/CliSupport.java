@@ -5,6 +5,7 @@ import dev.codewitness.core.config.VerificationConfig;
 import dev.codewitness.core.engine.VerificationEngine;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
+import dev.codewitness.core.spi.LanguageDetectorRegistry;
 import dev.codewitness.core.spi.ProgressListener;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.go.GoAdapterBundle;
@@ -16,6 +17,7 @@ import dev.codewitness.typescript.TypeScriptAdapterBundle;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /** Shared wiring for the command line interface. */
 final class CliSupport {
@@ -35,13 +37,17 @@ final class CliSupport {
         PythonAdapterBundle.register(languages, providers, true);
         RustAdapterBundle.register(languages, providers, true);
         GoAdapterBundle.register(languages, providers, true);
-        // JavaScript is registered before TypeScript: a project with TypeScript sources is claimed by the
-        // TypeScript adapter, and the JavaScript detector defers to it, but registration order makes the
-        // intent explicit.
+        // JavaScript and TypeScript are registered as a pair because they own disjoint file sets -
+        // js/mjs/cjs against ts/tsx/mts/cts - and can therefore both run over one tree. A TypeScript
+        // frontend next to plain-JavaScript tooling is verified in both languages rather than losing one.
         JavaScriptAdapterBundle.register(languages, providers, true);
         TypeScriptAdapterBundle.register(languages, providers, true);
         languages.discover();
-        return new VerificationEngine(languages, providers);
+        // Recognition for the languages no adapter above can verify. Without this a repository is reported
+        // as though the code in those languages were not there.
+        LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
+        return new VerificationEngine(languages, providers, detectors,
+                new dev.codewitness.core.exec.LocalProcessSandbox(List.of(Path.of("."))).runner());
     }
 
     /** Resolves the configuration file: explicit flag, then {@code <project>/codewitness.yaml}, then defaults. */

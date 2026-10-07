@@ -1,0 +1,5 @@
+[package]
+name = "polyglot-ledger"
+version = "0.1.0"
+edition = "2021"
+description = "The Rust half of the polyglot fixture: a ledger with no dependencies, so it builds offline."

@@ -195,7 +195,8 @@ public final class HtmlReportWriter {
         // Which languages were verified. A reader of a polyglot report has to be able to tell, at a glance,
         // what the verdicts below are actually about.
         for (VerificationReport.LanguageSummary language : report.languages()) {
-            html.append("<dt>Language</dt><dd>").append(esc(language.describe())).append("</dd>\n");
+            html.append("<dt>").append(language.verified() ? "Language" : "Not verified").append("</dt><dd>")
+                    .append(esc(language.describe())).append("</dd>\n");
         }
         html.append("<dt>Environment</dt><dd>")
                 .append(esc(environment != null ? environment.isolationLevel() : "unknown"))

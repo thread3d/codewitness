@@ -86,25 +86,28 @@ or a JavaScript project:
 ./codewitness verify ./my-javascript-project --requirements requirements.md
 ```
 
-The language is detected. A project may be written in more than one: a Java service with a TypeScript
-frontend is two verifiable projects in one tree, and `LanguageAdapterRegistry.selectAll` runs **every**
-adapter that claims part of it, so neither side is silently absent from the report. The report then says
-`polyglot` and lists each language it verified under `languages`, so the verdicts cannot be read as if the
-whole tree were one language. Phases that belong to a language run once per language, and a language whose
-build fails blocks only the requirements written in it — a sibling that compiled is still verifiable.
+The language is detected, and a project may be written in several. `LanguageAdapterRegistry.selectAll`
+runs **every** adapter that claims part of the tree — a Java service with a TypeScript frontend is two
+verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
+belong to a language run once per language against that language's own description; a language whose build
+fails blocks only the requirements written in it, and the run is `BLOCKED` only when that failure actually
+stopped one from being verified.
+
+JavaScript and TypeScript coexist in one tree. They own disjoint extensions — `js`/`mjs`/`cjs` against
+`ts`/`tsx`/`mts`/`cts` — so the split is at the file level, and a TypeScript frontend next to plain
+JavaScript tooling is verified in both rather than losing one.
+
+The report says `polyglot` and lists every language it accounted for under `languages`, each entry marked
+`verified` or not, so the verdicts cannot be read as if the whole tree were one language. A language the
+tree contains that **no** adapter understands is an entry in that same list, marked not verified and naming
+the file that gave it away — a language that appears nowhere in the report is indistinguishable from one
+that is not there. Recognition comes from `LanguageDetector` implementations discovered like adapters are,
+so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
 `language.adapter: java`, `python`, `rust`, `go`, `typescript` or `javascript` *narrows* the run to that one
 adapter instead of being merged with the automatic choice. It is not forced: the named adapter is used when
 it exists and actually claims the project, and otherwise the run falls back to auto-detection — an unknown
 id is silently ignored rather than reported.
-
-A language present in the tree that **no** adapter understands is reported as an explicit limitation naming
-the file that gave it away, rather than being left out: running every adapter that claims a project cannot
-help with a language nothing covers, and a report that stays quiet about it is worse than one that says so.
-The check is a heuristic over well-known project descriptors — `Gemfile`, `composer.json`, `*.csproj` and the
-like — and it skips dependency, build-output and sample-project directories (`node_modules`, `target`,
-`vendor`, `fixtures`, `testdata`), because naming a repository's own test inputs would be noise in a list
-that is only useful while it is read.
 
 Python support needs only an interpreter: it uses `pytest` when the project has it and the standard library `unittest` runner
 otherwise, so a project with no third-party packages can still be verified. Rust support needs only
@@ -547,13 +550,14 @@ codewitness/
 
 Language support lives entirely in the adapters: adding a language means adding a module that
 implements `dev.codewitness.core.spi.LanguageAdapter` and registering its providers — not editing the
-engine. A few platform defaults do remain in core — the `LanguageId` and `BuildSystemId` constants
-(`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`, `TYPESCRIPT`, `POLYGLOT` and the rest), the typed
-`PackageCoordinate` an advisory lookup needs, the `UncoveredLanguages` naming table, and the
+engine. Recognising a language CodeWitness has no adapter for is the same shape: a module implementing
+`dev.codewitness.core.spi.LanguageDetector`, discovered the same way, and the detectors for the languages
+nothing here implements live in `codewitness-language-detectors`. A few platform defaults do remain in core
+— the `LanguageId` and `BuildSystemId` constants (`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`,
+`TYPESCRIPT`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup needs, and the
 excluded-directory and build-wrapper names in `WorkspaceManager` — but they are vocabulary and platform
-defaults, not language logic, and the engine never switches on a language. `UncoveredLanguages` is the one
-place worth watching: it only ever adds a sentence to the report's limitations, and must never grow into
-something that schedules a phase or influences a verdict.
+defaults, not language logic, and the engine never switches on a language. Nothing in core names a language
+it cannot already verify.
 
 ---
 

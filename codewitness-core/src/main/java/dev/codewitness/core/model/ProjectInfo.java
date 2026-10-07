@@ -167,11 +167,13 @@ public final class ProjectInfo {
                 }
             });
             info.attributes().forEach((key, value) -> attributes.putIfAbsent(key, value));
-            // Modules are keyed by path and name together: two adapters legitimately describe the same
-            // directory as a module of their own language, and collapsing those would hide one language's
-            // code from the module list.
-            info.modules().forEach(module ->
-                    modules.putIfAbsent(module.path() + "|" + module.name(), module));
+            // Modules are keyed by everything that identifies one, not just path and name: two adapters
+            // legitimately describe the same directory as a module of their own language - the Node pair
+            // always do - and collapsing those would drop one language's source and test directories from
+            // the map the requirement mapper scans.
+            info.modules().forEach(module -> modules.putIfAbsent(
+                    module.path() + "|" + module.name() + "|" + module.sourceDirs() + "|" + module.testSourceDirs(),
+                    module));
         }
         builder.sourceExtensions(extensions);
         builder.attributes(attributes);

@@ -1,0 +1,14 @@
+dev.codewitness.languages.ClojureLanguageDetector
+dev.codewitness.languages.CppLanguageDetector
+dev.codewitness.languages.DartLanguageDetector
+dev.codewitness.languages.DotNetLanguageDetector
+dev.codewitness.languages.ElixirLanguageDetector
+dev.codewitness.languages.ErlangLanguageDetector
+dev.codewitness.languages.HaskellLanguageDetector
+dev.codewitness.languages.KotlinLanguageDetector
+dev.codewitness.languages.LuaLanguageDetector
+dev.codewitness.languages.PerlLanguageDetector
+dev.codewitness.languages.PhpLanguageDetector
+dev.codewitness.languages.RubyLanguageDetector
+dev.codewitness.languages.ScalaLanguageDetector
+dev.codewitness.languages.SwiftLanguageDetector

@@ -237,8 +237,12 @@ public final class JsonReportWriter {
         ArrayNode languages = mapper.createArrayNode();
         for (VerificationReport.LanguageSummary language : report.languages()) {
             ObjectNode entry = mapper.createObjectNode();
-            entry.put("adapter", language.adapter());
             entry.put("language", language.language().id());
+            // A language the run only recognised must be distinguishable from one it verified, or "this
+            // project's languages" would read as a list of things that were checked.
+            entry.put("verified", language.verified());
+            entry.put("adapter", language.adapter());
+            entry.put("evidence", language.evidence());
             entry.put("buildSystem", language.buildSystem().id());
             entry.put("modules", language.modules());
             entry.put("buildAttempted", language.buildAttempted());

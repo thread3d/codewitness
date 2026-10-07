@@ -32,6 +32,7 @@
 
   <modules>
     <module>codewitness-core</module>
+    <module>codewitness-language-detectors</module>
     <module>codewitness-storage</module>
     <module>codewitness-report</module>
     <!-- Shared adapter machinery. Built before the adapters that depend on it. -->
@@ -144,6 +145,11 @@
       <dependency>
         <groupId>dev.codewitness</groupId>
         <artifactId>codewitness-adapter-typescript</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-language-detectors</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

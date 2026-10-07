@@ -90,6 +90,23 @@ final class ReportFixtures {
                 .build();
     }
 
+    /** @return the standard fixture with a set of verified-or-recognised language entries. */
+    static VerificationReport reportWithLanguages(List<VerificationReport.LanguageSummary> languages) {
+        return VerificationReport.builder(RUN_ID, project(), requirements())
+                .verdicts(List.of(verifiedVerdict(), failedVerdict()))
+                .evidence(evidence())
+                .counterexamples(List.of(counterexample()))
+                .tests(tests())
+                .coverage(coverage())
+                .mutation(mutation())
+                .findings(findings())
+                .dependencies(dependencies())
+                .languages(languages)
+                .run(run())
+                .limitations(List.of(LIMITATION))
+                .build();
+    }
+
     /** @return the standard fixture with a different set of analyzer findings. */
     static VerificationReport reportWithFindings(List<Finding> findings) {
         return VerificationReport.builder(RUN_ID, project(), requirements())

@@ -61,7 +61,8 @@ public final class RustDependencyAnalyzer implements VerificationTools.Dependenc
                 return DependencyReport.notAnalysed("cargo-lock",
                         "Cargo.lock exists but could not be read: " + e);
             }
-            List<PackageCoordinate> coordinates = TomlPackageTable.parse(locked, PackageCoordinate.CRATES_IO);
+            List<PackageCoordinate> coordinates =
+                    TomlPackageTable.parse(locked, PackageCoordinate.CRATES_IO, true);
             if (!coordinates.isEmpty()) {
                 return DependencyReport.inventory("cargo-lock",
                         "inventory only: every crate Cargo.lock resolves, including transitive ones; "

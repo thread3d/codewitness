@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>dev.codewitness</groupId>
+    <artifactId>codewitness-parent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>codewitness-language-detectors</artifactId>
+  <name>CodeWitness :: Language Detectors</name>
+  <description>Recognition of languages CodeWitness has no adapter for, so that a report can say a
+    language is present rather than staying silent about it. This module verifies nothing: it exists so
+    that adding that recognition is a module and a provider file, like adding a language adapter is.</description>
+
+  <dependencies>
+    <!-- Only the SPI and the LanguageId vocabulary: a detector is not a verifier and needs nothing else. -->
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-core</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

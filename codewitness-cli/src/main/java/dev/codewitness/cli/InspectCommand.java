@@ -14,6 +14,7 @@ import dev.codewitness.core.requirements.Requirement;
 import dev.codewitness.core.requirements.RequirementParser;
 import dev.codewitness.core.requirements.RequirementSet;
 import dev.codewitness.core.spi.LanguageAdapter;
+import dev.codewitness.core.spi.LanguageDetectorRegistry;
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.go.GoAdapterBundle;
@@ -95,6 +96,15 @@ public final class InspectCommand implements Callable<Integer> {
         System.out.println("project          " + projectRef.name() + " (" + projectRef.identifier() + ")");
         System.out.println("path             " + projectRef.root());
         System.out.println("adapters         " + adapters.stream().map(LanguageAdapter::id).toList());
+        // Languages present that nothing here can verify: printed for the same reason they are reported, so
+        // that an inspection cannot be read as a complete picture of a tree it only partly covers.
+        var uncovered = new LanguageDetectorRegistry().discover().detect(projectRef.root(),
+                adapters.stream().map(adapter -> adapter.inspect(projectRef, context).language())
+                        .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new)));
+        System.out.println("unverified       " + (uncovered.isEmpty() ? "none"
+                : uncovered.stream()
+                        .map(detection -> detection.displayName() + " (" + detection.evidence() + ")")
+                        .toList()));
         for (LanguageAdapter adapter : adapters) {
             ProjectInfo info = adapter.inspect(projectRef, context);
             if (adapters.size() > 1) {

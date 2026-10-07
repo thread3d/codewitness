@@ -157,9 +157,22 @@ nothing to show for it.
 
 For the core's own purposes - mapping requirements to files, describing the project in the report - the
 inspections are combined by `ProjectInfo.union`, which reports `polyglot` as the language rather than
-naming whichever adapter was selected first. A language present in the tree that no adapter understands
-is reported as an explicit limitation by `UncoveredLanguages`; that table is a naming heuristic only and
-never influences what runs or what a verdict says.
+naming whichever adapter was selected first.
+
+### Languages nothing can verify
+
+Every adapter is all-or-nothing: a language either has one and is verified, or has none and cannot be
+represented at all. `LanguageDetector` is the second case - a language CodeWitness can see and cannot
+verify - and it is discovered through `ServiceLoader` exactly as adapters are, so recognising a language is
+a module and a provider file. The detectors for the languages nothing here implements live in
+`codewitness-language-detectors`, which is what keeps the core from knowing what a `Gemfile` is.
+
+`LanguageDetectorRegistry.detect` returns the registered languages present in the tree that no adapter
+claimed, and `VerificationReport.languages` holds both kinds of entry: the languages that were verified and
+the languages that were only recognised. One list, because a reader who sees the verified set without
+seeing what was left out of it reads the report as covering the whole tree. A detector only ever adds an
+entry and a sentence to the limitations list; it never schedules a phase, produces evidence, or touches a
+verdict.
 
 ## 4. The verdict rules, and why
 

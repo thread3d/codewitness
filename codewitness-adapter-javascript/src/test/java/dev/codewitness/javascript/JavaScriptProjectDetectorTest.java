@@ -52,23 +52,29 @@ class JavaScriptProjectDetectorTest {
     }
 
     @Test
-    @DisplayName("a TypeScript project is not claimed: the TypeScript adapter can type check it")
-    void rejectsTypeScriptProject(@TempDir Path root) throws IOException {
+    @DisplayName("a TypeScript project holding JavaScript of its own is claimed for the JavaScript it holds")
+    void claimsTheJavaScriptOfATypeScriptProject(@TempDir Path root) throws IOException {
+        // A TypeScript frontend next to plain-JavaScript tooling used to lose the JavaScript entirely: this
+        // detector refused the project as soon as it saw tsconfig.json. The two adapters own disjoint
+        // extension sets, so both can read one tree without either touching a file the other owns.
         JavaScriptTestContexts.write(root, "package.json", "{\"name\": \"typed\"}\n");
         JavaScriptTestContexts.write(root, "tsconfig.json", "{\"compilerOptions\": {}}\n");
-        JavaScriptTestContexts.write(root, "src/index.js", "export const value = 1;\n");
+        JavaScriptTestContexts.write(root, "src/index.ts", "export const value: number = 1;\n");
+        JavaScriptTestContexts.write(root, "tooling/build.js", "export const value = 1;\n");
 
-        assertFalse(JavaScriptProjectDetector.looksLikeJavaScriptProject(root));
+        assertTrue(JavaScriptProjectDetector.looksLikeJavaScriptProject(root));
+        assertFalse(JavaScriptProjectDetector.SOURCE_EXTENSIONS.contains("ts"),
+                "the JavaScript adapter must not own any TypeScript extension");
     }
 
     @Test
-    @DisplayName("a lone TypeScript source is enough to leave the project to the TypeScript adapter")
+    @DisplayName("a lone TypeScript source is not JavaScript, so it is still left to the TypeScript adapter")
     void rejectsTypeScriptSources(@TempDir Path root) throws IOException {
         JavaScriptTestContexts.write(root, "package.json", "{\"name\": \"typed\"}\n");
-        JavaScriptTestContexts.write(root, "src/index.js", "export const value = 1;\n");
         JavaScriptTestContexts.write(root, "src/types.ts", "export type T = number;\n");
 
-        assertFalse(JavaScriptProjectDetector.looksLikeJavaScriptProject(root));
+        assertFalse(JavaScriptProjectDetector.looksLikeJavaScriptProject(root),
+                "there is no JavaScript here for this adapter to verify");
     }
 
     @Test

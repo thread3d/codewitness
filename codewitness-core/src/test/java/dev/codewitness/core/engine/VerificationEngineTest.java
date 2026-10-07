@@ -17,6 +17,8 @@ import dev.codewitness.core.result.RunStatus;
 import dev.codewitness.core.result.VerificationReport;
 import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
+import dev.codewitness.core.spi.LanguageDetector;
+import dev.codewitness.core.spi.LanguageDetectorRegistry;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
 
@@ -172,19 +174,41 @@ class VerificationEngineTest {
     }
 
     @Test
-    @DisplayName("a language nothing can verify is named in the limitations instead of being ignored")
+    @DisplayName("a language nothing can verify appears in the report as present, not only in the limitations")
     void aLanguageWithNoAdapterIsReported() throws Exception {
         // The half of the polyglot problem that running more adapters cannot fix: a language present in the
-        // tree that no adapter understands must still appear in the report.
+        // tree that no adapter understands must still appear in the report. It is an entry in the same list
+        // as the verified languages, so a reader cannot see one without seeing what was left out.
         java.nio.file.Files.writeString(tmp.resolve("Gemfile"), "source 'https://rubygems.org'\n");
         LanguageAdapter service = fake("java", LanguageId.JAVA, "java", true);
+        LanguageDetectorRegistry detectors = LanguageDetectorRegistry.of(new LanguageDetector() {
+            @Override
+            public String id() {
+                return "ruby";
+            }
 
-        VerificationReport report = run(service);
+            @Override
+            public String language() {
+                return "Ruby";
+            }
+
+            @Override
+            public java.util.Optional<String> evidence(java.nio.file.Path root) {
+                return java.nio.file.Files.isRegularFile(root.resolve("Gemfile"))
+                        ? java.util.Optional.of("Gemfile") : java.util.Optional.empty();
+            }
+        });
+
+        VerificationReport report = run(List.of(service), requirements(), VerificationConfig.defaults(), detectors);
 
         assertTrue(report.limitations().stream().anyMatch(l -> l.contains("Ruby") && l.contains("Gemfile")),
                 report.limitations().toString());
-        assertEquals(List.of("java"), report.languages().stream()
+        assertEquals(List.of("java", "ruby"), report.languages().stream()
                 .map(language -> language.language().id()).toList());
+        VerificationReport.LanguageSummary ruby = report.languages().get(1);
+        assertFalse(ruby.verified(), "nothing built, tested or analysed the Ruby");
+        assertEquals("Gemfile", ruby.evidence());
+        assertTrue(ruby.describe().contains("no adapter in this run can verify it"), ruby.describe());
     }
 
     @Test
@@ -238,9 +262,15 @@ class VerificationEngineTest {
 
     private VerificationReport run(List<LanguageAdapter> adapters, RequirementSet requirements,
             VerificationConfig config) {
+        return run(adapters, requirements, config, LanguageDetectorRegistry.of());
+    }
+
+    private VerificationReport run(List<LanguageAdapter> adapters, RequirementSet requirements,
+            VerificationConfig config, LanguageDetectorRegistry detectors) {
         LanguageAdapterRegistry registry = new LanguageAdapterRegistry();
         adapters.forEach(registry::register);
-        return new VerificationEngine(registry, VerificationProviderRegistry.empty())
+        return new VerificationEngine(registry, VerificationProviderRegistry.empty(), detectors,
+                new dev.codewitness.core.exec.LocalProcessSandbox(List.of(tmp)).runner())
                 .verify(ProjectRef.of(tmp), requirements, config, (phase, message) -> { });
     }
 

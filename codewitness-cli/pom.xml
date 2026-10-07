@@ -50,6 +50,12 @@
       <groupId>dev.codewitness</groupId>
       <artifactId>codewitness-adapter-typescript</artifactId>
     </dependency>
+    <!-- Recognition of languages nothing can verify. A dependency rather than a hard-coded table in the
+         core, so that a report can name Ruby or PHP without the engine knowing what Ruby or PHP are. -->
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-language-detectors</artifactId>
+    </dependency>
     <dependency>
       <groupId>info.picocli</groupId>
       <artifactId>picocli</artifactId>

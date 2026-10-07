@@ -2,6 +2,7 @@ package dev.codewitness.report;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.codewitness.core.model.BuildSystemId;
 import dev.codewitness.core.model.CoverageReport;
 import dev.codewitness.core.model.LanguageId;
 import dev.codewitness.core.model.ProjectInfo;
@@ -287,6 +288,34 @@ class JsonReportWriterTest {
         assertEquals(0, security.path("medium").asInt());
         assertEquals(0, security.path("unknown").asInt());
         assertEquals(1, security.path("total").asInt());
+    }
+
+    @Test
+    void everyLanguageAccountsForItselfAsVerifiedOrNot() throws Exception {
+        // The languages list holds both kinds of entry, and a consumer has to be able to tell them apart:
+        // "this project's languages" would otherwise read as a list of things that were checked, when one
+        // of them is the language nothing could check.
+        VerificationReport withLanguages = ReportFixtures.reportWithLanguages(List.of(
+                new VerificationReport.LanguageSummary("java", LanguageId.JAVA, BuildSystemId.MAVEN, 2,
+                        true, true, ""),
+                VerificationReport.LanguageSummary.recognisedOnly(LanguageId.of("ruby"), "Gemfile")));
+
+        JsonNode languages = MAPPER.readTree(new JsonReportWriter().render(withLanguages))
+                .path("project").path("languages");
+
+        assertEquals(2, languages.size(), languages.toString());
+        JsonNode java = languages.get(0);
+        assertTrue(java.path("verified").asBoolean(), java.toString());
+        assertEquals("java", java.path("adapter").asText());
+        assertEquals("maven", java.path("buildSystem").asText());
+        assertEquals("", java.path("evidence").asText(), "a verified language needs no evidence file");
+
+        JsonNode ruby = languages.get(1);
+        assertFalse(ruby.path("verified").asBoolean(), ruby.toString());
+        assertEquals("", ruby.path("adapter").asText(), "no adapter ran for it, and the entry says so");
+        assertEquals("none", ruby.path("buildSystem").asText());
+        assertEquals("Gemfile", ruby.path("evidence").asText(),
+                "an unverified entry must name the file that gives the language away");
     }
 
     @Test

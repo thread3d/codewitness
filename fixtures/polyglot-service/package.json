@@ -1,0 +1,12 @@
+{
+  "name": "polyglot-ledger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Node halves of the polyglot fixture: a TypeScript ledger and a plain-JavaScript tool. They are different languages with different file extensions, and the run verifies both.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

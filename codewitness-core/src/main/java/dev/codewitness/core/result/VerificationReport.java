@@ -67,18 +67,23 @@ public final class VerificationReport {
     }
 
     /**
-     * One language a run actually verified.
+     * One language a run accounted for: either one it verified, or one it could only see.
      *
      * <p>A report whose verdicts were computed in more than one language has to be able to say which ones,
-     * or a reader cannot tell a polyglot project from a single-language one. This is that statement: one
-     * entry per adapter that claimed part of the project, with what it saw and whether its build succeeded.
+     * or a reader cannot tell a polyglot project from a single-language one. It also has to be able to say
+     * which languages it saw and <em>could not</em> verify, because a language that appears nowhere in the
+     * report is indistinguishable from one that is not there. Both live in this one list so that neither
+     * can be dropped without the other being missed.
      *
-     * @param adapter        the language adapter that ran, for example {@code java}
-     * @param language       the language it reported
-     * @param buildSystem    the build system it reported
-     * @param modules        how many modules it found
-     * @param buildAttempted whether its build phase ran
-     * @param buildSucceeded whether its build succeeded; {@code false} when it was not attempted
+     * @param adapter        the language adapter that ran, for example {@code java}; empty when no adapter
+     *                       could verify this language and it was only recognised
+     * @param language       the language
+     * @param buildSystem    the build system that was reported, or {@code none} when nothing was inspected
+     * @param modules        how many modules the adapter found
+     * @param buildAttempted whether the build phase ran
+     * @param buildSucceeded whether the build succeeded; {@code false} when it was not attempted
+     * @param evidence       why the run believes this language is present: the file that gives it away, or
+     *                       empty when the language was verified rather than merely recognised
      */
     public record LanguageSummary(
             String adapter,
@@ -86,9 +91,28 @@ public final class VerificationReport {
             BuildSystemId buildSystem,
             int modules,
             boolean buildAttempted,
-            boolean buildSucceeded) {
+            boolean buildSucceeded,
+            String evidence) {
+
+        public LanguageSummary {
+            adapter = adapter == null ? "" : adapter;
+            evidence = evidence == null ? "" : evidence;
+        }
+
+        /** @return the entry for a language a detector recognised and no adapter could verify. */
+        public static LanguageSummary recognisedOnly(LanguageId language, String evidence) {
+            return new LanguageSummary("", language, BuildSystemId.NONE, 0, false, false, evidence);
+        }
+
+        /** @return {@code true} when an adapter actually built, tested and analysed this language. */
+        public boolean verified() {
+            return !adapter.isEmpty();
+        }
 
         public String describe() {
+            if (!verified()) {
+                return language + " — present (" + evidence + "), but no adapter in this run can verify it";
+            }
             return language + " via " + adapter + " (" + buildSystem + ", " + modules + " module(s), build "
                     + (buildAttempted ? (buildSucceeded ? "succeeded" : "failed") : "not attempted") + ")";
         }

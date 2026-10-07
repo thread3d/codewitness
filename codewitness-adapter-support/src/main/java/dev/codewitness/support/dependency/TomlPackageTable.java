@@ -39,6 +39,19 @@ public final class TomlPackageTable {
      * @return one coordinate per {@code [[package]]} table that declares both a name and a version
      */
     public static List<PackageCoordinate> parse(String toml, String ecosystem) {
+        return parse(toml, ecosystem, false);
+    }
+
+    /**
+     * @param toml          contents of a lock file such as {@code Cargo.lock}
+     * @param ecosystem     the advisory ecosystem the packages belong to
+     * @param publishedOnly {@code true} to keep only entries that name the registry they came from, which
+     *                      is what separates a published crate from the one being built. A {@code Cargo.lock}
+     *                      lists the workspace's own crate in its {@code [[package]]} tables alongside its
+     *                      dependencies; poetry.lock lists only dependencies, so it has nothing to filter.
+     * @return one coordinate per qualifying {@code [[package]]} table
+     */
+    public static List<PackageCoordinate> parse(String toml, String ecosystem, boolean publishedOnly) {
         List<PackageCoordinate> coordinates = new ArrayList<>();
         if (toml == null || toml.isBlank()) {
             return coordinates;
@@ -46,13 +59,15 @@ public final class TomlPackageTable {
         boolean inPackage = false;
         String name = null;
         String version = null;
+        boolean published = false;
         for (String line : toml.split("\\R", -1)) {
             Matcher table = TABLE.matcher(line);
             if (table.matches()) {
-                addIfComplete(coordinates, ecosystem, inPackage, name, version);
+                addIfComplete(coordinates, ecosystem, inPackage, name, version, published, publishedOnly);
                 inPackage = "package".equals(table.group(1).strip());
                 name = null;
                 version = null;
+                published = false;
                 continue;
             }
             if (!inPackage) {
@@ -63,15 +78,18 @@ public final class TomlPackageTable {
                 switch (key.group(1)) {
                     case "name" -> name = key.group(2).strip();
                     case "version" -> version = key.group(2).strip();
+                    // "source" names the registry or repository a crate came from. A crate built from this
+                    // very tree has none.
+                    case "source" -> published = !key.group(2).isBlank();
                     default -> {
-                        // Every other key - checksum, source, dependencies, description - is not part of
-                        // the coordinate. Ignoring them is what keeps a nested dependency name out of the
+                        // Every other key - checksum, dependencies, description - is not part of the
+                        // coordinate. Ignoring them is what keeps a nested dependency name out of the
                         // inventory.
                     }
                 }
             }
         }
-        addIfComplete(coordinates, ecosystem, inPackage, name, version);
+        addIfComplete(coordinates, ecosystem, inPackage, name, version, published, publishedOnly);
         // A lock file can resolve the same crate at two versions for two dependents. Both are real, and
         // both are worth asking about, but each is asked about exactly once.
         Set<String> seen = new LinkedHashSet<>();
@@ -85,9 +103,14 @@ public final class TomlPackageTable {
     }
 
     private static void addIfComplete(
-            List<PackageCoordinate> coordinates, String ecosystem, boolean inPackage, String name, String version) {
-        if (inPackage && name != null && !name.isEmpty() && version != null && !version.isEmpty()) {
-            coordinates.add(PackageCoordinate.of(ecosystem, name, version));
+            List<PackageCoordinate> coordinates, String ecosystem, boolean inPackage, String name, String version,
+            boolean published, boolean publishedOnly) {
+        if (!inPackage || name == null || name.isEmpty() || version == null || version.isEmpty()) {
+            return;
         }
+        if (publishedOnly && !published) {
+            return;
+        }
+        coordinates.add(PackageCoordinate.of(ecosystem, name, version));
     }
 }
