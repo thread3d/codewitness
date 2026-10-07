@@ -138,7 +138,7 @@ public final class NodeScenarioTestGenerator implements VerificationTools.TestGe
         sb.append("// It uses only Node's standard library, so it runs on any Node ")
                 .append(profile.minimumNodeVersion())
                 .append("+ without a build step.\n\n");
-        sb.append("import test from \"node:test\";\n");
+        sb.append("import test, { describe } from \"node:test\";\n");
         appendHoistedImports(sb, scenario.setup());
         sb.append('\n');
         sb.append("const CW_REQUIREMENT = ").append(stringLiteral(requirement.id())).append(";\n");
@@ -147,31 +147,48 @@ public final class NodeScenarioTestGenerator implements VerificationTools.TestGe
                 .append(stringLiteral(oneLine(scenario.invariant() == null ? "(no invariant declared)" : scenario.invariant())))
                 .append(";\n\n");
 
+        // The cases are grouped under a suite named after the generated class, because that name is how
+        // the engine maps a result back to the obligation that produced it: the runner reports the
+        // enclosing <testsuite name>, and Node only started writing the test file into each <testcase> in
+        // Node 24, while the JavaScript adapter supports Node 18.17 and the TypeScript one Node 22.6.
+        // Without the suite every generated case reads as suite "test" and nothing is attributable.
+        StringBuilder cases = new StringBuilder();
         List<Map<String, String>> boundaryCases = boundaryCases(inputs);
         int index = 0;
         if (!inputs.isEmpty() && boundaryCases.isEmpty()) {
             // Every input has a declared type but no boundary value: run the explicit/default values once.
-            sb.append(caseFunction(scenario, index, inputs, defaultValues(inputs)));
+            cases.append(caseFunction(scenario, index, inputs, defaultValues(inputs)));
             index++;
         } else {
             for (Map<String, String> values : boundaryCases) {
-                sb.append(caseFunction(scenario, index, inputs, values));
+                cases.append(caseFunction(scenario, index, inputs, values));
                 index++;
             }
         }
         if (inputs.isEmpty()) {
-            sb.append(singleCase(scenario));
+            cases.append(singleCase(scenario));
         }
         boolean random = scenario.mode() != Scenario.Mode.SINGLE || scenario.cases() > 1;
         if (random && !inputs.isEmpty()) {
             if (scenario.mode() == Scenario.Mode.CONCURRENT) {
-                sb.append(concurrentSearch(inputs, scenario));
+                cases.append(concurrentSearch(inputs, scenario));
             } else {
-                sb.append(randomSearch(inputs, scenario));
+                cases.append(randomSearch(inputs, scenario));
             }
         }
+        sb.append("describe(").append(stringLiteral(classNameFor(scenario, obligation))).append(", () => {\n");
+        indentInto(sb, cases.toString(), "  ");
+        sb.append("});\n");
         sb.append(profile.typedAnnotations() ? HELPERS_TYPED : HELPERS_UNTYPED);
         return sb.toString();
+    }
+
+    /** Appends {@code block} with every non-empty line indented, keeping its blank lines blank. */
+    private static void indentInto(StringBuilder sb, String block, String indent) {
+        String body = block.endsWith("\n") ? block.substring(0, block.length() - 1) : block;
+        for (String line : body.split("\n", -1)) {
+            sb.append(line.isEmpty() ? "" : indent).append(line).append('\n');
+        }
     }
 
     private static void appendHoistedImports(StringBuilder sb, String setup) {

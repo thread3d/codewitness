@@ -9,7 +9,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -33,11 +35,18 @@ import java.util.regex.Pattern;
  * &lt;/testsuites&gt;
  * </pre>
  *
- * <p>Node reports the test <em>file</em> and the case <em>name</em>, so the suite is derived from the
- * file: the extension and the {@code .test}/{@code .spec} marker are dropped, which is the same
- * identifier {@link dev.codewitness.core.engine.RequirementCodeMapper} builds when it scans the same
- * file. A generated test's suite is therefore exactly the class name the generator chose, which is what
- * lets the engine attribute a failure to the obligation that produced it.
+ * <p>The suite is the test file's stem — the extension and the {@code .test}/{@code .spec} marker are
+ * dropped — which is the same identifier {@link dev.codewitness.core.engine.RequirementCodeMapper}
+ * builds when it scans the same file. A generated test's suite is therefore exactly the class name the
+ * generator chose, which is what lets the engine attribute a failure to the obligation that produced it.
+ *
+ * <p>The report does not always say which file a case came from. Node only began writing the
+ * {@code file} attribute on each {@code <testcase>} in Node 24, while this adapter supports Node 18.17
+ * and Node 22.6; on those, every case carries {@code classname="test"} and nothing else. A nested case
+ * still has a name to be found under, because a reporter that groups cases emits a
+ * {@code <testsuite name="...">} around them, so the enclosing suite is read as a fallback. Without that
+ * fallback a whole run collapses to suite {@code test} and the engine can map no result to any
+ * requirement.
  *
  * <p>The runner wraps a failing case in several XML levels, so the failure message is taken from the
  * first place it appears — the {@code failure} attribute — and only falls back to the nested element.
@@ -46,7 +55,17 @@ import java.util.regex.Pattern;
  */
 public final class NodeTestReportParser {
 
-    private static final Pattern TESTCASE = Pattern.compile("<testcase\\b([^>]*?)(/?)>", Pattern.DOTALL);
+    /**
+     * Matches the report's structure in document order: a suite opens, a suite closes, or a case is
+     * declared. Tracking the open suites is what recovers the class name from a report that nests its
+     * cases, which is the only place Node before 24 puts it.
+     *
+     * <p>Groups: 1 the {@code <testsuite>} attributes, 2 its self-closing slash, 3 the
+     * {@code <testcase>} attributes, 4 its self-closing slash. A closing tag matches nothing, so it is
+     * recognised from the matched text.
+     */
+    private static final Pattern DOCUMENT = Pattern.compile(
+            "<testsuite\\b([^>]*?)(/?)>|</testsuite\\s*>|<testcase\\b([^>]*?)(/?)>", Pattern.DOTALL);
     private static final Pattern ATTRIBUTE = Pattern.compile("([A-Za-z_][A-Za-z0-9_:.-]*)\\s*=\\s*\"([^\"]*)\"");
     private static final Pattern ENTITY = Pattern.compile("&(#x?[0-9A-Fa-f]+|[a-zA-Z]+);");
     private static final Pattern FAILURE_ATTRIBUTE = Pattern.compile(
@@ -75,25 +94,36 @@ public final class NodeTestReportParser {
         }
         List<TestCaseResult> cases = new ArrayList<>();
         Duration duration = Duration.ZERO;
-        Matcher matcher = TESTCASE.matcher(xml);
+        Deque<String> suites = new ArrayDeque<>();
+        Matcher matcher = DOCUMENT.matcher(xml);
         while (matcher.find()) {
-            String attributes = matcher.group(1);
-            boolean selfClosing = matcher.group(2).equals("/");
-            Map<String, String> values = attributes(attributes);
-            String name = values.getOrDefault("name", "<unnamed>");
-            String suite = suiteOf(values.get("file"), values.get("classname"));
+            if (matcher.group(3) != null) {
+                // A <testcase>. Its file, when the reporter writes one, names it; otherwise the suite it
+                // is nested in does, and only when neither exists is the class name or "test" the answer.
+                String attributes = matcher.group(3);
+                boolean selfClosing = matcher.group(4).equals("/");
+                Map<String, String> values = attributes(attributes);
+                String name = values.getOrDefault("name", "<unnamed>");
+                String suite = suiteOf(values.get("file"), values.get("classname"), suites.peek());
 
-            String body = "";
-            if (!selfClosing) {
-                int end = xml.indexOf("</testcase>", matcher.end());
-                body = end < 0 ? xml.substring(matcher.end()) : xml.substring(matcher.end(), end);
+                String body = "";
+                if (!selfClosing) {
+                    int end = xml.indexOf("</testcase>", matcher.end());
+                    body = end < 0 ? xml.substring(matcher.end()) : xml.substring(matcher.end(), end);
+                }
+                TestOutcome outcome = outcome(values, body);
+                Duration caseDuration = seconds(values.get("time"));
+                duration = duration.plus(caseDuration);
+                String failure = outcome.isFailure() ? failureText(values, body) : null;
+                cases.add(new TestCaseResult(suite, name, outcome, caseDuration,
+                        outcome.isFailure() ? failureType(values, body) : null, failure, failure));
+            } else if (matcher.group().startsWith("</")) {
+                if (!suites.isEmpty()) {
+                    suites.pop();
+                }
+            } else if (!matcher.group(2).equals("/")) {
+                suites.push(attributes(matcher.group(1)).getOrDefault("name", "test"));
             }
-            TestOutcome outcome = outcome(values, body);
-            Duration caseDuration = seconds(values.get("time"));
-            duration = duration.plus(caseDuration);
-            String failure = outcome.isFailure() ? failureText(values, body) : null;
-            cases.add(new TestCaseResult(suite, name, outcome, caseDuration,
-                    outcome.isFailure() ? failureType(values, body) : null, failure, failure));
         }
         if (cases.isEmpty()) {
             return TestResult.notExecuted("node --test ran but its JUnit report contained no test case; last "
@@ -161,6 +191,18 @@ public final class NodeTestReportParser {
      *     {@code .test}/{@code .spec} marker, falling back to the reported class name
      */
     public static String suiteOf(String file, String classname) {
+        return suiteOf(file, classname, null);
+    }
+
+    /**
+     * @param file           the test file path Node reported, or {@code null}
+     * @param classname      the suite name Node reported, or {@code null}
+     * @param enclosingSuite the name of the {@code <testsuite>} the case is nested in, or {@code null}
+     * @return the identifier the core maps a test to. The file is authoritative when the reporter
+     *     writes one; otherwise the enclosing suite is, because that is where Node before 24 puts the
+     *     only name a nested case has
+     */
+    static String suiteOf(String file, String classname, String enclosingSuite) {
         if (file != null && !file.isBlank()) {
             String name = file.replace('\\', '/');
             int slash = name.lastIndexOf('/');
@@ -180,6 +222,9 @@ public final class NodeTestReportParser {
         }
         if (classname != null && !classname.isBlank() && !classname.equals("test")) {
             return classname;
+        }
+        if (enclosingSuite != null && !enclosingSuite.isBlank() && !enclosingSuite.equals("test")) {
+            return enclosingSuite;
         }
         return "test";
     }

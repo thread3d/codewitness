@@ -35,6 +35,25 @@ class NodeTestReportParserTest {
             </testsuites>
             """;
 
+    /**
+     * The report Node writes before 24: no {@code file} attribute anywhere, and the only name a case
+     * has is the {@code <testsuite>} it is nested in. This is the shape the CI runner produces, so it is
+     * the shape a run on the adapter's supported floors actually has to parse.
+     */
+    private static final String REPORT_BEFORE_NODE_24 = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <testsuites>
+            \t<testsuite name="cw_sc_rolling_ob_001" time="0.004" disabled="0" errors="0" tests="1" failures="1" skipped="0" hostname="ci">
+            \t\t<testcase name="cw_case0000" time="0.004" classname="test" failure="CODEWITNESS_COUNTEREXAMPLE|case=0|actual=140000">
+            \t\t\t<failure type="testCodeFailure" message="CODEWITNESS_COUNTEREXAMPLE|case=0|actual=140000"/>
+            \t\t</testcase>
+            \t</testsuite>
+            \t<testsuite name="ledger" time="0.001" disabled="0" errors="0" tests="1" failures="0" skipped="0" hostname="ci">
+            \t\t<testcase name="totals are the sum" time="0.001" classname="test"/>
+            \t</testsuite>
+            </testsuites>
+            """;
+
     @Test
     @DisplayName("passing, failing and skipped cases are read with their file-derived suite")
     void parsesCases() {
@@ -68,6 +87,61 @@ class NodeTestReportParserTest {
                 .orElseThrow();
         assertEquals("cw_sc_rolling_ob_001", generated.suite(),
                 "the engine maps a generated result back to its obligation by this name");
+    }
+
+    @Test
+    @DisplayName("before Node 24 the enclosing suite names a case, because the report carries no file")
+    void derivesSuiteFromTheEnclosingSuite() {
+        TestResult result = NodeTestReportParser.parse(REPORT_BEFORE_NODE_24, "test", List.of());
+
+        assertTrue(result.executed());
+        assertEquals(2, result.total());
+        TestCaseResult generated = result.cases().stream()
+                .filter(testCase -> testCase.name().equals("cw_case0000"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("cw_sc_rolling_ob_001", generated.suite(),
+                "without this the whole run collapses to suite 'test' and no result is attributable");
+        TestCaseResult existing = result.cases().stream()
+                .filter(testCase -> testCase.name().equals("totals are the sum"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("ledger", existing.suite());
+    }
+
+    @Test
+    @DisplayName("a file the report does name is still authoritative over the enclosing suite")
+    void fileWinsOverTheEnclosingSuite() {
+        String report = """
+                <testsuites>
+                \t<testsuite name="some describe">
+                \t\t<testcase name="case" time="0.001" classname="test" file="/p/tests/ledger.test.js"/>
+                \t</testsuite>
+                </testsuites>
+                """;
+
+        TestResult result = NodeTestReportParser.parse(report, "test", List.of());
+
+        assertEquals("ledger", result.cases().getFirst().suite());
+    }
+
+    @Test
+    @DisplayName("a suite the case is no longer inside does not name it")
+    void closedSuiteDoesNotNameALaterCase() {
+        String report = """
+                <testsuites>
+                \t<testsuite name="closed">
+                \t\t<testcase name="inside" time="0.001" classname="test"/>
+                \t</testsuite>
+                \t<testcase name="after" time="0.001" classname="test"/>
+                </testsuites>
+                """;
+
+        TestResult result = NodeTestReportParser.parse(report, "test", List.of());
+
+        assertEquals("closed", result.cases().getFirst().suite());
+        assertEquals("test", result.cases().get(1).suite(),
+                "a case outside the suite must not inherit its name");
     }
 
     @Test

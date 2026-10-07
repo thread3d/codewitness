@@ -67,7 +67,10 @@ class TypeScriptScenarioTestGeneratorTest {
         assertEquals(List.of("OB-001"), test.obligationIds());
 
         String source = test.sourceCode();
-        assertTrue(source.contains("import test from \"node:test\";"), source);
+        assertTrue(source.contains("import test, { describe } from \"node:test\";"), source);
+        assertTrue(source.contains("describe(\"cw_sc_rolling_ob_001\", () => {"),
+                "the class name must be the suite the runner reports, or the engine cannot map the "
+                        + "result back to the obligation: " + source);
         assertTrue(source.contains("import { WithdrawalLedger } from \"../src/ledger.ts\";"),
                 "fragment imports must be hoisted to the module top: " + source);
         assertTrue(source.contains("const CW_REQUIREMENT = \"R-001\";"), source);
@@ -90,7 +93,7 @@ class TypeScriptScenarioTestGeneratorTest {
         // One boundary case plus the random search, each with two steps, declare four observations.
         assertEquals(4, source.split("const observation", -1).length - 1,
                 "each step declares its own observation: " + source);
-        assertTrue(source.contains("{\n      const observation"), source);
+        assertTrue(source.contains("{\n        const observation"), source);
         assertTrue(source.contains("const observation = ledger.totalWithinLast24Hours(t2);"),
                 "the observation placeholder must be substituted: " + source);
     }
