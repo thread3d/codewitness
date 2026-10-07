@@ -1,5 +1,7 @@
 package dev.codewitness.rust.mutation;
 
+import dev.codewitness.support.mutation.TextMutator;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -10,10 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The mutator must find operator sites without corrupting strings, comments or generic type
- * arguments: a mutant that does not compile tells us nothing about test strength.
+ * The Rust lexical shape, exercised through the shared mutator: it must find operator sites without
+ * corrupting strings, comments, lifetimes or generic type arguments, because a mutant that does not
+ * compile tells us nothing about test strength.
  */
-class RustMutatorTest {
+class RustLexisTest {
+
+    /** The shared mutator, reading Rust through the adapter's own lexis. */
+    private final TextMutator mutator = new TextMutator(RustLexis.INSTANCE);
 
     @Test
     @DisplayName("binary operators, comparison boundaries and boolean literals are sites")
@@ -26,8 +32,8 @@ class RustMutatorTest {
                 pub fn flag() -> bool { true }
                 """;
 
-        List<RustMutator.Site> sites = RustMutator.sites(source);
-        List<String> operators = sites.stream().map(RustMutator.Site::operator).toList();
+        List<TextMutator.Site> sites = mutator.sites(source);
+        List<String> operators = sites.stream().map(TextMutator.Site::operator).toList();
 
         assertTrue(operators.contains("+"), operators.toString());
         assertTrue(operators.contains(">"), operators.toString());
@@ -51,8 +57,8 @@ class RustMutatorTest {
                 }
                 """;
 
-        List<RustMutator.Site> sites = RustMutator.sites(source);
-        List<String> operators = sites.stream().map(RustMutator.Site::operator).toList();
+        List<TextMutator.Site> sites = mutator.sites(source);
+        List<String> operators = sites.stream().map(TextMutator.Site::operator).toList();
 
         assertEquals(List.of("*"), operators, operators.toString());
     }
@@ -61,12 +67,12 @@ class RustMutatorTest {
     @DisplayName("applying a site flips exactly that operator")
     void appliesOneMutation() {
         String source = "pub fn value(a: i64, b: i64) -> i64 { a + b }\n";
-        RustMutator.Site site = RustMutator.sites(source).stream()
+        TextMutator.Site site = mutator.sites(source).stream()
                 .filter(candidate -> candidate.operator().equals("+"))
                 .findFirst()
                 .orElseThrow();
 
-        String mutated = RustMutator.apply(source, site);
+        String mutated = TextMutator.apply(source, site);
 
         assertTrue(mutated.contains("a - b"), mutated);
         assertFalse(mutated.contains("a + b"), mutated);
@@ -77,6 +83,6 @@ class RustMutatorTest {
     void ignoresUnaryOperators() {
         String source = "pub fn negate(a: i64) -> i64 { -a }\n";
 
-        assertTrue(RustMutator.sites(source).isEmpty(), RustMutator.sites(source).toString());
+        assertTrue(mutator.sites(source).isEmpty(), mutator.sites(source).toString());
     }
 }

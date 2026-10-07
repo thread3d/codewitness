@@ -9,7 +9,9 @@ import dev.codewitness.javascript.JavaScriptProjectDetector;
 import dev.codewitness.javascript.JavaScriptScripts;
 import dev.codewitness.javascript.JavaScriptTestProvider;
 import dev.codewitness.javascript.NodeRuntime;
+import dev.codewitness.support.mutation.LanguageLexis;
 import dev.codewitness.support.mutation.LanguageMutationProfile;
+import dev.codewitness.support.mutation.ScriptLexis;
 import dev.codewitness.support.mutation.TextMutationTester;
 
 import java.nio.file.Path;
@@ -76,6 +78,11 @@ public final class JavaScriptMutationTester implements VerificationTools.Mutatio
         @Override
         public String mutationReportToolId() {
             return "javascript-text";
+        }
+
+        @Override
+        public LanguageLexis lexis() {
+            return ScriptLexis.INSTANCE;
         }
 
         @Override

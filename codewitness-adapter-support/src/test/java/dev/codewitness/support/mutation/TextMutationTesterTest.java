@@ -134,6 +134,11 @@ class TextMutationTesterTest {
             }
 
             @Override
+            public LanguageLexis lexis() {
+                return ScriptLexis.INSTANCE;
+            }
+
+            @Override
             public String excludedSourceSuffix() {
                 return ".jsx";
             }

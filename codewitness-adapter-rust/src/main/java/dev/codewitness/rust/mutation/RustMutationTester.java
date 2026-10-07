@@ -11,6 +11,7 @@ import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.rust.Cargo;
 import dev.codewitness.rust.RustProjectDetector;
+import dev.codewitness.support.mutation.TextMutator;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -30,7 +31,7 @@ import java.util.Set;
  *
  * <p>{@code cargo-mutants} is an optional tool, and a project should not lose mutation evidence just
  * because it is not installed. The adapter therefore mutates the source text itself through
- * {@link RustMutator}, recompiles and re-runs the project's own test suite for each mutant, and
+ * {@link TextMutator}, recompiles and re-runs the project's own test suite for each mutant, and
  * reports the mutants the suite could not detect as survivors.
  *
  * <p>The run is bounded three ways: a fixed operator set, a mutant cap and a wall-clock budget. Every
@@ -46,6 +47,9 @@ public final class RustMutationTester implements VerificationTools.MutationTeste
 
     /** Upper bound on source files considered, so a large crate cannot dominate a run. */
     private static final int MAX_FILES = 20;
+
+    /** The mutator over Rust's own lexis; the loop below is language independent. */
+    private static final TextMutator MUTATOR = new TextMutator(RustLexis.INSTANCE);
 
     @Override
     public String id() {
@@ -87,8 +91,8 @@ public final class RustMutationTester implements VerificationTools.MutationTeste
             } catch (IOException _) {
                 continue;
             }
-            List<RustMutator.Site> sites = RustMutator.sites(original);
-            for (RustMutator.Site site : sites) {
+            List<TextMutator.Site> sites = MUTATOR.sites(original);
+            for (TextMutator.Site site : sites) {
                 if (generated >= MAX_MUTANTS || Instant.now().isAfter(deadline)) {
                     break;
                 }
@@ -135,10 +139,10 @@ public final class RustMutationTester implements VerificationTools.MutationTeste
     }
 
     private Outcome runMutant(
-            VerificationContext context, Path file, String original, RustMutator.Site site, Duration remaining) {
+            VerificationContext context, Path file, String original, TextMutator.Site site, Duration remaining) {
         Path working = file;
         try {
-            Files.writeString(working, RustMutator.apply(original, site), StandardCharsets.UTF_8);
+            Files.writeString(working, TextMutator.apply(original, site), StandardCharsets.UTF_8);
             String cargo = Cargo.cargo(context.projectInfo(), context);
             ProcessResult result = context.runner().run(ProcessSpec.builder(
                             List.of(cargo, "test", "--no-fail-fast", "--quiet"), context.projectRoot())

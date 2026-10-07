@@ -58,6 +58,17 @@ public interface LanguageMutationProfile {
     String mutationReportToolId();
 
     /**
+     * The language's lexical shape, which is what the shared mutator reads its source with.
+     *
+     * <p>It must describe the same language {@link #languageId()} claims: the mutator decides which
+     * operators to flip and which literals to leave alone from this, and a mismatch would mutate the
+     * wrong tokens rather than fail loudly.
+     *
+     * @return the lexis the shared mutator tokenizes this language's source with
+     */
+    LanguageLexis lexis();
+
+    /**
      * Lower-case suffix of the files that sit next to the language's own sources but are not mutated,
      * because the adapter's parse check does not handle their syntax.
      *

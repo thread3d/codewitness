@@ -52,11 +52,15 @@ public final class TextMutationTester implements VerificationTools.MutationTeste
     /** What the language adapter knows and this tester does not. */
     private final LanguageMutationProfile profile;
 
+    /** The mutator for the profile's language; its lexical shape decides what is a site at all. */
+    private final TextMutator mutator;
+
     /**
      * @param profile the language-specific details this tester needs; the adapter supplies them
      */
     public TextMutationTester(LanguageMutationProfile profile) {
         this.profile = profile;
+        this.mutator = new TextMutator(profile.lexis());
     }
 
     @Override
@@ -103,7 +107,7 @@ public final class TextMutationTester implements VerificationTools.MutationTeste
             } catch (IOException _) {
                 continue;
             }
-            List<TextMutator.Site> sites = TextMutator.sites(original);
+            List<TextMutator.Site> sites = mutator.sites(original);
             for (TextMutator.Site site : sites) {
                 if (generated >= MAX_MUTANTS || Instant.now().isAfter(deadline)) {
                     break;

@@ -1,5 +1,7 @@
 package dev.codewitness.go.mutation;
 
+import dev.codewitness.support.mutation.TextMutator;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -10,11 +12,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The mutator must find operator sites without corrupting comments, interpreted strings, raw strings
- * or rune literals: a mutant that does not compile tells us nothing about test strength, and a mutant
- * inside a literal would change data rather than behaviour.
+ * The Go lexical shape, exercised through the shared mutator: it must find operator sites without
+ * corrupting comments, interpreted strings, raw strings or rune literals. A mutant that does not
+ * compile tells us nothing about test strength, and a mutant inside a literal would change data
+ * rather than behaviour.
  */
-class GoMutatorTest {
+class GoLexisTest {
+
+    /** The shared mutator, reading Go through the adapter's own lexis. */
+    private final TextMutator mutator = new TextMutator(GoLexis.INSTANCE);
 
     @Test
     @DisplayName("binary operators, comparison boundaries and boolean literals are sites")
@@ -32,12 +38,12 @@ class GoMutatorTest {
                 func flag() bool { return true }
                 """;
 
-        List<GoMutator.Site> sites = GoMutator.sites(source);
+        List<TextMutator.Site> sites = mutator.sites(source);
 
         assertEquals(List.of("+", ">", "*", "-", "%", "true"),
-                sites.stream().map(GoMutator.Site::operator).toList(), sites.toString());
+                sites.stream().map(TextMutator.Site::operator).toList(), sites.toString());
         assertEquals(List.of(4, 4, 5, 7, 7, 10),
-                sites.stream().map(GoMutator.Site::line).toList(), sites.toString());
+                sites.stream().map(TextMutator.Site::line).toList(), sites.toString());
     }
 
     @Test
@@ -57,9 +63,9 @@ class GoMutatorTest {
                 }
                 """;
 
-        List<GoMutator.Site> sites = GoMutator.sites(source);
+        List<TextMutator.Site> sites = mutator.sites(source);
 
-        assertEquals(List.of("*"), sites.stream().map(GoMutator.Site::operator).toList(), sites.toString());
+        assertEquals(List.of("*"), sites.stream().map(TextMutator.Site::operator).toList(), sites.toString());
         assertEquals(10, sites.getFirst().line(), sites.toString());
     }
 
@@ -75,7 +81,7 @@ class GoMutatorTest {
                 + "\treturn a * b\n"
                 + "}\n";
 
-        List<GoMutator.Site> sites = GoMutator.sites(source);
+        List<TextMutator.Site> sites = mutator.sites(source);
 
         assertEquals(1, sites.size(), sites.toString());
         assertEquals("*", sites.getFirst().operator(), sites.toString());
@@ -88,12 +94,12 @@ class GoMutatorTest {
     @DisplayName("applying a site flips exactly that operator")
     void appliesOneMutation() {
         String source = "package sample\n\nfunc value(a int, b int) int { return a + b }\n";
-        GoMutator.Site site = GoMutator.sites(source).stream()
+        TextMutator.Site site = mutator.sites(source).stream()
                 .filter(candidate -> candidate.operator().equals("+"))
                 .findFirst()
                 .orElseThrow();
 
-        String mutated = GoMutator.apply(source, site);
+        String mutated = TextMutator.apply(source, site);
 
         assertEquals("package sample\n\nfunc value(a int, b int) int { return a - b }\n", mutated);
         assertTrue(mutated.contains("a - b"), mutated);
@@ -105,12 +111,12 @@ class GoMutatorTest {
     @DisplayName("applying a comparison boundary changes one token without shifting the rest")
     void appliesComparisonBoundaryMutation() {
         String source = "package sample\n\nfunc less(a int, b int) bool { return a < b }\n";
-        GoMutator.Site site = GoMutator.sites(source).stream()
+        TextMutator.Site site = mutator.sites(source).stream()
                 .filter(candidate -> candidate.operator().equals("<"))
                 .findFirst()
                 .orElseThrow();
 
-        String mutated = GoMutator.apply(source, site);
+        String mutated = TextMutator.apply(source, site);
 
         assertEquals("package sample\n\nfunc less(a int, b int) bool { return a <= b }\n", mutated);
         assertEquals(source.substring(0, site.offset()), mutated.substring(0, site.offset()), mutated);
@@ -123,7 +129,7 @@ class GoMutatorTest {
     void ignoresUnaryOperators() {
         String source = "package sample\n\nfunc negate(a int) int { return -a }\n";
 
-        assertTrue(GoMutator.sites(source).isEmpty(), GoMutator.sites(source).toString());
+        assertTrue(mutator.sites(source).isEmpty(), mutator.sites(source).toString());
     }
 
     @Test
@@ -131,7 +137,7 @@ class GoMutatorTest {
     void ignoresRuneLiterals() {
         String source = "package sample\n\nfunc runeValue() rune { return '+' }\n";
 
-        assertTrue(GoMutator.sites(source).isEmpty(), GoMutator.sites(source).toString());
+        assertTrue(mutator.sites(source).isEmpty(), mutator.sites(source).toString());
     }
 
     private static int differingCharacters(String before, String after) {

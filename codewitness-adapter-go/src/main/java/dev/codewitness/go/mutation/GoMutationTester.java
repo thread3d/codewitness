@@ -11,6 +11,7 @@ import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.go.GoProjectDetector;
 import dev.codewitness.go.GoTool;
+import dev.codewitness.support.mutation.TextMutator;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -30,7 +31,7 @@ import java.util.Set;
  *
  * <p>Go has no universally installed mutation tool, and a project should not lose mutation evidence
  * just because one is absent. The adapter therefore mutates the source text itself through
- * {@link GoMutator}, re-runs the project's own test suite with {@code go test} for each mutant, and
+ * {@link TextMutator}, re-runs the project's own test suite with {@code go test} for each mutant, and
  * reports the mutants the suite could not detect as survivors.
  *
  * <p>The run is bounded three ways: a fixed operator set, a mutant cap and a wall-clock budget. Every
@@ -51,6 +52,9 @@ public final class GoMutationTester implements VerificationTools.MutationTester 
 
     /** Smallest budget a mutant may be given; a process cannot be started with a non-positive timeout. */
     private static final Duration MINIMUM_MUTANT_BUDGET = Duration.ofMillis(1);
+
+    /** The mutator over Go's own lexis; the loop below is language independent. */
+    private static final TextMutator MUTATOR = new TextMutator(GoLexis.INSTANCE);
 
     @Override
     public String id() {
@@ -92,8 +96,8 @@ public final class GoMutationTester implements VerificationTools.MutationTester 
             } catch (IOException _) {
                 continue;
             }
-            List<GoMutator.Site> sites = GoMutator.sites(original);
-            for (GoMutator.Site site : sites) {
+            List<TextMutator.Site> sites = MUTATOR.sites(original);
+            for (TextMutator.Site site : sites) {
                 if (generated >= MAX_MUTANTS || Instant.now().isAfter(deadline)) {
                     break;
                 }
@@ -150,11 +154,11 @@ public final class GoMutationTester implements VerificationTools.MutationTester 
     }
 
     private Outcome runMutant(
-            VerificationContext context, Path file, String original, GoMutator.Site site, Duration remaining) {
+            VerificationContext context, Path file, String original, TextMutator.Site site, Duration remaining) {
         Path working = file;
         Duration runBudget = remaining.compareTo(MINIMUM_MUTANT_BUDGET) < 0 ? MINIMUM_MUTANT_BUDGET : remaining;
         try {
-            Files.writeString(working, GoMutator.apply(original, site), StandardCharsets.UTF_8);
+            Files.writeString(working, TextMutator.apply(original, site), StandardCharsets.UTF_8);
             String go = GoTool.go(context.projectInfo(), context);
             ProcessResult result = context.runner().run(ProcessSpec.builder(
                             List.of(go, "test", "-count=1", "./..."), context.projectRoot())

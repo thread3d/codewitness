@@ -5,7 +5,9 @@ import dev.codewitness.core.model.MutationReport;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
+import dev.codewitness.support.mutation.LanguageLexis;
 import dev.codewitness.support.mutation.LanguageMutationProfile;
+import dev.codewitness.support.mutation.ScriptLexis;
 import dev.codewitness.support.mutation.TextMutationTester;
 import dev.codewitness.typescript.NodeRuntime;
 import dev.codewitness.typescript.TypeScriptProjectDetector;
@@ -76,6 +78,11 @@ public final class TypeScriptMutationTester implements VerificationTools.Mutatio
         @Override
         public String mutationReportToolId() {
             return "typescript-text";
+        }
+
+        @Override
+        public LanguageLexis lexis() {
+            return ScriptLexis.INSTANCE;
         }
 
         @Override
