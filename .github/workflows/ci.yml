@@ -67,16 +67,24 @@ jobs:
         with:
           node-version: '22'
 
-      # Fail loudly rather than trust the runner image. In particular `mvn` is not installed by
-      # setup-java: the Java fixture's build resolves Maven through MAVEN_HOME/M2_HOME and then
-      # PATH (BuildToolLauncher.resolve), and GitHub's Ubuntu image ships Maven there. If that ever
-      # stops being true this step fails with a named tool instead of the e2e tests quietly
-      # skipping.
+      # Pin Maven instead of trusting whatever the runner image happens to ship. The Java fixture is
+      # built by `BuildToolLauncher.resolve`, which looks for a wrapper in the fixture (there is none),
+      # then MAVEN_HOME/M2_HOME, then `mvn` on PATH - so Maven has to be on PATH, and the version has to
+      # be one we chose. 3.9.16 is the version this repository's own wrapper pins.
+      - name: Set up Maven 3.9.16
+        uses: stCarolas/setup-maven@v5.1
+        with:
+          maven-version: 3.9.16
+
+      # Fail loudly rather than trust the runner image. Absent tools make the end-to-end tests skip
+      # themselves (a JUnit assumption), which is a green build with those languages never having run.
+      # The Maven check asserts the pinned version, so a silently substituted Maven is visible too.
       - name: Assert every toolchain is present
         run: |
           set -euo pipefail
           java -version
           mvn -v
+          mvn -v | grep -q '3\.9\.16'
           python3 --version
           cargo --version
           go version
