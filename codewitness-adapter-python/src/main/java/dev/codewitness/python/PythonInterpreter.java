@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import dev.codewitness.support.Platform;
 
 /**
  * Locates the Python interpreter used to run a project, and describes what that interpreter can do.
@@ -189,7 +190,7 @@ public final class PythonInterpreter {
     }
 
     static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+        return Platform.isWindows();
     }
 
     /**

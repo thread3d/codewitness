@@ -12,11 +12,16 @@
   <artifactId>codewitness-adapter-support</artifactId>
   <name>CodeWitness :: Adapter Support</name>
   <description>Machinery shared by more than one language adapter, none of which belongs in the
-    language-independent core: the text mutator, and helpers for running and reading external tools.</description>
+    language-independent core: the text mutator and the mutation tester loop that drives it.</description>
 
   <dependencies>
-    <!-- Deliberately no dependency on codewitness-core: everything here is a plain utility over text,
-         paths and processes, so the adapters can depend on it without dragging the engine along. -->
+    <!-- This module holds machinery used by more than one adapter, so it depends on core for the SPI
+         types it implements: the shared mutation tester is a VerificationTools.MutationTester. -->
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-core</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

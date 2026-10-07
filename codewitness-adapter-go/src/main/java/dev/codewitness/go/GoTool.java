@@ -16,6 +16,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import dev.codewitness.support.Text;
+import dev.codewitness.support.Platform;
 
 /**
  * Locates the {@code go} executable used to build a project, and describes what it reported.
@@ -161,15 +163,7 @@ public final class GoTool {
 
     /** @return the last {@code count} lines of a captured output, for reports and diagnostics. */
     public static String lastLines(String text, int count) {
-        if (text == null || text.isBlank()) {
-            return "(no output)";
-        }
-        String[] lines = text.strip().split("\\R");
-        StringBuilder sb = new StringBuilder();
-        for (int i = Math.max(0, lines.length - count); i < lines.length; i++) {
-            sb.append(lines[i]).append(" | ");
-        }
-        return sb.toString();
+        return Text.lastLines(text, count);
     }
 
     private static String firstLine(String text) {
@@ -180,7 +174,7 @@ public final class GoTool {
     }
 
     static boolean isWindows() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+        return Platform.isWindows();
     }
 
     /**

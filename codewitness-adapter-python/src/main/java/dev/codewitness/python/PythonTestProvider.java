@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import dev.codewitness.support.Text;
 
 /**
  * Runs a Python project's existing tests.
@@ -178,14 +179,6 @@ public final class PythonTestProvider implements VerificationTools.TestRunner {
     }
 
     public static String lastLines(String text, int count) {
-        if (text == null || text.isBlank()) {
-            return "(no output)";
-        }
-        String[] lines = text.strip().split("\\R");
-        StringBuilder sb = new StringBuilder();
-        for (int i = Math.max(0, lines.length - count); i < lines.length; i++) {
-            sb.append(lines[i]).append(" | ");
-        }
-        return sb.toString();
+        return Text.lastLines(text, count);
     }
 }
