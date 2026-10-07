@@ -51,7 +51,13 @@ public final class WorkspaceManager {
             // adapter's build restores it with `composer install`. The two PHPUnit caches hold absolute
             // paths and result data belonging to the machine that wrote them, so they are not carried
             // into the workspace either - a stale one would make a fresh run look like a previous one.
-            "vendor", ".phpunit.cache", ".phpunit.result.cache");
+            "vendor", ".phpunit.cache", ".phpunit.result.cache",
+            // Bundler's own state. `.bundle` holds the project's local configuration, which names
+            // absolute paths on the machine that wrote it; `.rspec_status` and SimpleCov's `coverage`
+            // directory are result data belonging to a previous run, and copying either would make a
+            // fresh run report the last one's numbers. Bundler's gem store lives elsewhere (under the
+            // run's artefact directory), so no installed bundle is copied either.
+            ".bundle", "coverage", ".yardoc");
 
     private static boolean isExcludedDirectory(String name) {
         return EXCLUDED_DIRECTORIES.contains(name) || name.endsWith(".egg-info");
@@ -79,7 +85,8 @@ public final class WorkspaceManager {
         if (mode == Mode.IN_PLACE) {
             return new Workspace(project.root(), Mode.IN_PLACE,
                     "operating in place on " + project.root() + "; generated tests are written into the project "
-                            + "test sources and removed afterwards");
+                            + "test sources and are not always removed afterwards, because an adapter whose "
+                            + "replay command needs the generated test to stay runnable leaves it there");
         }
         Path root = runDirectory.resolve("workspace").toAbsolutePath().normalize();
         copyTree(project.root(), root);

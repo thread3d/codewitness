@@ -152,6 +152,22 @@ public final class RequirementCodeMapper {
                     .replace('/', '.');
             return stripExtension(relative);
         }
+        if (extension.equals("rb") || extension.equals("rake") || extension.equals("gemspec")) {
+            // RSpec reports a spec by its path relative to the project root, the way `rspec` was invoked:
+            // `./spec/ledger_spec.rb`. The adapter's report parser records the suite as that path with the
+            // separators turned into dots and the extension dropped, so the mapping derives the same value
+            // here. Relativising against the test root instead would produce `ledger_spec`, which only
+            // matches through the simple-name fallback below - and that fallback cannot tell this file
+            // apart from `test/ledger_spec.rb`, so two suites of one name would both be attributed to the
+            // requirement that only one of them mentions.
+            Path base = projectRoot != null && file.startsWith(projectRoot) ? projectRoot : file.getParent();
+            if (base == null) {
+                return stripExtension(fileName);
+            }
+            String relative = base.relativize(file).toString().replace(java.io.File.separatorChar, '.')
+                    .replace('/', '.');
+            return stripExtension(relative);
+        }
         if (extension.equals("go")) {
             // Go reports a test case under its package's module-qualified import path, which is what
             // the Go test report parser records as the suite, so the mapping derives the same value

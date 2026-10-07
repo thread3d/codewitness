@@ -3,8 +3,8 @@
 # This fixture is one directory containing six languages, and its subject is the thing that makes that
 # work: `language.adapter: auto` selects every adapter that claims part of the tree, so all six are
 # built, tested and analysed in a single run, and each language appears in the report in its own right.
-# It also holds a Gemfile, which no adapter understands, so the report has to name Ruby as present and
-# not verified rather than leaving it out.
+# It also holds a mix.exs, for a language no adapter understands, so the report has to name Elixir as
+# present and not verified rather than leaving it out.
 #
 # One scenario, for the Python half. The other five requirements carry no scenario and stay UNVERIFIED,
 # which is the honest answer for a requirement nobody has said how to execute. This one is here because it

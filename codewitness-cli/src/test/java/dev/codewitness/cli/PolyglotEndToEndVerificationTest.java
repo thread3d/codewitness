@@ -28,9 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * including the one it contains and cannot verify at all.
  *
  * <p>The fixture holds a Maven project, a Python package, a Cargo crate, a Go module, a TypeScript ledger
- * and a plain-JavaScript tool in one directory, plus a {@code Gemfile} that no adapter understands. That
- * last file is not decoration: it is the case running more adapters cannot fix, where the honest answer is
- * to name the language rather than to compute a verdict as though the code were not there.
+ * and a plain-JavaScript tool in one directory, plus a {@code mix.exs} for Elixir, which no adapter
+ * understands. That last file is not decoration: it is the case running more adapters cannot fix, where the
+ * honest answer is to name the language rather than to compute a verdict as though the code were not there.
  *
  * <p>All six toolchains are needed, so unlike the per-language tests this one does not skip itself when one
  * is missing - a skipped test here would look exactly like a polyglot project that works. The CI workflow
@@ -74,12 +74,12 @@ class PolyglotEndToEndVerificationTest extends EndToEndSupport {
                 "every language in the fixture must be verified in one run: " + languages);
 
         // The language nothing can verify is a first-class entry, not a footnote: a reader who sees the six
-        // verified languages without seeing Ruby would read the report as covering the whole tree.
-        JsonNode ruby = languageNamed(languages, "ruby");
-        assertFalse(ruby.path("verified").asBoolean(), "nothing built, tested or analysed the Ruby");
-        assertEquals("Gemfile", ruby.path("evidence").asText(),
+        // verified languages without seeing Elixir would read the report as covering the whole tree.
+        JsonNode elixir = languageNamed(languages, "elixir");
+        assertFalse(elixir.path("verified").asBoolean(), "nothing built, tested or analysed the Elixir");
+        assertEquals("mix.exs", elixir.path("evidence").asText(),
                 "the entry must name the file that gives the language away");
-        assertTrue(report.path("limitations").toString().contains("Ruby"),
+        assertTrue(report.path("limitations").toString().contains("Elixir"),
                 "the limitation must name the language: " + report.path("limitations"));
 
         assertEquals("polyglot", report.path("project").path("language").asText(),

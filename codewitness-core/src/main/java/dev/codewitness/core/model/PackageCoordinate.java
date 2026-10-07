@@ -62,6 +62,14 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
      * names packages that exist in that ecosystem whether or not they were fetched through it.
      */
     public static final String PACKAGIST = "Packagist";
+    /**
+     * The RubyGems ecosystem id, which covers gems Bundler resolves for a Ruby project.
+     *
+     * <p>Spelled {@code RubyGems} because that is the name the advisory service knows the ecosystem by,
+     * and because RubyGems is where Bundler actually resolves from: a Ruby project's lock file names gems
+     * that exist in that ecosystem whether or not they were fetched through it.
+     */
+    public static final String RUBYGEMS = "RubyGems";
 
     public PackageCoordinate {
         Objects.requireNonNull(ecosystem, "ecosystem");
@@ -130,6 +138,16 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
      */
     public static PackageCoordinate packagist(String name, String version) {
         return new PackageCoordinate(PACKAGIST, name, version, null);
+    }
+
+    /**
+     * @return a RubyGems coordinate for a gem, at the version a lock file resolved.
+     *
+     * <p>The name is the bare gem name Bundler itself uses, which is also the form the advisory service
+     * matches on.
+     */
+    public static PackageCoordinate rubygem(String name, String version) {
+        return new PackageCoordinate(RUBYGEMS, name, version, null);
     }
 
     /** @return a coordinate in an arbitrary ecosystem, for sources this class has no shortcut for. */

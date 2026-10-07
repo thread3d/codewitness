@@ -1,0 +1,7 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+# RSpec is a bundle dependency of the project rather than a tool of the machine, exactly as PHPUnit is
+# a Composer dependency of the PHP fixture: `bundle install` in the build phase is what makes it exist.
+gem "rspec", "~> 3.13"

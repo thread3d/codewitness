@@ -61,6 +61,17 @@ public record LanguageId(String id) {
      */
     public static final LanguageId PHP = new LanguageId("php");
     /**
+     * Ruby, installed and tested with Bundler and RSpec.
+     *
+     * <p>The language is named for the language and not for the package manager, exactly as
+     * {@link #PHP} is not called {@code composer}: Bundler resolves this language's gems and is reported
+     * separately as {@link BuildSystemId#BUNDLER}. Ruby has no separate compilation step, but it does
+     * have a well defined first failure - a file the interpreter cannot parse - and that is checked with
+     * the interpreter's own parser so a file that does not parse is BLOCKED rather than reported as a code
+     * defect.
+     */
+    public static final LanguageId RUBY = new LanguageId("ruby");
+    /**
      * More than one language, verified together because more than one adapter claimed part of the
      * project. Reported instead of silently naming whichever language happened to be inspected first.
      */

@@ -17,12 +17,12 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ```
 
 The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin,
-C/C++ and PHP fixtures at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for
+C/C++, PHP and Ruby fixtures at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for
 TypeScript, 18.17+ for JavaScript), the .NET SDK (8+), Maven with network access the first time, CMake
-with CTest and an interpreter with Composer respectively, and nothing else: the Kotlin section is a
-Maven build, so `kotlinc` and the standard library arrive as dependencies, the C and C++ section fetches
-no package at all, and the PHP section's PHPUnit arrives from Packagist as a Composer dependency rather
-than as part of the toolchain.
+with CTest, an interpreter with Composer and an interpreter with Bundler respectively, and nothing
+else: the Kotlin section is a Maven build, so `kotlinc` and the standard library arrive as dependencies,
+the C and C++ section fetches no package at all, and the PHP and Ruby sections' PHPUnit and RSpec arrive
+from Packagist and RubyGems as dependencies rather than as part of the toolchain.
 
 ## 1. What is in the project?
 
@@ -578,3 +578,73 @@ behind R-003, its fee scenario discharges R-002 through an executed generated te
 scenario, so it stays `UNVERIFIED`. PHPUnit is also the thing to know before pointing this at a real
 project: a project that declares no PHPUnit and has none on the machine is reported as having no test
 runner rather than as passing, because PHP has no standard-library test framework to fall back on.
+
+## 17. The same thing for Ruby
+
+The Ruby fixture is the same ledger once more, this time as a Bundler project with RSpec. It needs an
+interpreter and Bundler and nothing else installed, and it shares PHP's structural peculiarity: RSpec is
+a project dependency rather than a tool of the machine, so the build phase has to run `bundle install`
+before a test can run at all. That is why the fixture's sandbox configuration allows network access and
+why the CI job warms the bundle first; the run is then measuring the adapter, not a download.
+
+```bash
+./codewitness verify fixtures/ruby-withdrawal-ledger \
+    --requirements fixtures/ruby-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  spec.generated.cw_sc_SC_ROLLING_spec   R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}
+                                               expected: observation <= 100000   actual: 140000
+  spec.generated.cw_sc_SC_NEGATIVE_spec  R-003  inputs: {amount=-10000}
+                                               expected: observation >= 50000    actual: 40000
+
+Tests
+  2 executed, 2 passed, 0 failed, 0 skipped  (parsed from the RSpec JSON report)
+
+Coverage
+  coverage not measured (SimpleCov wrote no coverage/.resultset.json)
+
+Mutation testing
+  8 mutants, 1 killed, 7 survived, score 12.5%
+```
+
+The scenario fragments are Ruby. `${name}` becomes a bare Ruby local variable, `setup` is Ruby
+statements run once per case, `observation` is a Ruby expression assigned to the local `observation`,
+and `invariant` is the Ruby boolean expression that must hold — in the fixture, `observation <= 100000`.
+The generated tests are RSpec spec files written into the project's own test root as
+`<test root>/generated/cw_sc_<ScenarioId>_spec.rb`, because RSpec discovers a spec by its file name and
+the `require 'spec_helper'` each generated file opens with is what loads the project's own
+configuration; there is nowhere else RSpec would find one. Each case is one `it` example —
+`cw_case0000` for the declared values, `cw_single_case` for a scenario with no inputs,
+`cw_random_search` when the generator searched under a seed — and the replay command is a real
+`bundle exec rspec <generated spec>` invocation with the recorded seed and case in the environment,
+because RSpec has no per-case seed flag to carry them.
+
+Existing tests are read from the JSON report RSpec's own formatter writes. A spec is reported by the path
+it was invoked under, so the parser records the suite as that path with the separators turned into dots
+and the extension dropped — `spec/ledger_spec.rb` becomes `spec.ledger_spec` — which is exactly the
+identifier the requirement mapper derives from the file for the same reason. Coverage comes from
+SimpleCov's `coverage/.resultset.json`, which only exists when the project loads SimpleCov, and is
+reported as not measured with the reason when it does not: the fixture deliberately does not load it, so
+the phase has to say so rather than report zero. SimpleCov's default report carries no branch data, so
+branch coverage is reported as unavailable rather than as an empty figure. Mutation runs through the same
+shared `TextMutator` as the other source-language adapters with a `RubyLexis` that knows what a text
+mutator gets wrong in Ruby: `#` and `=begin`/`=end` comments, single- and double-quoted strings,
+`%w`/`%q`/`%r` literals, heredocs, `?a` character literals, and a `/` that divides rather than opening a
+regular expression. The survivor is `== -> !=` in the calendar-day comparison, which no test in the
+fixture distinguishes from its negation.
+
+The fixture's two defects are the rolling-window bug behind R-001 and the accepted negative amount
+behind R-003, its fee scenario discharges R-002 through an executed generated test, and R-004 declares no
+scenario, so it stays `UNVERIFIED`. RSpec is also the thing to know before pointing this at a real
+project: a project that declares no RSpec and has none on the machine is reported as having no test
+runner rather than as passing. Ruby does ship minitest as a default gem, but the adapter deliberately
+does not fall back to it — a suite is written against one runner, and running a second, weaker one
+against files it was not written for produces results that describe nothing.

@@ -10,14 +10,15 @@ Scenarios live in `codewitness.yaml` under `scenarios:`. The fragments (`setup`,
 Python for a Python project, Rust for a Rust project, Go for a Go module, TypeScript for a TypeScript
 project, plain JavaScript for a JavaScript project, C# for a C#/.NET project, Kotlin for a Kotlin
 project, C or C++ for a project whose sources are either — one adapter covers both, so the
-fragment is written in whichever language the code under test is written in — and PHP for a PHP
-project. Everything else — modes,
+fragment is written in whichever language the code under test is written in — PHP for a PHP
+project, and Ruby for a Ruby project. Everything else — modes,
 inputs, ranges, seeds, the counterexample protocol — is identical. The examples below are Java; the
-Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++ and PHP forms are shown in
+Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++, PHP and Ruby forms are shown in
 [Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
 [TypeScript projects](#typescript-projects), [JavaScript projects](#javascript-projects),
 [C# projects](#c-projects), [Kotlin projects](#kotlin-projects),
-[C and C++ projects](#c-and-c-projects) and [PHP projects](#php-projects).
+[C and C++ projects](#c-and-c-projects), [PHP projects](#php-projects) and
+[Ruby projects](#ruby-projects).
 
 ```yaml
 scenarios:
@@ -79,8 +80,8 @@ Each step declares the inputs it searches over:
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`; in PHP it becomes the PHP variable `$name`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
-| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares, or a PHP type name such as `int`, `float`, `string` or `bool`. |
+| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`; in PHP it becomes the PHP variable `$name`, and in Ruby the bare local variable `name`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares, a PHP type name such as `int`, `float`, `string` or `bool`, or a Ruby type name such as `int`, `float`, `bool` or `string`. |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -117,7 +118,8 @@ That is the Java shape, and it is not the only one. Each language's section belo
 shape is: a standard-library `unittest` case for Python, a Cargo integration test for Rust, a
 `_test.go` file in the package under test for Go, a `node:test` module for TypeScript and JavaScript,
 an xUnit class in the tree's own test project for C#, a Kotlin JUnit 5 class in the tree's own test
-sources for Kotlin, a PHPUnit `TestCase` class in the tree's own test root for PHP, and, for C and C++,
+sources for Kotlin, a PHPUnit `TestCase` class in the tree's own test root for PHP, an RSpec spec in the
+tree's own test root for Ruby, and, for C and C++,
 one self-contained program with a `main` rather than a class
 in a framework — written into the run's artefact store, never into the tree.
 
@@ -799,6 +801,111 @@ steps:
 If the implementation rejects by returning a value, the invariant handles it and no wrapper is needed;
 the PHP fixture's `withdraw` returns a boolean and its acceptance is observed through the state it
 leaves.
+
+## Ruby projects
+
+For a Ruby project the fragments are Ruby statements and expressions, and the generated test is an
+ordinary RSpec spec written under `<test root>/generated/` in the project's own test tree — RSpec
+discovers a spec by its file name, and the `require 'spec_helper'` the generated file opens with is what
+loads the project's own configuration, so there is nowhere else RSpec would find it. `${name}` is
+replaced textually by the bare Ruby local variable `name`, exactly as the Python generator replaces it by
+the bare name, so a fragment writes `@ledger.withdraw(${t1}, ${a1})` and the variable the call sees is
+`t1`:
+
+```yaml
+language:
+  adapter: ruby
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    description: Two withdrawals across midnight, one hour apart
+    mode: sequence
+    setup: |
+      @ledger = WithdrawalLedger.new
+    steps:
+      - call: "@ledger.withdraw(${t1}, ${a1})"
+        inputs:
+          - {name: t1, type: int, domain: integer, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: int, domain: integer, values: ["70000"], range: {min: 100, max: 90000}}
+      - call: "@ledger.withdraw(${t2}, ${a2})"
+        inputs:
+          - {name: t2, type: int, domain: integer, values: ["90000000"]}
+          - {name: a2, type: int, domain: integer, values: ["70000"]}
+    observation: "@ledger.total_within_last_24_hours(${t2})"
+    invariant: "observation <= 100000"
+    cases: 200
+    seed: 42
+```
+
+That scenario is the fixture's own, from `fixtures/ruby-withdrawal-ledger/codewitness.yaml`, and it is
+what finds the calendar-day defect in the ledger: the boundary case is a withdrawal at 23:50 and
+another at 01:00, 70,000 cents each, checked against the rolling limit.
+
+Notes specific to Ruby:
+
+- `setup` is Ruby statements run once per case, before the steps. It is the scenario's own fixture, so it
+  is executed inside each example rather than through a framework hook. A fragment that needs a file the
+  project's `spec_helper` does not cover can `require` it here; the generated spec itself is written into
+  the project's own first test root, under `generated/`, which is the tree RSpec scans;
+- `observation` is a Ruby expression assigned to the local `observation`, and `invariant` is a Ruby
+  boolean expression over `observation` and the inputs — `observation <= 100000` in the example above. It
+  is checked with `expect(<invariant>).to be(true)`, so it must evaluate to exactly `true` or `false`: an
+  expression that merely returns a truthy value fails, which is the strict reading of the contract. The
+  invariant is checked after every step, exactly as it is in every other language;
+- `type` is a Ruby type name the generator can produce: `int`, `float`, `bool` or `string`. Ruby has no
+  typed local variables, so `type` describes the value the fragment receives rather than a declaration
+  the generated file carries, and the variable is the bare `name` the fragment writes. The generator also
+  reads the Ruby spellings (`integer`, `fixnum`, `bignum`, `double`, `rational`, `bigdecimal`, `boolean`,
+  `trueclass`, `falseclass`, `symbol`) when no explicit `domain` is given. Money is usually integer minor
+  units, as the Ruby fixture does — cents — because Ruby has no built-in decimal type. `domain` chooses how
+  values are drawn, as it does everywhere else;
+- the generated file is an ordinary RSpec spec named after the scenario: `cw_sc_<ScenarioId>_spec.rb`,
+  where every character of the id that is not a letter or a digit becomes an underscore, so `SC-ROLLING`
+  generates `spec/generated/cw_sc_SC_ROLLING_spec.rb`. It wraps one `RSpec.describe` block around one `it`
+  per case, and each case is one example, so a failure is attributed by RSpec's own report rather than by
+  a line number the reader has to interpret. The examples are named `cw_case0000`, `cw_case0001` and so on
+  for the enumerated boundary cases, `cw_single_case` for a scenario that declares no inputs, and
+  `cw_random_search` or `cw_concurrent_search` for the seeded search;
+- `mode: concurrent` is executed **sequentially**, and the generated file says so in a `LIMIT:` comment.
+  A scenario's fragments are arbitrary user code the generator cannot assume is thread-safe, and a step
+  that raised inside a worker thread would have to be caught and re-reported by machinery the generated
+  file does not own, so the case executes the declared steps in order and demonstrates nothing about
+  interleaving;
+- RSpec is a bundle dependency, not part of the toolchain: it exists only after the build phase has run
+  `bundle install`. The adapter resolves it at test time for exactly that reason, and a project that has
+  none is reported as having no test runner rather than as passing;
+- a failing case raises the single `CODEWITNESS_COUNTEREXAMPLE|case=…|seed=…|inputs={…}|…` line from an
+  `RSpec::Expectations::ExpectationNotMetError`. That is what puts the structured line into RSpec's JSON
+  report, in the failing example's `exception.message`, which is where the engine reads it from — which is
+  why a counterexample contains the exact inputs rather than only a stack trace;
+- `CODEWITNESS_SEED` and `CODEWITNESS_CASE` in the environment pin one case for replay, because RSpec has
+  no per-case seed flag of its own. The reproduction command is a real RSpec invocation rather than a
+  description of one:
+
+```bash
+env CODEWITNESS_SEED=42 CODEWITNESS_CASE=0 bundle exec rspec spec/generated/cw_sc_SC_ROLLING_spec.rb
+```
+
+Ruby rejection is expressed the same way, in Ruby. A step that throws is a failure by default, so catch
+the exception yourself when throwing is the required behaviour — and rescue the specific class, because a
+bare `rescue` throws away the distinction between "rejected as required" and "crashed for another
+reason":
+
+```yaml
+steps:
+  - call: |
+      begin
+        @ledger.withdraw(0, ${amount})
+      rescue ArgumentError
+        # required behaviour: the withdrawal is rejected by throwing
+      end
+    description: an amount above the limit must be rejected by throwing
+```
+
+If the implementation rejects by returning a value, the invariant handles it and no wrapper is needed;
+the Ruby fixture's `withdraw` returns a boolean and its acceptance is observed through the state it
+leaves, exactly as the PHP fixture's does.
 
 ## Practical advice
 

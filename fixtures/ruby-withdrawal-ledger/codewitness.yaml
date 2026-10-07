@@ -1,0 +1,133 @@
+# CodeWitness configuration for the Ruby withdrawal-ledger fixture.
+#
+# This file declares how each requirement can be *executed* against the code. CodeWitness supplies
+# boundary enumeration, seeded random search, execution and reproducible counterexamples; the Ruby
+# fragments below are the oracle, and they are attributed to the user, and not to CodeWitness.
+#
+# The fragments are Ruby: `${name}` is replaced by the local variable `name`, `setup` is run once per
+# case, `observation` is assigned to the local `observation`, and `invariant` is the boolean expression
+# that must hold. Money is in integer cents, so the arithmetic the fixture is asked about is exact.
+#
+# Network access is allowed because Bundler has to resolve RSpec from RubyGems on the first run; the CI
+# job warms it first so that the end-to-end run measures the adapter and not a download.
+
+project:
+  name: ruby-withdrawal-ledger
+
+language:
+  adapter: ruby
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+  max_mutation_time: 5m
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: true
+  tool: ruby-text
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: true
+
+scenarios:
+  # R-001: two withdrawals an hour and ten minutes apart, across midnight, must still respect the
+  # rolling limit.
+  - id: SC-ROLLING
+    requirement: R-001
+    description: Two withdrawals across midnight, one hour apart
+    mode: sequence
+    setup: |
+      @ledger = WithdrawalLedger.new
+    steps:
+      - call: "@ledger.withdraw(${t1}, ${a1})"
+        description: first withdrawal at 23:50
+        inputs:
+          - name: t1
+            type: int
+            domain: integer
+            values: ["85800000"]
+            range: {min: 0, max: 172800000}
+          - name: a1
+            type: int
+            domain: integer
+            values: ["70000"]
+            range: {min: 100, max: 90000}
+      - call: "@ledger.withdraw(${t2}, ${a2})"
+        description: second withdrawal at 01:00 the next day
+        inputs:
+          - name: t2
+            type: int
+            domain: integer
+            values: ["90000000"]
+          - name: a2
+            type: int
+            domain: integer
+            values: ["70000"]
+    observation: "@ledger.total_within_last_24_hours(${t2})"
+    invariant: "observation <= 100000"
+    cases: 200
+    seed: 42
+
+  # R-002: a fee must change the recorded total. The invariant is checked after every step, so the whole
+  # experiment is expressed as one step: record 100.00, apply 0.50, then read the total.
+  - id: SC-FEE
+    requirement: R-002
+    description: Applying a fee must increase the recorded total
+    mode: single
+    setup: |
+      @ledger = WithdrawalLedger.new
+    steps:
+      - call: "@ledger.withdraw(0, 10000); @ledger.apply_fee(50)"
+        description: record a withdrawal of 100.00 and apply a fee of 0.50
+    observation: "@ledger.total_within_last_24_hours(3600000)"
+    invariant: "observation == 10050"
+    cases: 1
+    seed: 1
+
+  # R-003: negative amounts must be rejected and must not reduce the recorded total.
+  - id: SC-NEGATIVE
+    requirement: R-003
+    description: Negative amounts must be rejected
+    mode: single
+    setup: |
+      @ledger = WithdrawalLedger.new
+    steps:
+      - call: "@ledger.withdraw(0, 50000)"
+        description: record a withdrawal of 500.00
+      - call: "@ledger.withdraw(3600000, ${amount})"
+        description: attempt a negative withdrawal
+        inputs:
+          - name: amount
+            type: int
+            domain: integer
+            values: ["-10000"]
+            range: {min: -10000, max: -1}
+    observation: "@ledger.total_within_last_24_hours(3600000)"
+    invariant: "observation >= 50000"
+    cases: 1
+    seed: 1

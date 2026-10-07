@@ -32,9 +32,14 @@ change has to respect.
   interpreter's own parser is the build, and PHPUnit is a Composer dependency the fixture declares, so
   the first run resolves it from Packagist; a project that declares none is reported as having no test
   runner rather than quietly passing)
+- Ruby with Bundler on `PATH` for the Ruby adapter and its end-to-end fixture (the interpreter's own
+  parser is the build, and RSpec is a bundle dependency the fixture declares, so the first run resolves
+  it from RubyGems; a project that declares none is reported as having no test runner rather than
+  quietly passing)
 - Network access for the first build (dependencies) and for the end-to-end tests, except the C#
-  fixture and the C/C++ fixture, which need none, and the PHP fixture, which needs it until its
-  `vendor/` directory exists, because PHPUnit is a Composer dependency rather than part of the toolchain
+  fixture and the C/C++ fixture, which need none, and the PHP and Ruby fixtures, which need it until
+  their `vendor/` directory or bundle exists, because PHPUnit and RSpec are package-manager
+  dependencies rather than part of the toolchain
 
 ## Build and test
 
@@ -95,8 +100,9 @@ To add one:
    `fixtures/javascript-withdrawal-ledger` (JavaScript, `package.json`, `node:test`),
    `fixtures/csharp-withdrawal-ledger` (C#, `WithdrawalLedger.sln`, `dotnet test`),
    `fixtures/kotlin-withdrawal-ledger` (Kotlin, `pom.xml` with `kotlin-maven-plugin`, `kotlin.test`/
-   JUnit 5), `fixtures/cpp-withdrawal-ledger` (C++, `CMakeLists.txt`, `ctest`) or
-   `fixtures/php-withdrawal-ledger` (PHP, `composer.json`, `phpunit.xml`, PHPUnit). Keep at least
+   JUnit 5), `fixtures/cpp-withdrawal-ledger` (C++, `CMakeLists.txt`, `ctest`),
+   `fixtures/php-withdrawal-ledger` (PHP, `composer.json`, `phpunit.xml`, PHPUnit) or
+   `fixtures/ruby-withdrawal-ledger` (Ruby, `Gemfile`, RSpec). Keep at least
    one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
    adapter's "Java 17+" claim stays exercised against real bytecode.
 2. Introduce **one** defect, and state it in a comment at the top of the class — the comment is part
@@ -119,14 +125,17 @@ To add one:
 3. Implement the tool providers you need from `VerificationTools` and register them where the CLI
    wires everything (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`,
    `GoAdapterBundle`, `TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle`,
-   `KotlinAdapterBundle`, `CppAdapterBundle` and `PhpAdapterBundle` are the worked examples). Two languages can share a
+   `KotlinAdapterBundle`, `CppAdapterBundle`, `PhpAdapterBundle` and `RubyAdapterBundle` are the worked
+   examples). Two languages can share a
    build tool — Kotlin and Java both use Gradle and Maven — so a provider has to select on the
    project's *language* as well as on its build system, or both adapters answer for one tree. The
    reverse case is the C and C++ adapter's: one build system, CMake, covers two languages, so one
    adapter claims both and one `LanguageId` (`cpp`) carries them. PHP is the case where the test runner
    is not a tool of the machine at all: PHPUnit is a Composer dependency, so a `TestRunner` must resolve
    it after the build phase has installed it and say so when there is none, rather than reporting a
-   suite that could not have existed at inspection time. If your
+   suite that could not have existed at inspection time. Ruby is the same case with a different package
+   manager: RSpec arrives from RubyGems through `bundle install`, so a `TestRunner` must resolve it after
+   the build too and report "no test runner" rather than a suite of zero when there is none. If your
    tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
    counterexample carries a command that actually runs.
 4. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the

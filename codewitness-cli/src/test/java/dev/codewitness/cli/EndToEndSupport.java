@@ -145,6 +145,24 @@ abstract class EndToEndSupport {
         return findExecutable(isWindows() ? "php.exe" : "php");
     }
 
+    /**
+     * Skips the test when no Ruby interpreter is available, instead of failing spuriously.
+     *
+     * <p>Ruby is the other adapter whose test tool is not part of the language toolchain: RSpec is a
+     * bundle dependency, so the fixture's build has to resolve it from RubyGems before a test can run.
+     * Only the interpreter is checked here; a Bundler that cannot reach the network makes the build fail
+     * loudly, and the run reports that as {@code BLOCKED} rather than as a code defect.
+     */
+    static void assumeRubyAvailable() {
+        Assumptions.assumeTrue(findRuby() != null,
+                "no ruby executable on PATH: Ruby end-to-end verification cannot run");
+    }
+
+    /** @return the {@code ruby} executable on {@code PATH}, or {@code null}. */
+    static String findRuby() {
+        return findExecutable(isWindows() ? "ruby.exe" : "ruby");
+    }
+
     /** Skips the test when no .NET SDK is available, instead of failing spuriously. */
     static void assumeDotnetAvailable() {
         Assumptions.assumeTrue(findDotnet() != null,

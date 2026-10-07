@@ -45,6 +45,16 @@ public record BuildSystemId(String id) {
      * {@code composer.phar}.
      */
     public static final BuildSystemId COMPOSER = new BuildSystemId("composer");
+    /**
+     * Bundler, driven by {@code Gemfile} and {@code Gemfile.lock}, resolving Ruby gems from RubyGems
+     * into the bundle {@code bundle install} creates.
+     *
+     * <p>Ruby projects have one package manager in practice, so this build system is what every Ruby
+     * tree the adapter claims is reported with. The Bundler executable is recorded in the project
+     * attributes rather than encoded here, because a project may pin its own copy through
+     * {@code .bundle/config} or ship only a binstub under {@code bin/}.
+     */
+    public static final BuildSystemId BUNDLER = new BuildSystemId("bundler");
     public static final BuildSystemId NONE = new BuildSystemId("none");
     /** More than one build system, because more than one language adapter claimed part of the project. */
     public static final BuildSystemId POLYGLOT = new BuildSystemId("polyglot");

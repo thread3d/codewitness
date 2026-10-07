@@ -65,8 +65,9 @@ docker run --rm --network=none --cap-drop=ALL --security-opt=no-new-privileges \
 ```
 
 The container sees only the project mount, has no network, no capabilities and no host credentials.
-The Maven, Gradle, Python, Cargo, Go, Node, NuGet and Composer caches inside the container start empty,
-which is the honest trade-off of isolation: the first run has to download what it needs, and with `--network=none`
+The Maven, Gradle, Python, Cargo, Go, Node, NuGet, Composer and Bundler caches inside the container start
+empty, which is the honest trade-off of isolation: the first run has to download what it needs, and with
+`--network=none`
 it cannot, so container mode is most useful with a pre-populated image.
 
 The image must contain the toolchain for the language under verification: a JDK image for Java (the
@@ -75,7 +76,8 @@ project, an image with the Rust toolchain for a Rust project, an image with the 
 module, an image with a Node runtime for a TypeScript project (22.6+) or a JavaScript project
 (18.17+), an image with the .NET SDK (8+) for a C# project, an image with CMake, a C or C++ compiler and
 `gcov` for a C or C++ project, an image with PHP 8, Composer and a coverage driver (Xdebug or PCOV) for
-a PHP project, or an image with a JVM and the project's own build tool for a Kotlin project — Kotlin
+a PHP project, an image with Ruby and Bundler for a Ruby project, or an image with a JVM and the
+project's own build tool for a Kotlin project — Kotlin
 needs no image of its own, because it is compiled by the same `kotlinc` the project's Maven or Gradle
 build already invokes. The local-process sandbox needs no image
 and uses the interpreter or toolchain the project already has. A run whose `sandbox.allow_network` is
@@ -120,6 +122,19 @@ non-interactive and a container may run as root; and `COMPOSER_DISABLE_XDEBUG_WA
 performance warning cannot appear in output a parser reads. The PHP dependency phase reads the inventory
 it can read — `composer.json` and, when it exists, `composer.lock` — and reports a version that is a
 range, a wildcard or a branch alias as unresolved rather than treating an unknown as a clean result.
+
+Bundler is in the same position as Composer, for the same reason: CodeWitness sets no switch that
+forbids the network for it, so `allow_network: false` does not stop a `bundle install` from reaching
+RubyGems, and the report says which sandbox and which network position a run actually had rather than
+implying otherwise. What the Ruby adapter does instead is give each run its own Bundler state:
+`BUNDLE_PATH`, `BUNDLE_APP_CONFIG`, `BUNDLE_USER_HOME`, `BUNDLE_USER_CACHE`, `BUNDLE_USER_CONFIG` and
+`BUNDLE_USER_PLUGIN` are all pointed under the run's artefact store, so a run cannot read or write a
+developer's global `~/.bundle` or gem home, or make one run's downloads visible to the next. It also
+passes `BUNDLE_SILENCE_ROOT_WARNING=1`, because a run's workspace is often owned by root and the warning
+is about the account rather than the project, and `BUNDLE_DISABLE_SHARED_GEMS=1`, so the dependency set a
+run is tested against is exactly the one this project's lock file names. The Ruby dependency phase reads
+the inventory it can read — `Gemfile.lock` — and reports a gem with no resolved version as unresolved
+rather than treating an unknown as a clean result.
 
 ## Recommendations
 

@@ -44,6 +44,15 @@ fixtures/**/vendor/
 fixtures/**/.phpunit.cache/
 fixtures/**/.phpunit.result.cache/
 
+# Ruby dependencies and caches. The Ruby fixture's `Gemfile.lock` *is* committed, for the same reason
+# Composer's is: an application pins its dependency versions and the lock file is what makes a later
+# `bundle install` reproduce the same tree. The bundle itself lands in vendor/bundle and is covered
+# above; `.bundle` holds this machine's local configuration, and `coverage` holds SimpleCov's results
+# from a previous run.
+fixtures/**/.bundle/
+fixtures/**/coverage/
+fixtures/**/.rspec_status
+
 # CodeWitness run data produced inside the repository
 .codewitness/
 **/.codewitness/

@@ -91,13 +91,14 @@ class DetectorAdapterAgreementTest {
 
         // A tree the adapter does not claim - here, one with no Kotlin in it at all - is still the
         // detector's to speak for, which is the point of keeping the detector registered rather than
-        // deleting it. Ruby is the example because nothing verifies it: the languages with adapters have
-        // no detector at all, so only the unverifiable ones can appear here.
-        Path other = project.resolve("ruby");
-        write(other, "ledger.rb", "def total\n  0\nend\n");
+        // deleting it. Perl is the example because nothing verifies it: the languages with adapters are
+        // suppressed by the covered set, and this call passes none, so only a language no adapter claims
+        // can appear here.
+        Path other = project.resolve("perl");
+        write(other, "ledger.pl", "sub total {\n  return 0;\n}\n");
         List<String> uncovered = detectors.detect(other, Set.of()).stream()
                 .map(LanguageDetectorRegistry.Detection::displayName).toList();
-        assertTrue(uncovered.contains("Ruby"),
+        assertTrue(uncovered.contains("Perl"),
                 "a language no adapter claimed is still named: " + uncovered);
     }
 

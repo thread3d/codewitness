@@ -121,7 +121,9 @@ Rust generated test raises it from a Cargo integration test, a Go generated test
 C# generated test throws it as an `XunitException` inside an xUnit fact — which is
 what carries the line into the TRX failure message the engine reads — a PHP generated test carries it in
 the failure message of a PHPUnit `TestCase` method, which is what puts it into the JUnit `<failure>` text
-the PHP report parser reads, and a C and C++ generated test is
+the PHP report parser reads, a Ruby generated test raises it as an
+`RSpec::Expectations::ExpectationNotMetError`, which is what puts it into `exception.message` in RSpec's
+JSON report, where the Ruby report parser reads it, and a C and C++ generated test is
 one self-contained program that prints the line to standard output and exits non-zero, which CTest
 records as `Failed` with the program's output beside it in `system-out`, so the CTest report parser
 joins the two before the engine reads the line. In every case the engine parses it identically.

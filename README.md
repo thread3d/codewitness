@@ -112,6 +112,12 @@ or a PHP project:
 ./codewitness verify ./my-php-project --requirements requirements.md
 ```
 
+or a Ruby project:
+
+```bash
+./codewitness verify ./my-ruby-project --requirements requirements.md
+```
+
 The language is detected, and a project may be written in several. `LanguageAdapterRegistry.selectAll`
 runs **every** adapter that claims part of the tree — a Java service with a TypeScript frontend is two
 verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
@@ -131,7 +137,7 @@ that is not there. Recognition comes from `LanguageDetector` implementations dis
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
 `language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp`, `kotlin`,
-`cpp` or `php`
+`cpp`, `php` or `ruby`
 *narrows* the run
 to that one adapter instead of being merged with the automatic choice. It is not forced: the named adapter
 is used when it exists and actually claims the project, and otherwise the run falls back to
@@ -172,7 +178,13 @@ its dependencies are resolved with `composer install`, its PHPUnit suite is run 
 report PHPUnit writes, and generated scenarios become ordinary PHPUnit `TestCase` classes in the tree's
 own test root. PHPUnit is the one test tool here that is not part of the toolchain — it is a Composer
 dependency, so it exists only after the build has resolved it, and a project that has none is reported
-as having no test runner rather than quietly passing.
+as having no test runner rather than quietly passing. Ruby support needs only an interpreter and
+Bundler: a tree with a `Gemfile` is linted with the interpreter's own parser, its gems are resolved with
+`bundle install`, its RSpec suite is run and read from the JSON report RSpec writes, and generated
+scenarios become ordinary RSpec spec files in the tree's own `spec/` root. RSpec is the second test tool
+here that is not part of the toolchain — it is a bundle dependency, so it exists only after the build has
+resolved it, and a project that has none is reported as having no test runner rather than quietly
+passing.
 
 ---
 
@@ -507,7 +519,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php
+  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php | ruby
 
 verification:
   timeout: 15m           # per build or test command
@@ -571,10 +583,10 @@ also indexed in `<project>/.codewitness/codewitness.db` (SQLite).
 A report is only useful if it can be reproduced, so every run records: the project identifier, the
 source revision, the CodeWitness version, the runtime version (the Java version for a Java project,
 the .NET SDK version for a C# one, the Kotlin release for a Kotlin one, the CMake version for a C and
-C++ one, the PHP version for a PHP one), the build tool and its version, the verification configuration
-fingerprint, every tool version, the language model identifier if any, the requirements hash, the
-isolation level, timestamps and every command that was executed. Evidence records carry their command
-and inputs, and counterexamples carry a replayable command.
+C++ one, the PHP version for a PHP one, the Ruby version for a Ruby one), the build tool and its version,
+the verification configuration fingerprint, every tool version, the language model identifier if any,
+the requirements hash, the isolation level, timestamps and every command that was executed. Evidence
+records carry their command and inputs, and counterexamples carry a replayable command.
 
 ---
 
@@ -641,6 +653,9 @@ codewitness/
 ├── codewitness-adapter-php/     PHP projects: the interpreter's own parse and composer install,
 │                               PHPUnit with JUnit parsing, heuristics, security, Xdebug/PCOV
 │                               coverage, bounded source mutation, Composer/Packagist inventory
+├── codewitness-adapter-ruby/    Ruby projects: the interpreter's own parse and bundle install,
+│                               RSpec with JSON parsing, heuristics, security, SimpleCov coverage,
+│                               bounded source mutation, Bundler/RubyGems inventory
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -653,8 +668,8 @@ engine. Recognising a language CodeWitness has no adapter for is the same shape:
 `dev.codewitness.core.spi.LanguageDetector`, discovered the same way, and the detectors for the languages
 nothing here implements live in `codewitness-language-detectors`. A few platform defaults do remain in core
 — the `LanguageId` and `BuildSystemId` constants (`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`,
-`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `CMAKE`, `COMPOSER`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
-needs (`PACKAGIST` for PHP among them), and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
+`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `RUBY`, `CMAKE`, `COMPOSER`, `BUNDLER`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
+needs (`PACKAGIST` for PHP and `RUBYGEMS` for Ruby among them), and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
 vocabulary and platform defaults, not language logic, and the engine never switches on a language.
 Nothing in core names a language it cannot already verify.
 
@@ -670,9 +685,9 @@ mvn -pl codewitness-core test   # one module
 ```
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
-plus Python 3, Cargo, Go, Node, the .NET SDK, CMake with CTest and PHP with Composer for the Python,
-Rust, Go, TypeScript, JavaScript, C#, C/C++ and PHP fixtures, and network access the first time, because
-it builds real projects. The Kotlin fixture
+plus Python 3, Cargo, Go, Node, the .NET SDK, CMake with CTest, PHP with Composer and Ruby with Bundler
+for the Python, Rust, Go, TypeScript, JavaScript, C#, C/C++, PHP and Ruby fixtures, and network access the
+first time, because it builds real projects. The Kotlin fixture
 needs no toolchain of its own beyond Maven: it is a Maven build with `kotlin-maven-plugin`, so the
 compiler, the standard library and Surefire are resolved from a repository the way a dependency is. The C# fixture
 needs no toolchain of its own beyond the SDK: its sandbox config sets `allow_network: false`, and it works because the
@@ -681,8 +696,10 @@ SDK's test host packages are already in the machine's NuGet cache on any machine
 package — so it builds and tests without reaching for anything. The PHP fixture needs an interpreter
 and Composer and nothing else installed: PHPUnit is a Composer dependency rather than a part of the
 toolchain, so the first run resolves it from Packagist and the fixture allows network access for that
-reason, exactly as a real project's `composer install` needs it. An end-to-end test is skipped rather than
-failed when its toolchain is absent.
+reason, exactly as a real project's `composer install` needs it. The Ruby fixture is the same story with
+a different package manager: RSpec arrives from RubyGems as a bundle dependency, so the first run needs
+network access for `bundle install` and nothing else is installed by hand. An end-to-end test is skipped
+rather than failed when its toolchain is absent.
 
 ---
 
@@ -1245,6 +1262,131 @@ The honest limits of PHP support are:
   unless one is already on the machine;
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
+The Ruby adapter is implemented and exercised end to end as well
+(`fixtures/ruby-withdrawal-ledger`):
+
+- detection of Ruby trees by what a Ruby project announces itself with — a `Gemfile`, a `Gemfile.lock`,
+  a `*.gemspec`, a `.ruby-version`, a `Rakefile` or a `config.ru` — with the conventional `lib/`, `app/`
+  or `src/` source layout and the project root as the last resort, and a `spec/` or `test/` tree when it
+  holds Ruby source. The Ruby version the project asks for is read, in decreasing order of how much the
+  build is bound by it, from the `Gemfile`'s `ruby` line, a `.ruby-version` file or a gemspec's
+  `required_ruby_version`, and the interpreter's own probed version replaces it in the report. A
+  descriptor is read as text and never evaluated, because a `Gemfile` and a `*.gemspec` are Ruby source
+  and running either to learn a name would execute the project before the run has decided to. A
+  descriptor that exists and cannot be read is a detection warning, not an absent file. `vendor/`,
+  `.bundle`, `coverage`, `tmp`, `log`, `.rspec_status` and `.yardoc` are excluded from the source walk,
+  because a bundle tree, a Bundler config and a previous run's coverage data are not the project's code;
+- a build in two parts, because Ruby has no separate compilation step. The interpreter's own parser runs
+  over every source file through `RubyVM::InstructionSequence.compile_file`, so a project that does not
+  parse is `BLOCKED` and never a code defect. The check runs *before* the install deliberately: a tree
+  that does not parse is already a broken build, and installing a bundle into it would spend a network
+  round trip and a minute of the run's budget to report whatever the install failed at instead of the
+  syntax error the project actually has. When a `Gemfile` exists the build then runs `bundle install`,
+  which is what puts RSpec in the project's bundle; the command is never `bundle update`, because
+  verification must measure the dependency set the project committed to in its lock file, not the one
+  that happens to be newest today. A Bundler failure is a failed **build**, with Bundler's own output in
+  the notes, never a defect in the code;
+- existing tests through RSpec, with the report at `<artifacts>/ruby/rspec.json`, deleted before the run.
+  RSpec is resolved at test time rather than from the inspection probe, and that is the one place Ruby
+  differs structurally from the adapters whose test tool is part of the toolchain: RSpec is a bundle
+  dependency, so the project's own `bin/rspec` binstub only exists *after* the build phase has run
+  `bundle install`. The adapter looks for that binstub first, then `bundle exec rspec` — which a
+  `Gemfile` always makes available through the interpreter's own Bundler — then an RSpec below
+  `vendor/bundle` or on `PATH`. With none of those the phase returns "not executed" naming RSpec, because
+  a project's suite is written against one runner and running a second, weaker one against files it was
+  not written for produces results that describe nothing;
+- results parsed from RSpec's own JSON report, which is the runner's account rather than our reading of
+  its console output. Each example names its file as `file_path`, and the parser turns that into the
+  suite name the engine maps against requirements: the leading `./` is dropped, the separators become
+  dots and the `.rb` extension is removed, so `spec/ledger_spec.rb` becomes `spec.ledger_spec`. That is
+  exactly the identifier `RequirementCodeMapper` derives from the same file, so a result is attributed to
+  the requirement that names it without either side guessing. An example's status maps one to one, and
+  anything else is recorded as an error rather than as a pass; a malformed report becomes an error case
+  naming the parse failure rather than a silent skip; and a timeout is checked before the report is
+  looked for at all, so a run that was killed can never be read as a run that found nothing;
+- static analysis over a Ruby rule table (`ruby-heuristics`, ids `CW-RB-SEC-*`, `CW-RB-CORRECT-*`,
+  `CW-RB-BUG-*`, `CW-RB-REL-*`, `CW-RB-STYLE-001`, `CW-RB-MAIN-*` and `CW-RB-TEST-001`) read through one
+  literal-aware `RubySourceScan` that knows `#` and `=begin`/`=end` comments, single- and double-quoted
+  strings and their `#{...}` interpolation, percent literals, heredocs, regular expressions and the
+  `__END__` data section, so a rule sees the code and not a literal that happens to look like code. The
+  scan produces two offset-aligned views — comments blanked with literal text kept, and literal contents
+  masked with their delimiters kept — so a rule that is *about* a literal and a rule that is about a
+  statement shape each read the reading they mean. A separate security analyzer (`ruby-security`) filters
+  the same table to the `CW-RB-SEC-*` rules, so a rule is defined once and reported under one id, and each
+  finding carries its file, its line and its rule id;
+- coverage through SimpleCov's own result set (`coverage/.resultset.json`), asked for by setting the
+  conventional opt-in variables `COVERAGE` and `SIMPLECOV` on the suite's environment, and counted over
+  the project's own files only. SimpleCov is a gem rather than an interpreter extension, so unlike PHP
+  there is nothing for the inspection probe to load: presence is not the same as use, and the provider
+  decides from the report the run produces rather than from the probe. A stale
+  result set is deleted before the run, so a suite that wrote nothing can never be credited with a
+  previous run's numbers, and when no report appears the figure is reported as not measured with the
+  reason, never as zero;
+- a dependency inventory (`bundler`) read from `Gemfile.lock`'s `GEM`, `PATH` and `GIT` sections, every
+  entry carrying `PackageCoordinate.rubygem(name, version)` and so queryable as the RubyGems ecosystem.
+  The lock file is read directly rather than through a command, because `bundle lock` would rewrite the
+  file this analysis is a report about and `bundle list` needs the gems installed. A lock file that
+  exists and cannot be read is "not analysed" rather than an empty inventory, and an entry with no
+  version parenthesis, or a gem named in `DEPENDENCIES` that no `specs` block resolved, is reported with an
+  empty version rather than a guessed one, so the note says how many packages no advisory service can be
+  asked about;
+- mutation testing through the shared `TextMutator` and a `RubyLexis` (provider id `ruby-mutation`,
+  report tool `ruby-text`) that knows what a text mutator gets wrong in Ruby: `#` and `=begin`/`=end`
+  are comments, `__END__` ends the program, `/`, `<<`, `%` and `?` open a literal or an operator
+  depending on what precedes them, and `x.nil?` is one method name rather than the keyword `nil`
+  followed by a stray question mark. The run is bounded — at most sixteen mutants over at most twenty
+  files, within the configured mutation budget — and every file is restored in a `finally`. A mutant the
+  interpreter cannot parse, a Bundler that cannot load the project and a run that discovered no example
+  are told apart from a real failure and excluded from the score rather than counted as killed, and
+  surviving mutants are reported loudly without ever changing a verdict;
+- generated adversarial tests from declared scenarios: the fragments are Ruby, `${name}` becomes the bare
+  Ruby local `name`, and the generated file is an ordinary RSpec spec named `cw_sc_<ScenarioId>_spec.rb` —
+  every character of the id that is not a letter or a digit becomes an underscore, so `SC-ROLLING`
+  generates `cw_sc_SC_ROLLING_spec.rb` — written into the project's own first test root under
+  `generated/`, because RSpec discovers a spec by its file name and the `require 'spec_helper'` it opens
+  with is what loads the project's own configuration, and there is nowhere else RSpec would find it. A
+  failing case raises the single `CODEWITNESS_COUNTEREXAMPLE|…` line from an
+  `RSpec::Expectations::ExpectationNotMetError`, which is where the JSON report's `exception.message`
+  carries it; `CODEWITNESS_SEED` and `CODEWITNESS_CASE` travel in the environment because RSpec has no
+  per-case seed flag, and the reproduction command is a real
+  `env CODEWITNESS_SEED=… CODEWITNESS_CASE=… bundle exec rspec <generated spec>` invocation.
+
+The honest limits of Ruby support are:
+
+- RSpec is a bundle dependency and not part of the toolchain. It exists only after the build has run
+  `bundle install`, so a project that declares no RSpec and has none on the machine is reported as
+  having no test runner, and its requirements stay `UNVERIFIED`;
+- that build step resolves gems from RubyGems, so the first run of a project needs network access unless
+  its bundle is already installed or its `vendor/bundle` is already populated. CodeWitness installs
+  nothing on its own; it runs the install the project's own `Gemfile` asks for;
+- minitest is recognised from a `test/` tree, a `Rakefile` or a `Gemfile` mention and named in the report,
+  but the test phase drives RSpec. A project whose suite is minitest's is detected and reported as such,
+  and its tests are not run by this adapter;
+- the syntax check uses MRI's own `RubyVM::InstructionSequence`. On an interpreter that does not provide
+  it the check reports a warning per file and exits zero, because "this interpreter cannot parse-check"
+  is a fact about the checker and reporting it as a parse error would be a code defect the project does
+  not have — which also means no syntax error is caught there;
+- coverage is reported as not measured until the project itself loads SimpleCov and writes
+  `coverage/.resultset.json`. The `COVERAGE` and `SIMPLECOV` variables the run sets are conventional
+  names, not SimpleCov's own, so a project that gates SimpleCov on something else measures nothing and
+  the report says so rather than reporting zero. SimpleCov's default JSON carries line data only, so
+  branch coverage is not measured;
+- a gem that `Gemfile.lock` lists without a version, or a `DEPENDENCIES` entry that no `specs` block
+  resolved, is reported unresolved, because it is not a version an advisory can be a statement about,
+  and the report says the scan could not query it rather than implying the gem is clean;
+- mutation uses a deliberately small operator set rather than a dedicated Ruby framework the project
+  would have to add to its `Gemfile`, and only operators surrounded by whitespace are considered, so an
+  unformatted expression may be skipped. A surviving mutant means nobody checked that behaviour; it
+  never changes a verdict;
+- a scenario declared `mode: concurrent` is executed sequentially, and the generated file says so in a
+  `LIMIT:` comment: a scenario's fragments are arbitrary user code the generator cannot assume is
+  thread-safe, so the case executes the declared steps in order and demonstrates nothing about
+  interleaving;
+- a tree that holds `.rb` sources but no `Gemfile` is still claimed and linted, but there is no manifest
+  for Bundler to install from, so there is no test runner unless an RSpec is already on the machine or
+  below `vendor/bundle`;
+- the heuristic rule table is intentionally small and has a known false-positive profile.
+
 Implemented but limited, and reported as such:
 
 - **Dependency advisories** are checked only when you turn the scan on. It covers every ecosystem the
@@ -1252,8 +1394,9 @@ Implemented but limited, and reported as such:
   crates.io (from `package-lock.json`, `poetry.lock` and `Cargo.lock`, or from requirements pinned with
   `==`), Go (from the versions `go.mod` selects), NuGet (from `packages.lock.json`, or from
   `PackageReference` versions and central `PackageVersion` entries when there is no lock file),
-  ConanCenter (from `conan.lock`) and Packagist (from `composer.lock`, or from the declared `require`
-  and `require-dev` ranges when there is no lock file, where a range is left unresolved). A
+  ConanCenter (from `conan.lock`), Packagist (from `composer.lock`, or from the declared `require`
+  and `require-dev` ranges when there is no lock file, where a range is left unresolved) and RubyGems
+  (from `Gemfile.lock`). A
   dependency an inventory reports without a resolved version cannot be asked about, so the report says
   the scan could not query it rather than implying it is clean. When the scan is on, CodeWitness asks
   OSV which of the resolved dependencies are

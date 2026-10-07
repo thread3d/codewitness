@@ -49,10 +49,11 @@ jobs:
       # `./mvnw -Pe2e test` runs the fixture projects through their own toolchains: Maven for the
       # Java fixture, Python 3, Cargo, `go`, Node for the others (Node 22.18+ for TypeScript, where
       # type stripping is on by default, and 18.17+ for JavaScript), the .NET SDK for the C# fixture,
-      # CMake for the C and C++ one and PHP with Composer for the PHP one.
-      # The Kotlin and PHP fixtures are the two whose test tool is not part of the language toolchain -
-      # Kotlin's compiler and Surefire and PHP's PHPUnit are all resolved as dependencies - so both are
-      # warmed below, and both need the network this job already has.
+      # CMake for the C and C++ one and PHP with Composer for the PHP one, Ruby with Bundler for the
+      # Ruby one.
+      # The Kotlin, PHP and Ruby fixtures are the ones whose test tool is not part of the language
+      # toolchain - Kotlin's compiler and Surefire, PHP's PHPUnit and Ruby's RSpec are all resolved as
+      # dependencies - so all three are warmed below, and all three need the network this job already has.
       # Each end-to-end test skips itself (a JUnit assumption) when its toolchain is absent, so a missing
       # tool produces a green build with those languages never having run. Installing each one here, then
       # asserting it below, is what keeps that from happening silently.
@@ -133,6 +134,16 @@ jobs:
       - name: Warm the PHP fixture's dependencies
         run: composer install --no-interaction --no-progress --working-dir=fixtures/php-withdrawal-ledger
 
+      # Warm the Ruby fixture's bundle for the same reason, and with the same caveat: the fixture commits
+      # its Gemfile.lock, so this resolves the exact tree the end-to-end run will resolve. Ruby and
+      # Bundler come from the runner image rather than from a pinned action, because the image's Ruby is
+      # simply the interpreter the fixture is tested against; the version floor is asserted below instead
+      # of trusted, so a substituted interpreter is visible rather than silent.
+      - name: Warm the Ruby fixture's dependencies
+        env:
+          BUNDLE_GEMFILE: fixtures/ruby-withdrawal-ledger/Gemfile
+        run: bundle install
+
       # Fail loudly rather than trust the runner image. Absent tools make the end-to-end tests skip
       # themselves (a JUnit assumption), which is a green build with those languages never having run.
       # The Maven check asserts the pinned version, so a silently substituted Maven is visible too.
@@ -158,6 +169,11 @@ jobs:
           # The adapter reports coverage as not measured when no driver is loaded; assert the driver is
           # here so that the coverage phase is exercised rather than silently skipped in the report.
           php -m | grep -qi xdebug
+          ruby --version
+          bundle --version
+          # 3.1 is the floor the adapter assumes: both RSpec 3.13 and the Bundler the fixture locks to
+          # run on it.
+          ruby -e 'exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new("3.1") ? 0 : 1)'
 
       # Unit and integration tests. Surefire excludes the `e2e` group by default (pom.xml:
       # excluded.groups), so this is the fast suite.
@@ -165,7 +181,7 @@ jobs:
         run: ./mvnw -B test
 
       # The end-to-end suite, opt-in through the `e2e` profile, which clears excluded.groups. It
-      # builds the fixture projects with real Maven, Python, Cargo, Go, Node, .NET, CMake and Composer
-      # runs.
+      # builds the fixture projects with real Maven, Python, Cargo, Go, Node, .NET, CMake, Composer and
+      # Bundler runs.
       - name: End-to-end tests (fixture projects)
         run: ./mvnw -B -Pe2e test

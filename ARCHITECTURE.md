@@ -52,8 +52,9 @@ flowchart TD
     KOTLIN["Kotlin<br/>Gradle · Maven · kotlinc · JUnit · JaCoCo"]
     CPP["C/C++<br/>CMake · ctest · gcov · clang · gcc"]
     PHP["PHP<br/>composer · phpunit · xdebug · pcov"]
+    RUBY["Ruby<br/>bundler · rspec · simplecov"]
 
-    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet · kotlinc<br/>cmake · ctest · gcov · clang · gcc · php · composer · phpunit"]
+    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet · kotlinc<br/>cmake · ctest · gcov · clang · gcc · php · composer · phpunit<br/>ruby · bundler · rspec · simplecov"]
 
     CLI ==> ENGINE ==> MODEL ==> STRATEGIES ==> SPI
     SPI ==> JAVA
@@ -66,6 +67,7 @@ flowchart TD
     SPI ==> KOTLIN
     SPI ==> CPP
     SPI ==> PHP
+    SPI ==> RUBY
     JAVA --> TOOLS
     PYTHON --> TOOLS
     RUST --> TOOLS
@@ -76,6 +78,7 @@ flowchart TD
     KOTLIN --> TOOLS
     CPP --> TOOLS
     PHP --> TOOLS
+    RUBY --> TOOLS
 ```
 
 Enforced by module boundaries, not by convention:
@@ -93,6 +96,7 @@ Enforced by module boundaries, not by convention:
 | `codewitness-adapter-kotlin` | core, adapter-support | Kotlin, Gradle, Maven, `kotlinc` diagnostics, JUnit reports, JaCoCo coverage, source mutation |
 | `codewitness-adapter-cpp` | core, adapter-support | C and C++, CMake, CTest, clang/gcc/MSVC diagnostics, gcov coverage, source mutation, Conan/vcpkg/CMake inventory |
 | `codewitness-adapter-php` | core, adapter-support | PHP, the interpreter's own parse, Composer, PHPUnit, Xdebug/PCOV coverage, source mutation, Packagist inventory |
+| `codewitness-adapter-ruby` | core, adapter-support | Ruby, the interpreter's own parse, Bundler, RSpec, SimpleCov coverage, source mutation, RubyGems inventory |
 | `codewitness-storage` | core | SQLite persistence |
 | `codewitness-report` | core, Jackson | JSON and HTML rendering |
 | `codewitness-cli` | all of the above | argument parsing and wiring |
@@ -113,7 +117,7 @@ them.
    build wrapper, runtime version (the language's project detector: `JavaProjectDetector`,
    `PythonProjectDetector`, `RustProjectDetector`, `GoProjectDetector`, `TypeScriptProjectDetector`,
    `JavaScriptProjectDetector`, `CSharpProjectDetector`, `KotlinProjectDetector`,
-   `CppProjectDetector`, `PhpProjectDetector`).
+   `CppProjectDetector`, `PhpProjectDetector`, `RubyProjectDetector`).
 2. **workspace** — the project is copied into the run directory, excluding build output, VCS metadata
    and previous run data, with executable bits restored on `mvnw`/`gradlew`. `bin` and `obj` are
    excluded too, because `obj/project.assets.json` holds absolute package paths belonging to the
@@ -124,7 +128,9 @@ them.
    somewhere else. A `build` directory of the project's own is already excluded by name from the
    copy, as are `third_party`, `vendor`, `extern`, `external`, `conan` and `out` from the C and C++
    adapter's own source scan, and PHP's `.phpunit.cache` and `.phpunit.result.cache`, because a previous
-   run's results are not the project's sources.
+   run's results are not the project's sources. Ruby's `.bundle` holds a Bundler config naming absolute
+   paths on the machine that wrote it, and SimpleCov's `coverage` directory is result data belonging to a
+   previous run, so neither is copied either; `.yardoc` is excluded with them.
 3. **build** — `test-compile`/`testClasses` for Java, a syntax compile of every source file for
    Python, `cargo build --all-targets` for Rust, `go build ./...` for Go, `tsc --noEmit` (or a Node
    type-stripping syntax check when no compiler is installed) for TypeScript, `node --check` over
@@ -147,7 +153,13 @@ them.
    exist at all. A Composer failure is a failed build with Composer's own output in the notes, and
    `--no-scripts` because running a project's arbitrary install scripts is not a verifier's job. A
    failure ends verification here,
-   as `BLOCKED`.
+   as `BLOCKED`. Ruby is the same shape with a different toolchain: its build is a lint of every source
+   file with the interpreter's own parser (`RubyVM::InstructionSequence.compile_file`) followed, when a
+   `Gemfile` exists, by `bundle install` — the command that puts RSpec in the project's bundle and
+   therefore the only reason it can exist at test time. The lint runs first on purpose: a tree that does
+   not parse is already a broken build, and installing a bundle into it would spend a network round trip
+   to report the wrong failure. A Bundler failure is a failed build with Bundler's own output in the
+   notes, never a defect in the code.
 4. **tests** — stale reports are deleted, the suite is run, and results are parsed from the raw XML
    reports, not from console output. Rust has no XML report, so results are parsed from libtest's
    line protocol instead; the pairing of Cargo's two output streams is documented in the adapter. Go
@@ -169,7 +181,13 @@ them.
    parser reads the dotted `classname` and normalises any backslash to a dot, which is the identifier
    `RequirementCodeMapper` derives for the same file from its `namespace` declaration. When no PHPUnit
    exists at all the phase reports the tests as not executed and names it, because PHP has no
-   standard-library test framework to fall back on.
+   standard-library test framework to fall back on. Ruby has the same structural position with RSpec:
+   the runner is resolved at test time, because the project's own `bin/rspec` binstub only exists after
+   the build's `bundle install`, and the phase asks for RSpec's own JSON report
+   (`--format json --out <artifacts>/ruby/rspec.json`) rather than scraping progress output. Each example
+   names its file as `file_path`, and the parser turns that into the dotted suite
+   (`spec/ledger_spec.rb` becomes `spec.ledger_spec`), which is the identifier `RequirementCodeMapper`
+   derives for the same file, so a result is attributed rather than guessed at.
 5. **static analysis** — compiler diagnostics plus the adapter's heuristic rule table. For C# that
    is the Roslyn diagnostics the build phase already produced, plus a C# rule table; for Kotlin it is
    a Kotlin rule table read through one scanner that knows the language's literals; for C and C++ it
@@ -177,7 +195,10 @@ them.
    literal-masked view and a directive view, so a rule sees the literals it is about and the
    statements a literal would otherwise hide; for PHP it is a rule table read through one
    literal-aware `PhpSourceScan` that knows single and double quotes, heredoc and nowdoc strings,
-   `//`, `#` and `/* */` comments and backslash escapes.
+   `//`, `#` and `/* */` comments and backslash escapes; for Ruby it is a rule table read through one
+   `RubySourceScan` that knows `#` and `=begin`/`=end` comments, interpolating strings, percent literals,
+   heredocs, regular expressions and the `__END__` data section, and offers each rule a code view and a
+   literal-masked view of the same length so a match maps back to the line that produced it.
 6. **security** — the same rule table, filtered to security rules, reported separately.
 7. **dependencies** — a resolved inventory per language, read from the lock file when there is one
    (`package-lock.json`, `poetry.lock`, `Cargo.lock`, `packages.lock.json`) or from the versions the
@@ -190,7 +211,12 @@ them.
    package's version is a property of the machine. For PHP the sources are `composer.json` and, when it
    exists, `composer.lock`, every entry queried as the `Packagist` ecosystem, with a version that is a
    range, a wildcard or a branch alias reported unresolved rather than guessed and the `platform`,
-   `php` and `ext-*` entries skipped because they are not packages. Which
+   `php` and `ext-*` entries skipped because they are not packages. For Ruby the source is
+   `Gemfile.lock`, whose `GEM`, `PATH` and `GIT` sections are read as the resolved graph and whose
+   entries are queried as the `RubyGems` ecosystem; an entry with no version parenthesis, or a gem that
+   `DEPENDENCIES` names and no `specs` block resolved, is reported unresolved rather than guessed, and a
+   project with a `Gemfile` but no lock file has no resolved graph to inventory, which the phase says
+   rather than reporting an empty one. Which
    dependencies exist is a separate question from whether any of them has an advisory, and the report
    answers the two separately.
 8. **coverage** — the adapter's coverage provider (JaCoCo for Java, coverage.py for Python,
@@ -203,16 +229,26 @@ them.
    it; the figures cover the project's own sources only, with the reports for headers nobody in the
    project wrote excluded and the note saying how many were. PHP coverage is PHPUnit's Clover report,
    and PHP has no instrumentation of its own: when the probe found no Xdebug and no PCOV loaded the
-   phase reports the figure as not measured and names the missing driver, never as zero.
+   phase reports the figure as not measured and names the missing driver, never as zero. Ruby coverage is
+   SimpleCov's own result set (`coverage/.resultset.json`), read after the suite is re-run with the
+   conventional `COVERAGE` and `SIMPLECOV` opt-ins set: SimpleCov is a gem rather than an interpreter
+   extension, so there is nothing to probe for and the presence of the gem is not the measurement - the
+   provider decides from the report the run produces. A stale
+   result set is deleted before the run, and when none appears the figure is not measured with the
+   reason, never zero.
 9. **mutation** — the adapter's mutation tester (PIT for Java, a bounded AST mutator for Python, a
-   bounded source-operator mutator for Rust, Go, TypeScript, JavaScript, C#, Kotlin, C and C++ and
-   PHP), with stale reports deleted first. C# re-runs each mutant with `dotnet test --no-restore`;
+   bounded source-operator mutator for Rust, Go, TypeScript, JavaScript, C#, Kotlin, C and C++, PHP and
+   Ruby), with stale reports deleted first. C# re-runs each mutant with `dotnet test --no-restore`;
    Kotlin re-runs the project's own test goal, because PIT's bytecode mutants do not map back to Kotlin
    source lines; C and C++ re-run each mutant through the platform shell, because CMake has no single
    invocation that builds and tests in one command, and decide viability by whether CTest reached its
    own `Total Test time` summary rather than by matching failure words. PHP re-runs each mutant through
    PHPUnit and decides viability with the same lint program the build uses, so a mutant that does not
-   parse is discarded rather than counted as killed, and every file is restored in a `finally`.
+   parse is discarded rather than counted as killed, and every file is restored in a `finally`. Ruby
+   re-runs each mutant through RSpec with the shared `TextMutator` and a `RubyLexis`, and decides
+   viability from the runner's own words, so a mutant the interpreter cannot parse, a Bundler that cannot
+   load the project and a run that discovered no example are all excluded from the score rather than
+   counted as killed.
 10. **obligation planning** — scenarios declared by the user, properties derived from requirement
     text, or an explicit "nothing can be attempted here" obligation.
 11. **strategies** — per requirement: existing tests, static analysis, generated tests, mutation,
@@ -271,7 +307,10 @@ C++ tree built by a hand-written `Makefile` or by Meson, which is recognised and
 unverifiable rather than passed over. `PhpLanguageDetector` declares the same for `php`: it used to
 stand in for a language CodeWitness had no adapter for, and now it names PHP only for a tree the
 adapter does not claim, so a PHP project that was verified is not described a second time as
-unverifiable and one that was not is still reported rather than passed over.
+unverifiable and one that was not is still reported rather than passed over. `RubyLanguageDetector`
+declares the same for `ruby`: it used to be the whole of what CodeWitness could say about a Ruby tree,
+and it now names Ruby only for a tree the adapter does not claim, so a verified Ruby project is not
+described twice while one left unverified is still reported rather than dropped from the report.
 
 ## 4. The verdict rules, and why
 
@@ -327,8 +366,10 @@ A C and C++ generated test is one self-contained program that prints that line t
 exits non-zero; CTest records `Failed` as the failure message with the program's output beside it in
 `system-out`, which is why the CTest report parser joins the two. A PHP generated test is a PHPUnit
 `TestCase` method whose failure message carries the same line, which is where the JUnit report parser
-reads it from — the protocol is one line in every language, and only the place it is read from
-differs.
+reads it from. A Ruby generated test is an RSpec example that fails with an
+`RSpec::Expectations::ExpectationNotMetError` carrying the line, which is where RSpec's JSON report has
+it, in the failing example's `exception.message` — the protocol is one line in every language, and only
+the place it is read from differs.
 
 ## 6. Requirements, obligations and the mapping problem
 
@@ -348,13 +389,14 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
 - a source or test file belongs to a requirement when the requirement's id appears in it, or when the
   requirement declares `paths:`/`tests:` explicitly. The extensions that count as source come from the
   adapter (`sourceExtensions`), so the same rule works for `.java` files, Python modules, Rust files,
-  Go files, TypeScript files, JavaScript files, C# files, Kotlin files, C and C++ files and PHP files;
+  Go files, TypeScript files, JavaScript files, C# files, Kotlin files, C and C++ files, PHP files and
+  Ruby files;
   Go adds one refinement, because its tests
   live beside the code rather than in a separate tree, so only `*_test.go` files in a Go test tree are
   treated as tests;
 - a mutation location is mapped to its source file path, whether the tool reports a Java class name,
   a Python file, a Rust file, a Go file, a TypeScript file, a JavaScript file, a C# file, a Kotlin
-  file, a C or C++ file or a PHP file;
+  file, a C or C++ file, a PHP file or a Ruby file;
 - a test declared in a requirement is matched by the identifier the language's own report uses, which
   is why `RequirementCodeMapper` derives a .NET test class identifier as `<namespace>.<file stem>` —
   the shape of the TRX `className` — the same way it already special-cases Go and Node. PHP is the same
@@ -362,7 +404,12 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
   own backslash form and as `classname` in JUnit's dotted form, and the adapter's parser records the
   dotted one. The mapper therefore derives `Namespace.Class` from the file's own `namespace`
   declaration and writes the separators as dots, so the identifier the report carries and the
-  identifier derived from the file agree rather than merely resemble each other;
+  identifier derived from the file agree rather than merely resemble each other. Ruby is the same
+  problem again: RSpec reports an example's file as `file_path`, and the parser records the suite as that
+  path relative to the project root with the separators turned into dots (`spec/ledger_spec.rb` becomes
+  `spec.ledger_spec`). The mapper derives the same identifier from a `.rb`, `.rake` or `.gemspec` file
+  under the project root rather than relativising against the test root — which would match only through
+  the simple-name fallback and could not tell two same-named suites apart;
 - anything unmapped stays unmapped and the report says so. CodeWitness never silently attributes a
   passing test to a requirement it does not mention.
 
@@ -374,7 +421,8 @@ providers. The engine needs no change: it selects an adapter by asking each one 
 the project, and never switches on a language string. `codewitness-adapter-python`,
 `codewitness-adapter-rust`, `codewitness-adapter-go`, `codewitness-adapter-typescript`,
 `codewitness-adapter-javascript`, `codewitness-adapter-csharp`, `codewitness-adapter-kotlin`,
-`codewitness-adapter-cpp` and `codewitness-adapter-php` are the worked examples: each reuses the whole pipeline and adds only
+`codewitness-adapter-cpp`, `codewitness-adapter-php` and `codewitness-adapter-ruby` are the worked
+examples: each reuses the whole pipeline and adds only
 detection, tool providers and a generator. A language that shares a build tool with another one — Kotlin with Java, over Gradle and
 Maven — has to claim by *source language* as well as by build system, because two adapters claiming
 one tree is a polyglot run and two providers claiming one project both run. The C and C++ adapter is
@@ -388,13 +436,15 @@ A header names neither, because a header belongs to whichever language includes 
 `TestGenerator`, `GeneratedTestExecutor`) and register it in the composition root
 (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`, `GoAdapterBundle`,
 `TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle`, `KotlinAdapterBundle`,
-`CppAdapterBundle` and `PhpAdapterBundle` are the examples).
+`CppAdapterBundle`, `PhpAdapterBundle` and `RubyAdapterBundle` are the examples).
 Registration is data, not code paths. A `TestRunner` or `GeneratedTestExecutor` may also implement the
 optional replay-command methods, which is how a language supplies a reproducible command without the
 core knowing how tests are invoked. PHP is also where a test runner turns out to be a project
 dependency rather than a tool of the machine: PHPUnit does not exist until the build has installed it,
 so the adapter's runner resolves it after the build instead of trusting what inspection could see, and
-a `TestRunner` that has nothing to run says so rather than reporting a suite of zero tests.
+a `TestRunner` that has nothing to run says so rather than reporting a suite of zero tests. Ruby is the
+same case with a different package manager: RSpec does not exist until `bundle install` has put it in
+the project's bundle, so its runner is resolved after the build too.
 
 **Another verification strategy.** Implement `VerificationStrategy`. It receives the context, the
 requirement and its obligations, and returns evidence plus per-obligation outcomes. It cannot assign
@@ -411,7 +461,9 @@ security boundary.
 
 A run records everything needed to reproduce it: project identifier, source revision, CodeWitness
 version, runtime version (Java, Python, Rust, Go, Node for TypeScript and JavaScript, the .NET SDK for
-C#, the Kotlin release for Kotlin, the CMake release for C and C++, or the PHP release for PHP), build tool and version, configuration fingerprint, tool versions, language model identifier,
+C#, the Kotlin release for Kotlin, the CMake release for C and C++, the PHP release for PHP, or the Ruby
+release for Ruby), build tool and version, configuration fingerprint, tool versions, language model
+identifier,
 requirements hash, isolation level, timestamps, and every command. Run data is kept
 under `<project>/.codewitness/runs/<run-id>/`, with generated sources and raw reports copied into the
 artifact store so a counterexample can be reviewed and replayed after the run.
@@ -431,19 +483,21 @@ reports live in the artifact store on disk, not in the database.
   Java test to prove it is valid Java, rendering a Python scenario into a runnable module, rendering a
   Go scenario into a `_test.go` file, rendering a JavaScript scenario into a plain `node:test` module,
   rendering a C# scenario into an xUnit class in a project that compiles and rendering a C++ scenario
-  into a self-contained program with its compile and link commands, and a PHP scenario into a PHPUnit
-  `TestCase` class). The Kotlin generator's
+  into a self-contained program with its compile and link commands, a PHP scenario into a PHPUnit
+  `TestCase` class, and a Ruby scenario into an RSpec spec file). The Kotlin generator's
   output is proved by the end-to-end test instead, which compiles and runs it with the real compiler
   rather than putting a second Kotlin compiler on a unit test classpath; the C++ generator's output is
   proved the same way, by compiling it with the compiler the fixture's own build records.
 - **Integration tests** drive each adapter against small projects and parse synthetic tool reports,
   including the DOCTYPE-carrying JaCoCo and PIT formats, pytest's JUnit XML, coverage.py's JSON,
   Node's JUnit report, a BOM-prefixed TRX report, a CTest JUnit report with a failed test whose
-  `system-out` carries the counterexample line and a PHPUnit JUnit report that names a test class twice,
-  in PHP's backslash spelling in `class` and in JUnit's dotted spelling in `classname`.
+  `system-out` carries the counterexample line, a PHPUnit JUnit report that names a test class twice,
+  in PHP's backslash spelling in `class` and in JUnit's dotted spelling in `classname`, and an RSpec JSON
+  report whose failing example carries the counterexample line in its `exception.message`.
 - **End-to-end tests** (`-Pe2e`) run `./codewitness verify` against the fixture projects and assert the
   verdicts, the counterexample contents and the exit codes. The Java, Python, Rust, Go, TypeScript,
-  JavaScript, C#, Kotlin, C/C++ and PHP fixtures are all covered; the Python one uses only the standard library, the Rust
+  JavaScript, C#, Kotlin, C/C++, PHP and Ruby fixtures are all covered; the Python one uses only the
+  standard library, the Rust
   one and the Go one have no dependencies and the TypeScript and JavaScript ones have no packages, so
   each needs an interpreter, a toolchain, the `go` tool or a Node runtime and nothing else. The C# one
   needs the .NET SDK and no network: its test host packages must already be in the machine's NuGet
@@ -456,7 +510,10 @@ reports live in the artifact store on disk, not in the database.
   PHP fixture needs an interpreter and Composer and nothing else installed, but it needs network access
   the first time: PHPUnit is a Composer dependency rather than part of the toolchain, so the build must
   resolve it from Packagist before any test can run, which is why the fixture's sandbox config allows
-  network and why the continuous-integration job warms the toolchain before the run.
+  network and why the continuous-integration job warms the toolchain before the run. The Ruby fixture is
+  the same story with a different package manager: RSpec is a bundle dependency rather than part of the
+  toolchain, so the build must resolve it from RubyGems before any test can run, which is why that
+  fixture's sandbox config allows network and why the continuous-integration job warms its bundle first.
 - **Fixtures** are projects with known defects — off-by-one boundaries, null handling, concurrency,
   security, weak tests, and a requirement that cannot be verified at all — used to prove that
   CodeWitness distinguishes them, in more than one language.

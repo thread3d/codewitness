@@ -245,6 +245,26 @@ class RequirementCodeMapperTest {
     }
 
     @Test
+    @DisplayName("a Ruby spec file maps to the suite name RSpec reports for it")
+    void rubySpecFileMapsToSuiteName(@TempDir Path root) throws IOException {
+        ProjectInfo rubyProject = ProjectInfo.builder(ProjectRef.of(root))
+                .sourceExtensions(java.util.Set.of("rb", "rake", "gemspec"))
+                .addModule(new ModuleInfo("ledger", root, "ruby",
+                        List.of(root.resolve("lib")), List.of(root.resolve("spec")), null))
+                .build();
+        write(root.resolve("spec/ledger_spec.rb"), "# covers R-001\nRSpec.describe('x') {}\n");
+
+        RequirementCodeMapper mapper = RequirementCodeMapper.build(rubyProject,
+                requirements(Requirement.builder("R-001", "text").build()));
+
+        // RSpec reports file_path relative to the project root, so the mapping derives the same
+        // project-root-relative identifier the adapter's report parser records as the suite; anything
+        // else would only agree through the simple-name fallback.
+        assertEquals(List.of("spec.ledger_spec"), mapper.testClassesFor("R-001"));
+        assertEquals(Optional.of("R-001"), mapper.requirementForTestClass("spec.ledger_spec"));
+    }
+
+    @Test
     @DisplayName("a C# test file maps to the fully qualified name the TRX report records")
     void csharpTestFileMapsToItsNamespaceAndClassName(@TempDir Path root) throws IOException {
         ProjectInfo csharpProject = ProjectInfo.builder(ProjectRef.of(root))

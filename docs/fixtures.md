@@ -21,7 +21,8 @@ not install a `codewitness` command on `PATH`.
 | `kotlin-withdrawal-ledger` | Kotlin: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for Kotlin on the JVM: Gradle/Maven detection by Kotlin source rather than by the build descriptor it shares with Java, `kotlinc` diagnostics read from the compiler's own four shapes, JUnit XML reports, scenario-generated Kotlin test classes compiled by the project's own build, counterexamples, JaCoCo coverage over JVM bytecode and bounded source mutation, with nothing installed beyond the build tool and the Kotlin plugin it already declares. |
 | `cpp-withdrawal-ledger` | C++: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language whose build system is not a package manager: CMake detection and configure, `cmake --build`, CTest with JUnit parsing, scenario-generated self-contained C++ programs compiled with the flags the project's own build recorded, counterexamples, gcov coverage over a second instrumented build and bounded source mutation, with no package fetched at all. |
 | `php-withdrawal-ledger` | PHP: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language whose test tool is a Composer dependency rather than part of the toolchain: detection from the Composer manifest and the PHPUnit configuration, a build that is the interpreter's own parse followed by `composer install`, PHPUnit with JUnit parsing, scenario-generated PHPUnit `TestCase` classes written into the tree's own test root, counterexamples with a real PHPUnit replay command, coverage reported as not measured when no Xdebug or PCOV driver is loaded, and bounded source mutation — with nothing installed beyond the interpreter and Composer. |
-| `polyglot-service` | six languages in one directory, plus a `Gemfile` nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
+| `ruby-withdrawal-ledger` | Ruby: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language whose test tool is a Bundler dependency rather than part of the toolchain: detection from the `Gemfile` and the RSpec conventions, a build that is the interpreter's own parse followed by `bundle install`, RSpec with JSON parsing, scenario-generated RSpec specs written into the tree's own `spec/` root, counterexamples with a real `bundle exec rspec` replay command, coverage reported as not measured because the fixture does not load SimpleCov, and bounded source mutation — with nothing installed beyond the interpreter and Bundler. |
+| `polyglot-service` | six languages in one directory, plus a `mix.exs` for Elixir that nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
 | `security-vulnerability` | hardcoded credential, SQL built by concatenation | `FAILED` | 2 `FAILED` | Static security rules produce counterexamples with file, line and rule id, without any test running. |
@@ -463,9 +464,67 @@ versions an advisory can be a statement about. The ledger itself is plain PHP wi
 so everything the fixture asks about is in `src/WithdrawalLedger.php` and the only package Composer
 installs is the test tool.
 
+### `ruby-withdrawal-ledger`
+
+The Ruby counterpart of the PHP fixture: a Bundler project whose `WithdrawalLedger` applies its limit per
+calendar day instead of over a rolling 24-hour window (R-001) and which accepts a negative withdrawal and
+reduces the recorded total (R-003). Money is held in integer cents, so the arithmetic the requirements ask
+about is exact and the fixture needs no decimal type. The project's own tests pass, which is the point.
+
+The fixture is a `Gemfile` declaring RSpec and a committed `Gemfile.lock`, a `.rspec`,
+`lib/withdrawal_ledger.rb`, `spec/withdrawal_ledger_spec.rb`, `spec/spec_helper.rb`, `requirements.md` and
+its own `codewitness.yaml`. The `spec_helper` is not decoration: RSpec discovers a spec by its file name,
+and the `require 'spec_helper'` a generated spec opens with is what puts the ledger on the load path for
+it, exactly as the Composer autoloader does for a generated PHPUnit `TestCase`. The `Gemfile.lock` is
+committed on purpose, because a lock file is what makes an install reproducible and because only a lock
+file carries the resolved versions an advisory can be a statement about.
+
+R-001 and R-003 fail through generated RSpec specs written into `spec/generated/`; R-002 is discharged by an
+executed generated test, which is the only path to `VERIFIED`; R-004 declares no scenario and stays
+`UNVERIFIED`. Each counterexample carries the exact inputs and a replay command that is a real
+`bundle exec rspec` invocation with the seed and the case index in the environment, because RSpec has no
+per-case seed flag to pin a case with.
+
+The fixture's own suite is two RSpec examples, and both pass — that is the point of the fixture, and the
+reason a passing suite written by the same process is not evidence. Verification runs those two and then
+generates three spec files, one per scenario. R-001 fails through the generated boundary case
+`cw_case0000` in `spec/generated/cw_sc_SC_ROLLING_spec.rb`, carrying
+`{t1=85800000, a1=70000, t2=90000000, a2=70000}` and an observed total of 140,000 cents against a limit of
+100,000; R-003 fails with `{amount=-10000}` and an observed 40,000 where at least 50,000 was required.
+R-002 is discharged by an executed generated test. Mutation produces eight mutants, of which one is killed
+and seven survive; the survivors include `== -> !=` at `lib/withdrawal_ledger.rb:35`, the calendar-day
+comparison that no test in the fixture distinguishes from its negation. Static analysis and the security
+scan report no finding, and the dependency inventory is six gems read from `Gemfile.lock`.
+
+Coverage is reported as not measured here: the fixture neither declares SimpleCov nor loads it, so the run
+has no result set to read, and the phase names that rather than reporting zero, because a zero is a
+measurement and a missing report is not.
+
+```bash
+./codewitness verify fixtures/ruby-withdrawal-ledger \
+    --requirements fixtures/ruby-withdrawal-ledger/requirements.md
+```
+
+The verdict shape is fixed by the fixture's two declared defects and its three scenarios. The counts a
+run prints — executed tests, the coverage figure when a project loads SimpleCov, killed and surviving
+mutants — are that run's own, and are recorded by the end-to-end suite rather than transcribed here.
+
+Two things about the Ruby fixture are worth knowing before reading its report. The first is that RSpec is
+a bundle dependency, not part of the toolchain: the build phase has to run `bundle install` before a test
+can run at all, which is why the fixture's `codewitness.yaml` sets `sandbox.allow_network: true` and why a
+CI job warms its bundle first — the run is then measuring the adapter, not a download. The second is that
+coverage is not measured at all unless the project itself loads SimpleCov; this fixture does not, and a
+missing result set is an unknown figure rather than a zero.
+
+The fixture needs an interpreter and Bundler and nothing else installed. Ruby and Bundler come from the
+machine; RSpec and its five supporting gems are resolved from RubyGems into the run's own bundle on the
+first run, and the committed `Gemfile.lock` is Bundler's own resolution record for them. The ledger itself
+is plain Ruby with no runtime dependency, so everything the fixture asks about is in
+`lib/withdrawal_ledger.rb` and the only gems Bundler installs are the test tool and its dependencies.
+
 ### `polyglot-service`
 
-One directory holding six languages' projects and a `Gemfile`: a Maven project, a Python package with a
+One directory holding six languages' projects and a `mix.exs`: a Maven project, a Python package with a
 `poetry.lock`, a Cargo crate, a Go module, a TypeScript ledger and a plain-JavaScript tool. Nothing
 arranges the sharing - each adapter finds its own files by extension and ignores the rest - which is the
 property the fixture exists to demonstrate. JavaScript and TypeScript own disjoint extensions
@@ -477,7 +536,7 @@ One scenario is declared, for the Python half. The other five requirements have 
 scenario is what proves the thing the per-language fixtures cannot: a generated test executed against the
 right language while six of them share a tree.
 
-The `Gemfile` is not decoration either. It is the case that running more adapters cannot fix - a language
+The `mix.exs` is not decoration either. It is the case that running more adapters cannot fix - a language
 present in the tree that nothing understands - and the report names it, with the file that gave it away,
 instead of computing verdicts as though the code were not there.
 
@@ -489,7 +548,7 @@ project      polyglot-service (polyglot, polyglot)
   language   go via go (go, 1 module(s), build succeeded)
   language   javascript via javascript (node, 1 module(s), build succeeded)
   language   typescript via typescript (node, 1 module(s), build succeeded)
-  NOT VERIFIED ruby - present (Gemfile), but no adapter in this run can verify it
+  NOT VERIFIED elixir - present (mix.exs), but no adapter in this run can verify it
 
 Requirements
   ? R-001  The Java ledger totals a list of amounts      UNVERIFIED
@@ -604,6 +663,7 @@ with the `./codewitness` launcher:
 ./codewitness verify fixtures/kotlin-withdrawal-ledger --requirements fixtures/kotlin-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/cpp-withdrawal-ledger --requirements fixtures/cpp-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/php-withdrawal-ledger --requirements fixtures/php-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/ruby-withdrawal-ledger --requirements fixtures/ruby-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 
