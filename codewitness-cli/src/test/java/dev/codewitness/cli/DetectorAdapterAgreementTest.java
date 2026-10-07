@@ -41,6 +41,8 @@ class DetectorAdapterAgreementTest {
                 "the C# adapter must be on the classpath of the CLI: " + adapters.ids());
         assertTrue(adapters.ids().contains("kotlin"),
                 "the Kotlin adapter must be on the classpath of the CLI: " + adapters.ids());
+        assertTrue(adapters.ids().contains("cpp"),
+                "the C and C++ adapter must be on the classpath of the CLI: " + adapters.ids());
 
         for (LanguageDetector detector : detectors.all()) {
             detector.verifiedAsAdapterLanguage().ifPresent(language -> assertTrue(
@@ -95,6 +97,33 @@ class DetectorAdapterAgreementTest {
                 .map(LanguageDetectorRegistry.Detection::displayName).toList();
         assertTrue(uncovered.contains("Ruby"),
                 "a language no adapter claimed is still named: " + uncovered);
+    }
+
+    @Test
+    @DisplayName("a CMake C++ project is verified, and a Make-built one is still reported as unverifiable")
+    void cppIsNotReportedTwice(@TempDir Path project) throws IOException {
+        write(project, "CMakeLists.txt", """
+                cmake_minimum_required(VERSION 3.20)
+                project(ledger LANGUAGES CXX)
+                """);
+        write(project, "src/ledger.cpp", "int ledger() { return 0; }\n");
+        LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
+
+        List<String> covered = detectors.detect(project, Set.of(LanguageId.CPP)).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(covered.isEmpty(),
+                "the adapter claimed this tree, so nothing about it is unverifiable: " + covered);
+
+        // The adapter drives CMake and nothing else, so a tree built by a hand-written Makefile is exactly
+        // what is left for the detector to speak for. Reporting it is the point of keeping the detector
+        // registered rather than deleting it once an adapter existed.
+        Path makeBuilt = project.resolve("make-built");
+        write(makeBuilt, "Makefile", "all:\n\tc++ -o ledger src/ledger.cpp\n");
+        write(makeBuilt, "src/ledger.cpp", "int main() { return 0; }\n");
+        List<String> uncovered = detectors.detect(makeBuilt, Set.of()).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(uncovered.contains("C or C++"),
+                "a C++ project the adapter does not claim is still named: " + uncovered);
     }
 
     private static void write(Path base, String relative, String content) throws IOException {

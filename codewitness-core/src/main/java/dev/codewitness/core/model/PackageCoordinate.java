@@ -46,6 +46,14 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
     public static final String GO = "Go";
     /** The NuGet ecosystem id, which covers .NET packages including C# and F# ones. */
     public static final String NUGET = "NuGet";
+    /**
+     * The Conan package ecosystem id, which covers the C and C++ Conan Center packages.
+     *
+     * <p>Spelled {@code ConanCenter} because that is the name the advisory service knows it by;
+     * {@code Conan} alone is rejected as an invalid ecosystem rather than answered with no advisories,
+     * which is the difference between "nothing is known" and "nothing is wrong".
+     */
+    public static final String CONAN_CENTER = "ConanCenter";
 
     public PackageCoordinate {
         Objects.requireNonNull(ecosystem, "ecosystem");
@@ -99,6 +107,11 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
     /** @return a NuGet coordinate for a .NET package id at a resolved version. */
     public static PackageCoordinate nuget(String packageId, String version) {
         return new PackageCoordinate(NUGET, packageId, version, null);
+    }
+
+    /** @return a Conan coordinate for a C or C++ package at the version a lock file resolved. */
+    public static PackageCoordinate conan(String name, String version) {
+        return new PackageCoordinate(CONAN_CENTER, name, version, null);
     }
 
     /** @return a coordinate in an arbitrary ecosystem, for sources this class has no shortcut for. */

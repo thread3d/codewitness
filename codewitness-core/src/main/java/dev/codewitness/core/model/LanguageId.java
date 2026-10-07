@@ -38,6 +38,18 @@ public record LanguageId(String id) {
      */
     public static final LanguageId KOTLIN = new LanguageId("kotlin");
     /**
+     * C and C++, compiled and tested by the project's own CMake build and CTest.
+     *
+     * <p>One identifier covers both languages because one build system does: a {@code CMakeLists.txt}
+     * declares C and C++ targets alike, they share a compiler driver, a test runner and a coverage
+     * tool, and no project states which of the two it is in a way a build could act on. The adapter
+     * reports the extensions it found so that a report says which of the two the tree actually holds
+     * rather than implying the other. The language is named for the language and not for the toolchain,
+     * exactly as {@link #CSHARP} is not called {@code dotnet}: the build system is reported separately as
+     * {@link BuildSystemId#CMAKE}.
+     */
+    public static final LanguageId CPP = new LanguageId("cpp");
+    /**
      * More than one language, verified together because more than one adapter claimed part of the
      * project. Reported instead of silently naming whichever language happened to be inspected first.
      */

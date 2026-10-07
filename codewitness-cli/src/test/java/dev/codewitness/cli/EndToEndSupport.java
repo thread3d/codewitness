@@ -109,6 +109,24 @@ abstract class EndToEndSupport {
         return findExecutable("node");
     }
 
+    /**
+     * Skips the test when no CMake is available, instead of failing spuriously.
+     *
+     * <p>The C and C++ adapter drives the toolchain the project already uses, so the fixture needs CMake and
+     * the CTest that ships with it. Both are looked for the way the adapter looks for them: on {@code PATH}.
+     */
+    static void assumeCmakeAvailable() {
+        Assumptions.assumeTrue(findCmake() != null,
+                "no cmake executable on PATH: C and C++ end-to-end verification cannot run");
+        Assumptions.assumeTrue(findExecutable("ctest") != null,
+                "no ctest executable on PATH: C and C++ end-to-end verification cannot run");
+    }
+
+    /** @return the {@code cmake} executable on {@code PATH}, or {@code null}. */
+    static String findCmake() {
+        return findExecutable("cmake");
+    }
+
     /** Skips the test when no .NET SDK is available, instead of failing spuriously. */
     static void assumeDotnetAvailable() {
         Assumptions.assumeTrue(findDotnet() != null,

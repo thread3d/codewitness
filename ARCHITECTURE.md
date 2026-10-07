@@ -50,8 +50,9 @@ flowchart TD
     JS["JavaScript<br/>node:test · V8 (LCOV)"]
     CSHARP["C# / .NET<br/>dotnet build · dotnet test (TRX) · Roslyn · coverlet · xUnit"]
     KOTLIN["Kotlin<br/>Gradle · Maven · kotlinc · JUnit · JaCoCo"]
+    CPP["C/C++<br/>CMake · ctest · gcov · clang · gcc"]
 
-    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet · kotlinc"]
+    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet · kotlinc<br/>cmake · ctest · gcov · clang · gcc"]
 
     CLI ==> ENGINE ==> MODEL ==> STRATEGIES ==> SPI
     SPI ==> JAVA
@@ -62,6 +63,7 @@ flowchart TD
     SPI ==> JS
     SPI ==> CSHARP
     SPI ==> KOTLIN
+    SPI ==> CPP
     JAVA --> TOOLS
     PYTHON --> TOOLS
     RUST --> TOOLS
@@ -70,6 +72,7 @@ flowchart TD
     JS --> TOOLS
     CSHARP --> TOOLS
     KOTLIN --> TOOLS
+    CPP --> TOOLS
 ```
 
 Enforced by module boundaries, not by convention:
@@ -85,6 +88,7 @@ Enforced by module boundaries, not by convention:
 | `codewitness-adapter-javascript` | core | JavaScript, Node, node:test, V8/LCOV coverage, source mutation |
 | `codewitness-adapter-csharp` | core | C#, .NET SDK, `dotnet build`/`dotnet test`, Roslyn diagnostics, xUnit, coverlet |
 | `codewitness-adapter-kotlin` | core, adapter-support | Kotlin, Gradle, Maven, `kotlinc` diagnostics, JUnit reports, JaCoCo coverage, source mutation |
+| `codewitness-adapter-cpp` | core, adapter-support | C and C++, CMake, CTest, clang/gcc/MSVC diagnostics, gcov coverage, source mutation, Conan/vcpkg/CMake inventory |
 | `codewitness-storage` | core | SQLite persistence |
 | `codewitness-report` | core, Jackson | JSON and HTML rendering |
 | `codewitness-cli` | all of the above | argument parsing and wiring |
@@ -104,11 +108,18 @@ them.
 1. **inspect** — language, build system, modules, source and test directories, test frameworks,
    build wrapper, runtime version (the language's project detector: `JavaProjectDetector`,
    `PythonProjectDetector`, `RustProjectDetector`, `GoProjectDetector`, `TypeScriptProjectDetector`,
-   `JavaScriptProjectDetector`, `CSharpProjectDetector`, `KotlinProjectDetector`).
+   `JavaScriptProjectDetector`, `CSharpProjectDetector`, `KotlinProjectDetector`,
+   `CppProjectDetector`).
 2. **workspace** — the project is copied into the run directory, excluding build output, VCS metadata
    and previous run data, with executable bits restored on `mvnw`/`gradlew`. `bin` and `obj` are
    excluded too, because `obj/project.assets.json` holds absolute package paths belonging to the
    machine that restored it — a copy that kept it would describe the environment it was copied from.
+   A CMake project's `CMakeFiles`, `_deps`, `vcpkg_installed`, `cmake-build-debug`,
+   `cmake-build-release`, `cmake-build-relwithdebinfo`, `cmake-build-minsizerel` and `.cache` are
+   excluded for the same reason: they are absolute-path-laden leftovers of a configure that ran
+   somewhere else. A `build` directory of the project's own is already excluded by name from the
+   copy, as are `third_party`, `vendor`, `extern`, `external`, `conan` and `out` from the C and C++
+   adapter's own source scan.
 3. **build** — `test-compile`/`testClasses` for Java, a syntax compile of every source file for
    Python, `cargo build --all-targets` for Rust, `go build ./...` for Go, `tsc --noEmit` (or a Node
    type-stripping syntax check when no compiler is installed) for TypeScript, `node --check` over
@@ -118,7 +129,12 @@ them.
    `-p:NuGetAudit=false` is passed on every command, because CodeWitness runs its own advisory scan
    and NuGet's own audit would make each build depend on api.nuget.org. Diagnostics are parsed from
    and `testClasses`/`test-compile` for Kotlin, which is how `kotlinc` is invoked at all — Kotlin's
-   compiler diagnostics are read in the four shapes it prints them. A failure ends verification here,
+   compiler diagnostics are read in the four shapes it prints them. For C and C++ it is
+   `cmake -S <src> -B <build> -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug` followed by
+   `cmake --build <build> --parallel`, in a build directory inside the run: clang and gcc diagnostics
+   (`file:line:col: error: message`, and gcc's `file:line:` without a column), MSVC's
+   `file(line,col): error C1234:` and a linker failure with no position are all read, so a compile
+   error is `BLOCKED` here too. A failure ends verification here,
    as `BLOCKED`.
 4. **tests** — stale reports are deleted, the suite is run, and results are parsed from the raw XML
    reports, not from console output. Rust has no XML report, so results are parsed from libtest's
@@ -132,16 +148,25 @@ them.
    whose outcomes map so that anything that is not `Passed` or `Failed` is recorded as skipped, and
    whose failure `<Message>` is carried into the counterexample verbatim. Kotlin runs the project's
    own test task and reads the same JUnit XML a Java project produces, because Kotlin tests run on the
-   JVM under the same reporting machinery.
+   JVM under the same reporting machinery. C and C++ run
+   `ctest --test-dir <build> --output-junit <file> --output-on-failure` and read the JUnit report CTest
+   writes, which names each test the way it was registered with `add_test`.
 5. **static analysis** — compiler diagnostics plus the adapter's heuristic rule table. For C# that
    is the Roslyn diagnostics the build phase already produced, plus a C# rule table; for Kotlin it is
-   a Kotlin rule table read through one scanner that knows the language's literals.
+   a Kotlin rule table read through one scanner that knows the language's literals; for C and C++ it
+   is one rule table read through one `CppSourceScan` that offers each rule a code view, a
+   literal-masked view and a directive view, so a rule sees the literals it is about and the
+   statements a literal would otherwise hide.
 6. **security** — the same rule table, filtered to security rules, reported separately.
 7. **dependencies** — a resolved inventory per language, read from the lock file when there is one
    (`package-lock.json`, `poetry.lock`, `Cargo.lock`, `packages.lock.json`) or from the versions the
    manifest itself selects (`go.mod`), and from the declared names and ranges otherwise. A C# version
    that stands behind an MSBuild property is reported unresolved rather than guessed, and so is a
-   Kotlin dependency whose version is a range or a dynamic version. Which
+   Kotlin dependency whose version is a range or a dynamic version. For C and C++ the sources are
+   `conan.lock`, whose resolved graph is queried as the `ConanCenter` ecosystem, `vcpkg.json`, whose
+   versions are declared floors and so are reported without a version, and the `FetchContent_Declare`
+   and `find_package` calls in the CMake files, where a git tag is not a released version and a system
+   package's version is a property of the machine. Which
    dependencies exist is a separate question from whether any of them has an advisory, and the report
    answers the two separately.
 8. **coverage** — the adapter's coverage provider (JaCoCo for Java, coverage.py for Python,
@@ -149,11 +174,17 @@ them.
    JavaScript, coverlet's cobertura report for C# and JaCoCo over the JVM bytecode Kotlin shares with
    Java), with the Java agent attached automatically when no report exists. C# coverage is collected with `dotnet test --collect:"XPlat Code Coverage"`; a
    project without `coverlet.collector` comes back "not measured", naming the collector instead of
-   reporting zero.
+   reporting zero. C and C++ coverage is `gcov`, measured over a second configure that adds
+   `--coverage` to `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS` and the project's own CTest suite run over
+   it; the figures cover the project's own sources only, with the reports for headers nobody in the
+   project wrote excluded and the note saying how many were.
 9. **mutation** — the adapter's mutation tester (PIT for Java, a bounded AST mutator for Python, a
-   bounded source-operator mutator for Rust, Go, TypeScript, JavaScript, C# and Kotlin), with stale
-   reports deleted first. C# re-runs each mutant with `dotnet test --no-restore`; Kotlin re-runs the
-   project's own test goal, because PIT's bytecode mutants do not map back to Kotlin source lines.
+   bounded source-operator mutator for Rust, Go, TypeScript, JavaScript, C#, Kotlin and C and C++),
+   with stale reports deleted first. C# re-runs each mutant with `dotnet test --no-restore`; Kotlin
+   re-runs the project's own test goal, because PIT's bytecode mutants do not map back to Kotlin
+   source lines; C and C++ re-run each mutant through the platform shell, because CMake has no single
+   invocation that builds and tests in one command, and decide viability by whether CTest reached its
+   own `Total Test time` summary rather than by matching failure words.
 10. **obligation planning** — scenarios declared by the user, properties derived from requirement
     text, or an explicit "nothing can be attempted here" obligation.
 11. **strategies** — per requirement: existing tests, static analysis, generated tests, mutation,
@@ -206,7 +237,10 @@ verdict.
 A detector also declares which adapter language already covers it: `DotNetLanguageDetector` reports
 `verifiedAsAdapterLanguage() == "csharp"`, so a tree the C# adapter verified is not described a second
 time as present and unverifiable. What remains on that path is F# and Visual Basic, which are still
-recognised and still reported as unverifiable.
+recognised and still reported as unverifiable. `CppLanguageDetector` declares the same for `cpp`, so a
+CMake tree the C and C++ adapter verified is not described twice, and what remains for it is a C or
+C++ tree built by a hand-written `Makefile` or by Meson, which is recognised and reported as
+unverifiable rather than passed over.
 
 ## 4. The verdict rules, and why
 
@@ -258,6 +292,9 @@ result, the invariant that was violated, the test that observed it, the evidence
 the case index, and a `ReproductionRecipe` (command plus artifact path). Generated tests report
 failures through a single structured line, `CODEWITNESS_COUNTEREXAMPLE|case=…|seed=…|inputs={…}|…`,
 which the engine parses — that is why a counterexample contains data rather than just a stack trace.
+A C and C++ generated test is one self-contained program that prints that line to standard output and
+exits non-zero; CTest records `Failed` as the failure message with the program's output beside it in
+`system-out`, which is why the CTest report parser joins the two.
 
 ## 6. Requirements, obligations and the mapping problem
 
@@ -277,13 +314,13 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
 - a source or test file belongs to a requirement when the requirement's id appears in it, or when the
   requirement declares `paths:`/`tests:` explicitly. The extensions that count as source come from the
   adapter (`sourceExtensions`), so the same rule works for `.java` files, Python modules, Rust files,
-  Go files, TypeScript files, JavaScript files, C# files and Kotlin files; Go adds one refinement,
+  Go files, TypeScript files, JavaScript files, C# files, Kotlin files and C and C++ files; Go adds one refinement,
   because its tests
   live beside the code rather than in a separate tree, so only `*_test.go` files in a Go test tree are
   treated as tests;
 - a mutation location is mapped to its source file path, whether the tool reports a Java class name,
-  a Python file, a Rust file, a Go file, a TypeScript file, a JavaScript file, a C# file or a Kotlin
-  file;
+  a Python file, a Rust file, a Go file, a TypeScript file, a JavaScript file, a C# file, a Kotlin
+  file or a C or C++ file;
 - a test declared in a requirement is matched by the identifier the language's own report uses, which
   is why `RequirementCodeMapper` derives a .NET test class identifier as `<namespace>.<file stem>` —
   the shape of the TRX `className` — the same way it already special-cases Go and Node;
@@ -297,18 +334,22 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
 providers. The engine needs no change: it selects an adapter by asking each one whether it supports
 the project, and never switches on a language string. `codewitness-adapter-python`,
 `codewitness-adapter-rust`, `codewitness-adapter-go`, `codewitness-adapter-typescript`,
-`codewitness-adapter-javascript`, `codewitness-adapter-csharp` and `codewitness-adapter-kotlin` are the
-worked examples: each reuses the whole pipeline and adds only detection, tool providers and a
-generator. A language that shares a build tool with another one — Kotlin with Java, over Gradle and
+`codewitness-adapter-javascript`, `codewitness-adapter-csharp`, `codewitness-adapter-kotlin` and
+`codewitness-adapter-cpp` are the worked examples: each reuses the whole pipeline and adds only
+detection, tool providers and a generator. A language that shares a build tool with another one — Kotlin with Java, over Gradle and
 Maven — has to claim by *source language* as well as by build system, because two adapters claiming
-one tree is a polyglot run and two providers claiming one project both run.
+one tree is a polyglot run and two providers claiming one project both run. The C and C++ adapter is
+the mirror image of that case: one build system covers two languages, so one adapter claims both and
+one `LanguageId` (`cpp`) carries them, with the report counting the `.c` files and the C++
+implementation files separately rather than reporting a number that pretends they are one language.
+A header names neither, because a header belongs to whichever language includes it.
 
 **Another tool.** Implement one of the interfaces in `VerificationTools` (`Compiler`, `TestRunner`,
 `StaticAnalyzer`, `CoverageProvider`, `MutationTester`, `SecurityAnalyzer`, `DependencyAnalyzer`,
 `TestGenerator`, `GeneratedTestExecutor`) and register it in the composition root
 (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`, `GoAdapterBundle`,
-`TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle` and
-`KotlinAdapterBundle` are the examples).
+`TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle`, `KotlinAdapterBundle`
+and `CppAdapterBundle` are the examples).
 Registration is data, not code paths. A `TestRunner` or `GeneratedTestExecutor` may also implement the
 optional replay-command methods, which is how a language supplies a reproducible command without the
 core knowing how tests are invoked.
@@ -328,7 +369,7 @@ security boundary.
 
 A run records everything needed to reproduce it: project identifier, source revision, CodeWitness
 version, runtime version (Java, Python, Rust, Go, Node for TypeScript and JavaScript, the .NET SDK for
-C#, or the Kotlin release for Kotlin), build tool and version, configuration fingerprint, tool versions, language model identifier,
+C#, the Kotlin release for Kotlin, or the CMake release for C and C++), build tool and version, configuration fingerprint, tool versions, language model identifier,
 requirements hash, isolation level, timestamps, and every command. Run data is kept
 under `<project>/.codewitness/runs/<run-id>/`, with generated sources and raw reports copied into the
 artifact store so a counterexample can be reviewed and replayed after the run.
@@ -346,23 +387,28 @@ reports live in the artifact store on disk, not in the database.
 - **Unit tests** pin the verdict rules, the parsers, the configuration, the sandbox, the workspace
   copier, the analyzers' rule tables and the generated-test rendering (including compiling a generated
   Java test to prove it is valid Java, rendering a Python scenario into a runnable module, rendering a
-  Go scenario into a `_test.go` file, rendering a JavaScript scenario into a plain `node:test` module
-  and rendering a C# scenario into an xUnit class in a project that compiles). The Kotlin generator's
+  Go scenario into a `_test.go` file, rendering a JavaScript scenario into a plain `node:test` module,
+  rendering a C# scenario into an xUnit class in a project that compiles and rendering a C++ scenario
+  into a self-contained program with its compile and link commands). The Kotlin generator's
   output is proved by the end-to-end test instead, which compiles and runs it with the real compiler
-  rather than putting a second Kotlin compiler on a unit test classpath.
+  rather than putting a second Kotlin compiler on a unit test classpath; the C++ generator's output is
+  proved the same way, by compiling it with the compiler the fixture's own build records.
 - **Integration tests** drive each adapter against small projects and parse synthetic tool reports,
   including the DOCTYPE-carrying JaCoCo and PIT formats, pytest's JUnit XML, coverage.py's JSON,
-  Node's JUnit report and a BOM-prefixed TRX report.
+  Node's JUnit report, a BOM-prefixed TRX report and a CTest JUnit report with a failed test whose
+  `system-out` carries the counterexample line.
 - **End-to-end tests** (`-Pe2e`) run `./codewitness verify` against the fixture projects and assert the
   verdicts, the counterexample contents and the exit codes. The Java, Python, Rust, Go, TypeScript,
-  JavaScript, C# and Kotlin fixtures are all covered; the Python one uses only the standard library, the Rust
+  JavaScript, C#, Kotlin and C/C++ fixtures are all covered; the Python one uses only the standard library, the Rust
   one and the Go one have no dependencies and the TypeScript and JavaScript ones have no packages, so
   each needs an interpreter, a toolchain, the `go` tool or a Node runtime and nothing else. The C# one
   needs the .NET SDK and no network: its test host packages must already be in the machine's NuGet
   cache, which they are for any machine that has run `dotnet test` before, because the fixture's sandbox
   config sets `allow_network: false`. The Kotlin fixture needs Maven and nothing else, because it is a
   Maven build with `kotlin-maven-plugin`: the compiler, the standard library and Surefire are resolved
-  from a repository the way a dependency is, which is why it is not a Gradle project here.
+  from a repository the way a dependency is, which is why it is not a Gradle project here. The C and
+  C++ fixture needs CMake and CTest and nothing else: it fetches no package, so it configures, builds,
+  tests, covers and mutates with the toolchain the machine's compiler ships, and needs no network.
 - **Fixtures** are projects with known defects — off-by-one boundaries, null handling, concurrency,
   security, weak tests, and a requirement that cannot be verified at all — used to prove that
   CodeWitness distinguishes them, in more than one language.

@@ -19,6 +19,7 @@ not install a `codewitness` command on `PATH`.
 | `javascript-withdrawal-ledger` | JavaScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for plain JavaScript, with no compiler and no type check anywhere: detection, `node --check` syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
 | `csharp-withdrawal-ledger` | C#/.NET: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for the .NET SDK: solution and project detection, `dotnet build` with Roslyn/MSBuild diagnostics, `dotnet test` with TRX parsing, scenario-generated xUnit facts written into the test project, counterexamples, coverlet cobertura coverage and bounded source mutation, with nothing installed beyond the SDK and the test host packages the project already references. |
 | `kotlin-withdrawal-ledger` | Kotlin: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for Kotlin on the JVM: Gradle/Maven detection by Kotlin source rather than by the build descriptor it shares with Java, `kotlinc` diagnostics read from the compiler's own four shapes, JUnit XML reports, scenario-generated Kotlin test classes compiled by the project's own build, counterexamples, JaCoCo coverage over JVM bytecode and bounded source mutation, with nothing installed beyond the build tool and the Kotlin plugin it already declares. |
+| `cpp-withdrawal-ledger` | C++: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language whose build system is not a package manager: CMake detection and configure, `cmake --build`, CTest with JUnit parsing, scenario-generated self-contained C++ programs compiled with the flags the project's own build recorded, counterexamples, gcov coverage over a second instrumented build and bounded source mutation, with no package fetched at all. |
 | `polyglot-service` | six languages in one directory, plus a `Gemfile` nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
@@ -311,6 +312,94 @@ the bare block would be read as an extra argument to the scenario's own call. Th
 where a `$` in an invariant or a step description is escaped, because Kotlin would otherwise read it as
 the start of a string template.
 
+### `cpp-withdrawal-ledger`
+
+The C++ counterpart of the reference fixture: a CMake project with a `ledger` static library and a
+`withdrawal_ledger_test` executable registered with CTest, whose `WithdrawalLedger` applies its limit
+per calendar day instead of over a rolling 24-hour window (R-001) and accepts a negative amount and
+reduces the recorded total (R-003). Money is `long long` minor units and instants are epoch
+milliseconds, so the fixture needs no decimal library. The project's own test passes, which is the
+point.
+
+The fixture is a header and two source files plus one `CMakeLists.txt`:
+`include/ledger/withdrawal_ledger.hpp`, `src/withdrawal_ledger.cpp`,
+`tests/withdrawal_ledger_test.cpp` and a `CMakeLists.txt` that declares a `project()`, builds `ledger`
+as a static library and registers
+`add_test(NAME withdrawal_ledger_test COMMAND withdrawal_ledger_test)`. The test is registered under
+the name of the file that implements it, which is the convention the requirement mapper reads, so the
+CTest report and the requirement agree without either side guessing.
+
+```bash
+./codewitness verify fixtures/cpp-withdrawal-ledger \
+    --requirements fixtures/cpp-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  CwScRollingOb001   R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}
+                            expected: observation <= 100000   actual: 140000
+  CwScNegativeOb003  R-003  inputs: {amount=-10000}
+                            expected: observation >= 50000    actual: 40000
+
+Tests:            1 executed, 1 passed, 0 failed, 0 skipped    (CTest JUnit report)
+Coverage:         line 92.7% (76/82), branch 41/72              (gcov)
+Mutation testing: 8 mutants, 7 killed, 1 survived, score 87.5% (cpp-text)
+Static analysis:  1 medium finding, CW-CPP-CORRECT-001 on the 86400000 constant
+Dependencies:     inventory only, nothing resolvable, so the advisory scan consulted no source
+```
+
+The overall run is `FAILED` and the exit code is `1`.
+
+R-001 fails through the generated program `CwScRollingOb001`, whose inputs are
+`{t1=85800000, a1=70000, t2=90000000, a2=70000}` — 23:50 and 01:00, 70,000 minor units each — and whose
+expected `observation <= 100000` is observed as `140000`. R-003 fails through `CwScNegativeOb003`,
+whose input `{amount=-10000}` leaves the expected `observation >= 50000` at `40000`. R-002 is
+discharged by an executed generated test, which is the only path to `VERIFIED`; R-004 declares no
+scenario and stays `UNVERIFIED`. Each counterexample carries a replay command that runs the saved
+generated program directly, with the seed and the case index in the environment:
+
+```bash
+env CODEWITNESS_SEED=42 CODEWITNESS_CASE=0 <run>/artifacts/generated-tests/CwScRollingOb001
+```
+
+What is C++-specific about it is the shape of a generated test, and it is a shape the other adapters do
+not use. A generated test is one self-contained C++ translation unit with a `main`, written into the
+run's artefact store and never into the tree — the Java and C# adapters write a generated test into the
+tree's own test sources, and this one never edits the tree it is verifying. It is compiled by the
+compiler the project's own build used, with the exact arguments that
+build recorded in `compile_commands.json`, and linked against the `ledger` archive that build produced.
+The file includes every header the project has, because a scenario fragment may name any of the
+project's types and the generator cannot read a C++ declaration to know which; a project whose headers
+cannot all be included together therefore gets a generated test that does not compile, which is
+reported as a generated test that did not compile rather than as a defect in the code. A generated test
+that does not compile leaves its requirement `UNVERIFIED`, never `BLOCKED`.
+
+The fixture's own test is the one test CTest runs, so the test line is one executed and one passed,
+parsed from the CTest JUnit report rather than from console output. Coverage is measured over the
+project's own sources only — `src/withdrawal_ledger.cpp` and `tests/withdrawal_ledger_test.cpp` —
+because `--coverage` also instruments the standard library headers the compiler read, and a line in a
+header nobody in this project wrote is not a line this project can cover; the note says how many such
+reports were excluded. Mutation produces eight mutants, of which seven are killed; the survivor is
+`- -> +` at `src/withdrawal_ledger.cpp:46`, the window arithmetic `atMillis - entry.atMillis`, which no
+test distinguishes from `atMillis + entry.atMillis` because the fixture's entries are all at or after
+the instant asked about. Mutation needs a build and a test in one command, and CMake offers no single
+invocation for both, so the mutant command composes the project's own two commands with the platform's
+shell. Static analysis reads one rule table and reports a single medium finding, `CW-CPP-CORRECT-001`
+on the `86400000` constant. The dependency inventory is an inventory only, and this fixture has nothing
+resolvable in it, so the advisory scan reports that no source was consulted rather than reporting zero
+vulnerabilities.
+
+The fixture needs CMake and CTest and nothing else: it fetches no package, so it builds and tests
+offline, and mutation and coverage use the compiler and `gcov` the machine already has. Only CMake is
+driven: a C or C++ tree built by a hand-written `Makefile` or by Meson is recognised and reported as
+present and not verified rather than built by a guess at its commands.
+
 ### `polyglot-service`
 
 One directory holding six languages' projects and a `Gemfile`: a Maven project, a Python package with a
@@ -450,6 +539,7 @@ with the `./codewitness` launcher:
 ./codewitness verify fixtures/javascript-withdrawal-ledger --requirements fixtures/javascript-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/csharp-withdrawal-ledger --requirements fixtures/csharp-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/kotlin-withdrawal-ledger --requirements fixtures/kotlin-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/cpp-withdrawal-ledger --requirements fixtures/cpp-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 

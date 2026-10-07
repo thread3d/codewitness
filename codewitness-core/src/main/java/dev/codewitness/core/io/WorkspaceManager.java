@@ -36,7 +36,16 @@ public final class WorkspaceManager {
             // an interpreter with absolute paths baked in: copying it into the workspace would both be
             // enormous and produce an interpreter that cannot find itself.
             "__pycache__", ".venv", "venv", ".tox", ".nox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-            ".hypothesis", ".eggs", "dist", ".pytype");
+            ".hypothesis", ".eggs", "dist", ".pytype",
+            // CMake writes an object file, a dependency file and the configure cache per target into
+            // CMakeFiles, and a project that fetches its dependencies with FetchContent puts them under
+            // _deps: both are absolute-path-laden leftovers of a configure that ran somewhere else. The
+            // IDE build directories and the vcpkg install tree are the same kind of thing. A build
+            // directory the adapter creates is already excluded by name above. A project's own
+            // hand-written directory called CMakeFiles would be shadowed by this, which is the price of
+            // not copying a stale configure into the workspace.
+            "CMakeFiles", "_deps", "vcpkg_installed", "cmake-build-debug", "cmake-build-release",
+            "cmake-build-relwithdebinfo", "cmake-build-minsizerel", ".cache");
 
     private static boolean isExcludedDirectory(String name) {
         return EXCLUDED_DIRECTORIES.contains(name) || name.endsWith(".egg-info");

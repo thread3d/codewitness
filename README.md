@@ -100,6 +100,12 @@ or a Kotlin project:
 ./codewitness verify ./my-kotlin-project --requirements requirements.md
 ```
 
+or a CMake C++ project:
+
+```bash
+./codewitness verify ./my-cmake-project --requirements requirements.md
+```
+
 The language is detected, and a project may be written in several. `LanguageAdapterRegistry.selectAll`
 runs **every** adapter that claims part of the tree — a Java service with a TypeScript frontend is two
 verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
@@ -118,7 +124,7 @@ the file that gave it away — a language that appears nowhere in the report is 
 that is not there. Recognition comes from `LanguageDetector` implementations discovered like adapters are,
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
-`language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp` or `kotlin`
+`language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp`, `kotlin` or `cpp`
 *narrows* the run
 to that one adapter instead of being merged with the automatic choice. It is not forced: the named adapter
 is used when it exists and actually claims the project, and otherwise the run falls back to
@@ -145,7 +151,15 @@ project's own build tool: a Maven build with `kotlin-maven-plugin` or a Gradle b
 plugin is compiled by `kotlinc` through that build, its Kotlin compiler diagnostics are read from the
 format the compiler itself prints, coverage comes from JaCoCo over the same JVM bytecode a Java
 project produces, and generated scenarios become ordinary Kotlin JUnit 5 classes in the tree's own
-test sources.
+test sources. C and C++ support needs only CMake and CTest: a tree whose `CMakeLists.txt` declares a
+`project()` and at least one C or C++ source is configured and built with `cmake`, its own CTest
+suite is run and read from the JUnit report CTest writes, static analysis reads a C and C++ rule
+table, coverage comes from `gcov` over a second configure that adds `--coverage` to the flags, the
+package inventory is read from `conan.lock`, `vcpkg.json` and the CMake files, and generated
+scenarios become one self-contained C++ translation unit each, compiled with the arguments the
+project's own build recorded and linked against the archives it produced. A tree built by a
+hand-written `Makefile` or by Meson is recognised and reported as present and not verified, because
+this adapter drives CMake and does not guess at a build it does not understand.
 
 ---
 
@@ -480,7 +494,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin
+  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp
 
 verification:
   timeout: 15m           # per build or test command
@@ -543,7 +557,8 @@ also indexed in `<project>/.codewitness/codewitness.db` (SQLite).
 
 A report is only useful if it can be reproduced, so every run records: the project identifier, the
 source revision, the CodeWitness version, the runtime version (the Java version for a Java project,
-the .NET SDK version for a C# one, the Kotlin release for a Kotlin one), the build tool and its version, the verification configuration
+the .NET SDK version for a C# one, the Kotlin release for a Kotlin one, the CMake version for a C and
+C++ one), the build tool and its version, the verification configuration
 fingerprint, every tool version, the language model identifier if any, the requirements hash, the
 isolation level, timestamps and every command that was executed. Evidence records carry their command
 and inputs, and counterexamples carry a replayable command.
@@ -607,6 +622,9 @@ codewitness/
 ├── codewitness-adapter-kotlin/  Kotlin projects: Gradle or Maven with the Kotlin plugin, kotlinc
 │                               diagnostics, JUnit XML reports, heuristics, security, JaCoCo
 │                               coverage, bounded source mutation, Maven and Gradle inventories
+├── codewitness-adapter-cpp/     C and C++ projects: CMake configure and build, clang/gcc/MSVC
+│                               diagnostics, CTest with JUnit parsing, heuristics, security, gcov
+│                               coverage, bounded source mutation, Conan/vcpkg/CMake inventory
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -619,7 +637,7 @@ engine. Recognising a language CodeWitness has no adapter for is the same shape:
 `dev.codewitness.core.spi.LanguageDetector`, discovered the same way, and the detectors for the languages
 nothing here implements live in `codewitness-language-detectors`. A few platform defaults do remain in core
 — the `LanguageId` and `BuildSystemId` constants (`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`,
-`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
+`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `CMAKE`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
 needs, and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
 vocabulary and platform defaults, not language logic, and the engine never switches on a language.
 Nothing in core names a language it cannot already verify.
@@ -636,13 +654,16 @@ mvn -pl codewitness-core test   # one module
 ```
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
-plus Python 3, Cargo, Go, Node and the .NET SDK for the Python, Rust, Go, TypeScript, JavaScript and
-C# fixtures, and network access the first time, because it builds real projects. The Kotlin fixture
+plus Python 3, Cargo, Go, Node, the .NET SDK and CMake with CTest for the Python, Rust, Go,
+TypeScript, JavaScript, C# and C/C++ fixtures, and network access the first time, because it builds
+real projects. The Kotlin fixture
 needs no toolchain of its own beyond Maven: it is a Maven build with `kotlin-maven-plugin`, so the
-compiler, the standard library and Surefire are resolved from a repository the way a dependency is. The C# fixture is
-the one that needs none: its sandbox config sets `allow_network: false`, and it works because the
+compiler, the standard library and Surefire are resolved from a repository the way a dependency is. The C# fixture
+needs no toolchain of its own beyond the SDK: its sandbox config sets `allow_network: false`, and it works because the
 SDK's test host packages are already in the machine's NuGet cache on any machine that has run
-`dotnet test` before. An end-to-end test is skipped rather than failed when its toolchain is absent.
+`dotnet test` before. The C and C++ fixture needs CMake and CTest and nothing else — it fetches no
+package — so it builds and tests without reaching for anything. An end-to-end test is skipped rather than
+failed when its toolchain is absent.
 
 ---
 
@@ -994,13 +1015,120 @@ The honest limits of Kotlin support are:
 - a tree that holds `.kt` sources but no build descriptor at all is claimed with a warning: the
   sources can be analysed, but there is nothing there that could compile them.
 
+The C and C++ adapter is implemented and exercised end to end as well
+(`fixtures/cpp-withdrawal-ledger`):
+
+- detection of C and C++ trees by CMake: a `CMakeLists.txt` that declares a `project()` and at least one
+  C or C++ source is claimed, and one `LanguageId` (`cpp`) covers both languages because one build
+  system does — the report carries a count of `.c` files and of C++ implementation files, and a header
+  names neither, because a header belongs to whichever language includes it. A tree built by a
+  hand-written `Makefile` or by Meson is recognised by `CppLanguageDetector` and reported as present and
+  not verified, exactly as a language nothing implements is: the detector declares
+  `verifiedAsAdapterLanguage()` as `cpp`, the way the C# and Kotlin detectors do, so a tree the adapter
+  did verify is not described a second time as unverifiable, and its suffix list gained `.c` so a pure C
+  tree is recognised at all;
+- a build through `cmake -S <src> -B <build> -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+  -DCMAKE_BUILD_TYPE=Debug` followed by `cmake --build <build> --parallel`, in a build directory the
+  adapter creates inside the run's artefact store and never inside the project tree. The
+  `compile_commands.json` that configure always exports is the build's own record of how each
+  translation unit was compiled, which is what lets a generated test be compiled the way the project
+  compiles itself. Diagnostics are read in the shapes a C or C++ compiler prints them — clang and gcc
+  `file:line:col: error: message`, gcc's `file:line:` without a column, MSVC's `file(line,col): error
+  C1234:` — plus a linker failure, which has no position at all — so a compile error is `BLOCKED` and
+  never a code defect: a project that does not compile leaves the run `BLOCKED` and exits `2`, not
+  `1`;
+- existing tests through `ctest --test-dir <build> --output-junit <file> --output-on-failure`, read from
+  the JUnit report CTest writes rather than from console output, with the raw report stored as an
+  artefact. CTest reports a test under the name it was registered with, and the requirement mapper
+  derives a test file's identifier from its own name, so a project that registers a test under the name
+  of the file that implements it — as the fixture does, and as the convention a CMake project that
+  wants its tests attributed follows — has the two agree without either side guessing. A project that
+  registers one under another name maps nothing, and the report says the test was not attributed rather
+  than attributing it to a requirement it may not exercise;
+- static analysis over one C and C++ rule table (`cpp-heuristics`, ids `CW-CPP-SEC-*` for the twelve
+  security rules, `CW-CPP-MEM-*`, `CW-CPP-BOUND-*`, `CW-CPP-NUM-*`, `CW-CPP-CORRECT-*`, `CW-CPP-REL-*`,
+  `CW-CPP-CONC-*` and `CW-CPP-TEST-001`), read through one `CppSourceScan` that produces three views of
+  the source — code, masked literals and directives — so a rule can look for a literal, for a statement
+  with the literals removed, or at a preprocessor directive, and the mutation lexis reads source through
+  the same scanner and can never disagree with the analyzers about where a C or C++ literal ends. The
+  literals it knows are `"..."`, `'...'`, a backslash continuation and a raw string
+  `R"delim(...)delim"` with an optional `u8`/`u`/`U`/`L` prefix, which is exactly where a naive scanner
+  sees a string ending at the first quote. A separate security rule set (`cpp-security`) is filtered out
+  of the same table by the security phase, so a rule is defined once and reported under one id.
+- coverage through `gcov` (provider id `gcov-coverage`), which every compiler implementing the GNU
+  coverage format ships. A second build directory is configured with `--coverage` in `CMAKE_C_FLAGS`
+  and `CMAKE_CXX_FLAGS`, the project's own CTest suite is run over it, and `gcov -b -c` is asked for a
+  report per instrumented object. Nothing about the project's own build is changed, and the figures
+  cover the project's own sources only: `--coverage` instruments the standard library headers the
+  compiler read too, and a line in a header nobody in this project wrote is not a line this project can
+  cover, so the reports for those files are excluded and the note says how many were;
+- mutation testing through the shared `CommandMutationTester` and a `CppLexis` (provider id
+  `cpp-text-mutation`, report tool `cpp-text`) with a bounded operator set that flips one operator at a
+  time and re-runs each mutant. Mutation needs a build and a test in one command, and CMake offers no
+  single invocation for both — `ctest --build-and-test` reconfigures from scratch for every mutant,
+  which would multiply the phase's cost by the size of the build — so the profile composes the project's
+  own two commands with the platform's shell (`/bin/sh -c "cmake --build <dir> --parallel && ctest
+  --test-dir <dir> --output-on-failure"`, `cmd.exe /c` on Windows). Viability is decided by whether CTest
+  reached its own `Total Test time` summary rather than by matching failure words: CTest's "The
+  following tests FAILED:" contains ninja's "FAILED:" verbatim, and a rule that matched the words would
+  call every killed mutant a mutant that did not compile;
+- a dependency inventory from three sources, and the difference is stated in the note rather than
+  hidden: `conan.lock`, which is Conan's own resolution record and gives the resolved graph with the
+  versions the install selected, queried as the `ConanCenter` ecosystem; `vcpkg.json`, which declares a
+  floor rather than the installed version, so no version is reported for it; and the
+  `FetchContent_Declare` and `find_package` calls in the CMake files, where a git tag is not a released
+  version and a system package's version is a property of the machine rather than of the project. An
+  inventory with nothing resolvable reports that no source could be consulted rather than reporting zero
+  vulnerabilities;
+- generated adversarial tests from declared scenarios: the fragments are C++, and a generated test is one
+  self-contained C++ translation unit with a `main`, not a class in a test framework. It is written into
+  the run's artefact store, compiled by the compiler the project's own build used with the exact
+  arguments that build recorded in `compile_commands.json`, and linked against the archives that build
+  produced. The Java and C# adapters write a generated test into the tree's own test sources; this
+  adapter never edits the tree it is verifying. The generated file includes every header the project has,
+  because a scenario fragment may name any of the project's types and the generator cannot read a C++
+  declaration to know which; a project whose headers cannot all be included together therefore gets a
+  generated test that does not compile, which is reported as such rather than as a defect in the code.
+  The compiled executable is kept in the artefact store, which is what makes the replay command — `env
+  CODEWITNESS_SEED=… CODEWITNESS_CASE=… <exe>` — work after the run. A failing case prints the
+  `CODEWITNESS_COUNTEREXAMPLE|…` line to standard output and exits non-zero, and a generated test that
+  does not compile leaves its requirement `UNVERIFIED`, never `BLOCKED`, because nothing was
+  demonstrated either way.
+
+The honest limits of C and C++ support are:
+
+- only CMake is driven. A tree built by a hand-written `Makefile` or by Meson is
+  recognised and reported as present and not verified rather than built by a guess at its commands;
+- a generated test needs the `compile_commands.json` the adapter's own configure always exports, and a
+  compiler and linker the project's build already used. A project whose build the adapter could not
+  configure has nothing to compile a generated test with, and the requirement stays `UNVERIFIED`;
+- a generated test includes every header the project has, so a project whose headers cannot all be
+  included in one translation unit gets a generated test that does not compile. That is reported as a
+  generated test that did not compile rather than as a defect, and it is a stated limit rather than a
+  hidden one;
+- mutation needs a build and a test in one command, and CMake has no single invocation for both, so the
+  mutant command goes through the platform shell. A project whose build and test cannot be chained with
+  `&&` in one shell command cannot be mutated;
+- coverage needs `gcov` on `PATH` and a test registered with `add_test`; without either, coverage is
+  reported as not measured with the reason, never as zero. The instrumented build is a full second
+  compile, which is why the phase costs what it does;
+- the inventory is an inventory. A `vcpkg.json` floor, a `FetchContent` git tag and a `find_package`
+  package all lack the resolved version an advisory is a statement about, so the report says how many
+  packages could not be asked about rather than implying they are clean;
+- one `LanguageId` (`cpp`) covers both languages, because one build system does. The report carries a
+  count of `.c` files and of C++ implementation files, but a header names neither: a header belongs to
+  whichever language includes it, and the adapter refuses to guess;
+- the heuristic rule table is intentionally small and has a known false-positive profile, exactly like
+  every other adapter's.
+
 Implemented but limited, and reported as such:
 
 - **Dependency advisories** are checked only when you turn the scan on. It covers every ecosystem the
   adapters can inventory at a resolved version: Maven (from `dependency:list`), npm and PyPI and
   crates.io (from `package-lock.json`, `poetry.lock` and `Cargo.lock`, or from requirements pinned with
-  `==`), Go (from the versions `go.mod` selects) and NuGet (from `packages.lock.json`, or from
-  `PackageReference` versions and central `PackageVersion` entries when there is no lock file). A
+  `==`), Go (from the versions `go.mod` selects), NuGet (from `packages.lock.json`, or from
+  `PackageReference` versions and central `PackageVersion` entries when there is no lock file) and
+  ConanCenter (from `conan.lock`). A
   dependency an inventory reports without a resolved version cannot be asked about, so the report says
   the scan could not query it rather than implying it is clean. When the scan is on, CodeWitness asks
   OSV which of the resolved dependencies are

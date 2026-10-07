@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>dev.codewitness</groupId>
+    <artifactId>codewitness-parent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>codewitness-adapter-cpp</artifactId>
+  <name>CodeWitness :: C/C++ Adapter</name>
+  <description>C and C++ language adapter: CMake detection, a cmake configure and build with clang,
+    gcc or MSVC diagnostics, CTest JUnit test reports, a C/C++ rule table, gcov coverage, a vcpkg and
+    Conan dependency inventory, bounded source mutation and scenario-generated test executables.
+    Needs the project's own CMake build and nothing else.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-core</artifactId>
+    </dependency>
+
+    <!-- The text-mutation loop, which is shared with the Rust, Go, C# and Kotlin adapters: a mutant is a
+         source text edit and a re-run of the project's own test command, which is the same job in every
+         language. C and C++ supply only their lexis, their build-and-test command and their reading of
+         what "did not compile" looks like. -->
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-adapter-support</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

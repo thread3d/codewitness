@@ -9,13 +9,14 @@ Scenarios live in `codewitness.yaml` under `scenarios:`. The fragments (`setup`,
 `observation`, `invariant`) are written in the **project's own language**: Java for a Java project,
 Python for a Python project, Rust for a Rust project, Go for a Go module, TypeScript for a TypeScript
 project, plain JavaScript for a JavaScript project, C# for a C#/.NET project, Kotlin for a Kotlin
-project. Everything else — modes,
+project, and C or C++ for a project whose sources are either — one adapter covers both, so the
+fragment is written in whichever language the code under test is written in. Everything else — modes,
 inputs, ranges, seeds, the counterexample protocol — is identical. The examples below are Java; the
-Python, Rust, Go, TypeScript, JavaScript, C# and Kotlin forms are shown in
+Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin and C/C++ forms are shown in
 [Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
-[TypeScript projects](#typescript-projects), [JavaScript projects](#javascript-projects) and
-[C# projects](#c-projects) and
-[Kotlin projects](#kotlin-projects).
+[TypeScript projects](#typescript-projects), [JavaScript projects](#javascript-projects),
+[C# projects](#c-projects), [Kotlin projects](#kotlin-projects) and
+[C and C++ projects](#c-and-c-projects).
 
 ```yaml
 scenarios:
@@ -78,7 +79,7 @@ Each step declares the inputs it searches over:
 | Field | Meaning |
 | --- | --- |
 | `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
-| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, or a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`. |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares. |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -110,6 +111,13 @@ For each obligation CodeWitness writes a JUnit 5 class into
 exactly that class, parses the reports and then deletes the source (keeping a copy in the run
 directory). Nothing about the generated test is special at runtime — you can read it, and you can run
 it by hand.
+
+That is the Java shape, and it is not the only one. Each language's section below says what its own
+shape is: a standard-library `unittest` case for Python, a Cargo integration test for Rust, a
+`_test.go` file in the package under test for Go, a `node:test` module for TypeScript and JavaScript,
+an xUnit class in the tree's own test project for C#, a Kotlin JUnit 5 class in the tree's own test
+sources for Kotlin, and, for C and C++, one self-contained program with a `main` rather than a class
+in a framework — written into the run's artefact store, never into the tree.
 
 A failing case fails the test with one structured line:
 
@@ -619,6 +627,79 @@ steps:
   - call: "runCatching { ledger.withdraw(0L, ${amount}) }.also { check(it.isFailure) }"
     description: an amount above the limit must be rejected by throwing
 ```
+
+## C and C++ projects
+
+For a C or C++ project the same scenario is written in C++ — or in C, if that is what the code under
+test is written in, because one adapter covers both languages and one `LanguageId` (`cpp`) carries
+them. A generated test is one self-contained C++ program with a `main`, written per scenario into the
+run's artefact store and never into the tree: it is not a class in a test framework, and it is never
+added to the project's `CMakeLists.txt`. The fragments are C++ statements and `${name}` becomes a C++
+variable:
+
+```yaml
+language:
+  adapter: cpp
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: |
+      auto l = ledger::WithdrawalLedger();
+    steps:
+      - call: "l.withdraw(${t1}, ${a1})"
+        inputs:
+          - {name: t1, type: long long, domain: integer, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: long long, domain: integer, values: ["70000"], range: {min: 10000, max: 90000}}
+      - call: "l.withdraw(${t2}, ${a2})"
+        inputs:
+          - {name: t2, type: long long, domain: integer, values: ["90000000"]}
+          - {name: a2, type: long long, domain: integer, values: ["70000"]}
+    observation: "l.totalWithinLast24Hours(${t2})"
+    invariant: "observation <= 100000"
+    cases: 200
+    seed: 42
+```
+
+Notes specific to C and C++:
+
+- `${name}` is replaced by the generated variable itself, so an input declared `long long` is written
+  `${t1}` and not a cast. Money in the fixture is `long long` minor units and instants are epoch
+  milliseconds, which is why no decimal type is needed;
+- `type` is a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project
+  declares. The generated declaration is `const <type> <name> = <value>;`, so a boundary value is emitted
+  as the scenario wrote it in C++ syntax, and a value that does not fit the declared type is a compile
+  error, which the run reports as a generated test that did not compile rather than as a defect;
+- the fragments are C++ **statements**, so each `call` ends in `;` (CodeWitness adds one if you leave it
+  out), and `setup` declares the subject with `auto` or with the project's own type;
+- the generated file includes every header the project has, because a scenario fragment may name any of
+  the project's types and the generator cannot read a C++ declaration to know which. A project whose
+  headers cannot all be included in one translation unit therefore gets a generated test that does not
+  compile, which the report says in those words. That is a stated limit rather than a hidden one;
+- the program is compiled by the compiler the project's own build used, with the exact arguments that
+  build recorded in `compile_commands.json`, and linked against the archives that build produced. The
+  adapter's own configure always exports that file; a project whose build could not be configured has
+  nothing to compile a generated test with, and the requirement stays `UNVERIFIED`;
+- a failing case prints the single `CODEWITNESS_COUNTEREXAMPLE|case=…|seed=…|inputs={…}|…` line to
+  standard output and exits non-zero. CTest records `Failed` as the failure message with the program's
+  output beside it in `system-out`, and the report parser joins the two, which is why a counterexample
+  contains the exact inputs rather than only a nonzero exit status;
+- a generated test that does not compile leaves its requirement `UNVERIFIED`, never `BLOCKED`: nothing
+  was demonstrated either way.
+
+The compiled program is kept in the run's artefact store, so the replay command runs it directly with
+the recorded seed and case:
+
+```bash
+env CODEWITNESS_SEED=42 CODEWITNESS_CASE=0 <run>/artifacts/generated-tests/CwScRollingOb001
+```
+
+C and C++ rejection is expressed the same way, through the invariant, because a step that throws is a
+failure by default. The fixture's `withdraw` returns `void` and reports a rejection only through the
+state it leaves, so `SC-NEGATIVE` records a withdrawal and then asserts on `totalWithinLast24Hours`; a
+step whose API returns a value can instead check it inline, because `call` is spliced in as a C++
+statement.
 
 ## Practical advice
 

@@ -16,10 +16,11 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ./demo.sh             # or follow the steps below
 ```
 
-The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript, C# and Kotlin
-sections at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for TypeScript, 18.17+
-for JavaScript), the .NET SDK (8+) and Maven with network access the first time respectively, and nothing
-else: the Kotlin section is a Maven build, so `kotlinc` and the standard library arrive as dependencies.
+The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin
+and C/C++ sections at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for TypeScript,
+18.17+ for JavaScript), the .NET SDK (8+), Maven with network access the first time and CMake with CTest
+respectively, and nothing else: the Kotlin section is a Maven build, so `kotlinc` and the standard library
+arrive as dependencies, and the C and C++ section fetches no package at all.
 
 ## 1. What is in the project?
 
@@ -454,3 +455,64 @@ Kotlin is where the adapters have to be careful about what claims a tree. It sha
 Java, so neither build descriptor is evidence of either language on its own: the Kotlin adapter claims a
 tree with Kotlin sources or a Kotlin plugin, and the Java adapter claims one with Java sources. A tree
 holding both is polyglot and is verified by both, each over its own files.
+
+## 15. The same thing for C and C++
+
+The C and C++ fixture is the same ledger once more, this time as a CMake project with a `ledger` static
+library and a `withdrawal_ledger_test` executable registered with CTest. It needs CMake and CTest and
+nothing else installed — no package is fetched — and the money is `long long` minor units:
+
+```bash
+./codewitness verify fixtures/cpp-withdrawal-ledger \
+    --requirements fixtures/cpp-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  CwScRollingOb001   R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}
+                            expected: observation <= 100000   actual: 140000
+  CwScNegativeOb003  R-003  inputs: {amount=-10000}
+                            expected: observation >= 50000    actual: 40000
+
+Tests
+  1 executed, 1 passed, 0 failed, 0 skipped
+
+Coverage
+  line 92.7% (76/82), branch 41/72
+
+Mutation testing
+  8 mutants, 7 killed, 1 survived, score 87.5%
+```
+
+The scenario fragments are C++, the generated tests are one self-contained C++ program per scenario,
+compiled by the compiler the project's own build used with the arguments that build recorded in
+`compile_commands.json` and linked against the library it produced, and the replay command runs the
+saved program directly with the seed and case in the environment:
+`env CODEWITNESS_SEED=42 CODEWITNESS_CASE=0 <run>/artifacts/generated-tests/CwScRollingOb001`. The
+generated file is never added to the project's build, and the executable is kept in the run's artefact
+store, which is what makes the replay work after the run. Existing tests are read from the JUnit report
+`ctest --output-junit` writes, coverage comes from `gcov` over a second configure that adds
+`--coverage` to `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS`, and mutation runs through the adapter's own text
+mutator, whose profile composes `cmake --build` and `ctest` with the platform shell because CMake has no
+single invocation that builds and tests in one command. Mutation kills seven of its eight mutants; the
+survivor is `- -> +` in the window arithmetic, which no test distinguishes from `+` because every entry
+in the fixture is at or after the instant asked about. Static analysis reports one medium finding,
+`CW-CPP-CORRECT-001` on the `86400000` constant, and the dependency phase reports an inventory with
+nothing resolvable rather than reporting zero vulnerabilities.
+
+Coverage counts the project's own sources only. The instrumented build also compiles the standard
+library headers, and a line in a header nobody in this project wrote is not a line this project can
+cover, so those reports are excluded from the figure and the note says how many were. A generated test
+that does not compile leaves its requirement `UNVERIFIED`, never `BLOCKED`, and a C or C++ project whose
+headers cannot all be included together gets exactly that — it is a stated limit, not a hidden one.
+
+Only CMake is driven, which is the one thing about C and C++ support worth knowing before pointing it at
+a tree: a `CMakeLists.txt` declaring a `project()` and at least one C or C++ source is claimed and
+verified, while a tree built by a hand-written `Makefile` or by Meson is recognised and reported as
+present and not verified. Nothing is guessed at a build this adapter does not drive.

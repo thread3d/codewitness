@@ -73,9 +73,10 @@ The image must contain the toolchain for the language under verification: a JDK 
 default), an image with Python 3 plus pytest and coverage.py if you want those phases for a Python
 project, an image with the Rust toolchain for a Rust project, an image with the `go` tool for a Go
 module, an image with a Node runtime for a TypeScript project (22.6+) or a JavaScript project
-(18.17+), an image with the .NET SDK (8+) for a C# project, or an image with a JVM and the project's own
-build tool for a Kotlin project — Kotlin needs no image of its own, because it is compiled by the same
-`kotlinc` the project's Maven or Gradle build already invokes. The local-process sandbox needs no image
+(18.17+), an image with the .NET SDK (8+) for a C# project, an image with CMake, a C or C++ compiler and
+`gcov` for a C or C++ project, or an image with a JVM and the project's own build tool for a Kotlin
+project — Kotlin needs no image of its own, because it is compiled by the same `kotlinc` the project's
+Maven or Gradle build already invokes. The local-process sandbox needs no image
 and uses the interpreter or toolchain the project already has. A run whose `sandbox.allow_network` is
 false also sets `CARGO_NET_OFFLINE` for Cargo, `GOPROXY=off` for Go and the package-manager offline
 flags for Node, so a build that would need to download something fails loudly instead of reaching the
@@ -94,6 +95,17 @@ redirected under the run's artefact store, so a run cannot read or write a devel
 state. The NuGet package folder is deliberately left alone — it is where the machine already keeps the
 packages it has restored, and pointing it somewhere else would turn every project into a download —
 which is why the caveat that project code can read anything the user can read applies to it too.
+
+C and C++ are in the same position as NuGet, in a different way. A `cmake` configure and build runs the
+project's own build, and the build directory the adapter creates is inside the run rather than inside
+the project, so the configure cache, the objects and the generated test executables are not left in the
+tree being verified; but `allow_network: false` is not enforced for a CMake project that fetches its
+dependencies with `FetchContent` or through a package manager such as Conan or vcpkg. CMake has no
+switch that forbids the network the way `CARGO_NET_OFFLINE` or `GOPROXY=off` do, so a configure that
+downloads a dependency will download it, and the report says which sandbox and which network position
+the run actually had rather than implying otherwise. The C and C++ dependency phase reads the inventory
+it can read — `conan.lock`, `vcpkg.json` and the CMake files — and says how many packages carry no
+resolved version, instead of treating an unknown as a clean result.
 
 ## Recommendations
 
