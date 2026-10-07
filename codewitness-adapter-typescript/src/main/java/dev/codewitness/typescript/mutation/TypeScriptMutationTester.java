@@ -8,6 +8,7 @@ import dev.codewitness.core.model.MutationReport;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.SurvivingMutant;
 import dev.codewitness.core.spi.VerificationContext;
+import dev.codewitness.support.mutation.TextMutator;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.typescript.NodeRuntime;
 import dev.codewitness.typescript.TypeScriptProjectDetector;
@@ -32,7 +33,7 @@ import java.util.Set;
  *
  * <p>A mutation framework is an optional dependency, and a project should not lose mutation evidence
  * just because it is not installed. The adapter therefore mutates the source text itself through
- * {@link TypeScriptMutator}, re-runs the project's own test suite for each mutant with
+ * {@link dev.codewitness.support.mutation.TextMutator}, re-runs the project's own test suite for each mutant with
  * {@code node --test}, and reports the mutants the suite could not detect as survivors.
  *
  * <p>A mutant that the runtime's type stripper cannot parse is non-viable and is excluded from the score
@@ -94,8 +95,8 @@ public final class TypeScriptMutationTester implements VerificationTools.Mutatio
             } catch (IOException _) {
                 continue;
             }
-            List<TypeScriptMutator.Site> sites = TypeScriptMutator.sites(original);
-            for (TypeScriptMutator.Site site : sites) {
+            List<TextMutator.Site> sites = TextMutator.sites(original);
+            for (TextMutator.Site site : sites) {
                 if (generated >= MAX_MUTANTS || Instant.now().isAfter(deadline)) {
                     break;
                 }
@@ -138,10 +139,10 @@ public final class TypeScriptMutationTester implements VerificationTools.Mutatio
     private enum Status { KILLED, SURVIVED, TIMED_OUT, NON_VIABLE }
 
     private Status runMutant(
-            VerificationContext context, Path file, String original, TypeScriptMutator.Site site,
+            VerificationContext context, Path file, String original, TextMutator.Site site,
             List<Path> tests, Duration remaining) {
         try {
-            Files.writeString(file, TypeScriptMutator.apply(original, site), StandardCharsets.UTF_8);
+            Files.writeString(file, TextMutator.apply(original, site), StandardCharsets.UTF_8);
             ProcessResult result = runTests(context, tests, remaining);
             if (result.timedOut()) {
                 return Status.TIMED_OUT;

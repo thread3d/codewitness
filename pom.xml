@@ -34,6 +34,8 @@
     <module>codewitness-core</module>
     <module>codewitness-storage</module>
     <module>codewitness-report</module>
+    <!-- Shared adapter machinery. Built before the adapters that depend on it. -->
+    <module>codewitness-adapter-support</module>
     <module>codewitness-adapter-java</module>
     <module>codewitness-adapter-python</module>
     <module>codewitness-adapter-rust</module>
@@ -107,6 +109,11 @@
       <dependency>
         <groupId>dev.codewitness</groupId>
         <artifactId>codewitness-report</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-adapter-support</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

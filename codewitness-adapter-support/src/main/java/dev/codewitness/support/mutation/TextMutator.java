@@ -1,4 +1,4 @@
-package dev.codewitness.javascript.mutation;
+package dev.codewitness.support.mutation;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * A small, bounded source mutator for JavaScript.
+ * A small, bounded source mutator for C-like source languages (JavaScript and TypeScript today).
  *
  * <p>A surviving mutant is the most direct evidence that a test suite does not constrain the behaviour
  * it appears to constrain, and it should not be unavailable just because a mutation framework is not
@@ -21,14 +21,19 @@ import java.util.Set;
  *   <li>it never touches comments, string literals or template literals, so it cannot corrupt a message
  *       or a credential while looking for a mutation site;</li>
  *   <li>it only mutates an operator surrounded by whitespace and by value expressions, which is how a
- *       formatter writes a binary operator. That deliberately skips unary minus and spread, which would
- *       otherwise produce mutants that do not parse and tell us nothing.</li>
+ *       formatter writes a binary operator. That deliberately skips unary minus, spread and generic type
+ *       arguments ({@code Array<string>}), which would otherwise produce mutants that do not parse or
+ *       compile and tell us nothing.</li>
  * </ul>
  *
  * <p>The operator set is deliberately small and is stated in every report. A mutant that does not parse
  * is non-viable and is excluded from the score.
+ *
+ * <p>One copy of this class serves every adapter in the C-like family. It used to exist as a separate
+ * JavaScript and TypeScript class that differed only in name, and the earlier split is what let the
+ * TypeScript copy fall behind on exactly the tokenizer edge cases above.
  */
-final class JavaScriptMutator {
+public final class TextMutator {
 
     /** Operator text to its replacement. Only these tokens are mutated. */
     private static final Map<String, String> MUTATIONS = mutationTable();
@@ -39,7 +44,7 @@ final class JavaScriptMutator {
     /** Tokens that can start a value expression; an operator must precede one to be binary. */
     private static final Set<String> VALUE_START = Set.of("(", "[", "{", "-", "+", "!", "~");
 
-    private JavaScriptMutator() {
+    private TextMutator() {
     }
 
     private static Map<String, String> mutationTable() {
@@ -65,9 +70,10 @@ final class JavaScriptMutator {
     }
 
     /** A single replaceable location: the token to change and where it is. */
-    record Site(String operator, String replacement, int offset, int line) {
+    public record Site(String operator, String replacement, int offset, int line) {
 
-        String describe() {
+        /** @return how the mutation reads in a report, for example {@code < -> <=}. */
+        public String describe() {
             return operator + " -> " + replacement;
         }
     }
@@ -77,7 +83,7 @@ final class JavaScriptMutator {
     }
 
     /** @return every mutatable site in the source, in source order. */
-    static List<Site> sites(String source) {
+    public static List<Site> sites(String source) {
         List<Token> tokens = tokenize(source);
         List<Site> sites = new ArrayList<>();
         for (int i = 0; i < tokens.size(); i++) {
@@ -107,7 +113,7 @@ final class JavaScriptMutator {
     }
 
     /** @return the source with one site's operator replaced. */
-    static String apply(String source, Site site) {
+    public static String apply(String source, Site site) {
         return source.substring(0, site.offset()) + site.replacement()
                 + source.substring(site.offset() + site.operator().length());
     }

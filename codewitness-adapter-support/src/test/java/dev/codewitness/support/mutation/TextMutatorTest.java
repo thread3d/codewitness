@@ -1,4 +1,4 @@
-package dev.codewitness.typescript.mutation;
+package dev.codewitness.support.mutation;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The bounded source mutator: what it changes and, just as importantly, what it refuses to. */
-class TypeScriptMutatorTest {
+class TextMutatorTest {
 
     @Test
     @DisplayName("spaced binary operators and boolean literals are mutatable")
@@ -21,12 +21,12 @@ class TypeScriptMutatorTest {
                 const flag = true;
                 """;
 
-        List<TypeScriptMutator.Site> sites = TypeScriptMutator.sites(source);
+        List<TextMutator.Site> sites = TextMutator.sites(source);
 
         assertEquals(4, sites.size(), sites.toString());
-        assertEquals(List.of("+", "<", "&&", "true"), sites.stream().map(TypeScriptMutator.Site::operator).toList());
+        assertEquals(List.of("+", "<", "&&", "true"), sites.stream().map(TextMutator.Site::operator).toList());
         assertEquals(List.of("-", "<=", "||", "false"),
-                sites.stream().map(TypeScriptMutator.Site::replacement).toList());
+                sites.stream().map(TextMutator.Site::replacement).toList());
         assertEquals(1, sites.getFirst().line());
         assertEquals(4, sites.getLast().line());
     }
@@ -36,33 +36,35 @@ class TypeScriptMutatorTest {
     void mutatesEquality() {
         String source = "const same = a === b;\nconst other = c !== d;\n";
 
-        List<TypeScriptMutator.Site> sites = TypeScriptMutator.sites(source);
+        List<TextMutator.Site> sites = TextMutator.sites(source);
 
-        assertEquals(List.of("===", "!=="), sites.stream().map(TypeScriptMutator.Site::operator).toList());
-        assertEquals(List.of("!==", "==="), sites.stream().map(TypeScriptMutator.Site::replacement).toList());
+        assertEquals(List.of("===", "!=="), sites.stream().map(TextMutator.Site::operator).toList());
+        assertEquals(List.of("!==", "==="), sites.stream().map(TextMutator.Site::replacement).toList());
     }
 
     @Test
-    @DisplayName("comments, strings, unspaced operators and generic arguments are never mutated")
+    @DisplayName("comments, strings, template literals, generic arguments and unspaced operators are never mutated")
     void refusesToCorruptTheSource() {
         String source = """
                 // const ignored = a + b;
                 /* const alsoIgnored = c < d; */
                 const message = "a + b and c < d";
                 const tight = a+b;
+                const tightComparison = a<b;
+                const template = `sum is ${a + b}`;
                 const generic = new Array<string>();
                 """;
 
-        assertTrue(TypeScriptMutator.sites(source).isEmpty(), TypeScriptMutator.sites(source).toString());
+        assertTrue(TextMutator.sites(source).isEmpty(), TextMutator.sites(source).toString());
     }
 
     @Test
     @DisplayName("applying a site rewrites exactly the operator")
     void appliesASite() {
         String source = "const small = count <= limit;";
-        TypeScriptMutator.Site site = TypeScriptMutator.sites(source).getFirst();
+        TextMutator.Site site = TextMutator.sites(source).getFirst();
 
         assertEquals("<= -> <", site.describe());
-        assertEquals("const small = count < limit;", TypeScriptMutator.apply(source, site));
+        assertEquals("const small = count < limit;", TextMutator.apply(source, site));
     }
 }
