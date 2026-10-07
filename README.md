@@ -405,7 +405,15 @@ verification:
 mutation:      { enabled: true, tool: pitest }
 property_testing: { enabled: true, max_scenarios: 50, concurrent: true }
 static_analysis:  { enabled: true, analyzers: [javac, heuristics] }
-security:      { enabled: true }
+security:
+  enabled: true
+  vulnerabilities:       # dependency advisories; off by default, and needs network access
+    enabled: false
+    source: osv          # osv
+    endpoint: https://api.osv.dev
+    timeout: 30s
+    max_dependencies: 500
+    fail_on: high        # critical | high | medium | low | none
 tests:         { enabled: true }
 
 llm:
@@ -562,7 +570,8 @@ The Python adapter is implemented and exercised end to end as well (`fixtures/py
 - coverage through `coverage.py`, reported as not measured when it is absent;
 - mutation testing through the standard library `ast` module, with a bounded operator set, a mutant
   cap and a wall-clock budget;
-- a dependency inventory from the project's manifests (inventory only, no vulnerability database);
+- a dependency inventory from the project's manifests (inventory only; advisories are not checked for
+  this ecosystem yet, since the manifest does not always carry a resolved version);
 - generated adversarial tests from declared scenarios: the fragments are Python, the generated tests
   are `unittest` cases, and a counterexample carries the exact inputs plus a replayable command.
 
@@ -589,7 +598,8 @@ The Rust adapter is implemented and exercised end to end as well (`fixtures/rust
 - coverage through `cargo-llvm-cov` when it is installed, and an honest "not measured" when it is not;
 - mutation testing through a bounded, built-in source mutator (arithmetic, comparison boundaries,
   boolean operators and boolean constants) that flips one operator at a time and re-runs the suite;
-- a dependency inventory from the Cargo manifests (inventory only, no vulnerability database);
+- a dependency inventory from the Cargo manifests (inventory only; advisories are not checked for this
+  ecosystem yet);
 - generated adversarial tests from declared scenarios: the fragments are Rust, the generated tests
   are standard-library Cargo integration tests, and a counterexample carries the exact inputs plus a
   replayable `cargo test` command.
@@ -622,7 +632,8 @@ The Go adapter is implemented and exercised end to end as well (`fixtures/go-wit
   `0/0` rather than guessed;
 - mutation testing through a bounded, built-in source mutator (arithmetic, comparison boundaries,
   boolean operators and boolean constants) that flips one operator at a time and re-runs the suite;
-- a dependency inventory from `go.mod` (inventory only, no vulnerability database);
+- a dependency inventory from `go.mod` (inventory only; advisories are not checked for this ecosystem
+  yet);
 - generated adversarial tests from declared scenarios: the fragments are Go, the generated
   `_test.go` files are placed in the package under test, and a counterexample carries the exact
   inputs plus a replayable `go test` command.
@@ -657,7 +668,8 @@ The TypeScript adapter is implemented and exercised end to end as well
 - mutation testing through a bounded, built-in source mutator (arithmetic, comparison boundaries,
   equality, boolean operators and boolean constants) that flips one operator at a time and re-runs the
   suite, excluding mutants the runtime cannot parse;
-- a dependency inventory from `package.json` (inventory only, no vulnerability database);
+- a dependency inventory from `package.json` (inventory only; advisories are not checked for this
+  ecosystem yet);
 - generated adversarial tests from declared scenarios: the fragments are TypeScript, the generated tests
   are `node:test` modules, and a counterexample carries the exact inputs plus a replayable `node --test`
   command.
@@ -705,7 +717,8 @@ The JavaScript adapter is implemented and exercised end to end as well
   tool id `javascript-text`; arithmetic, comparison boundaries, equality, boolean operators and
   boolean constants) that flips one operator at a time and re-runs the suite, excluding mutants the
   runtime cannot parse;
-- a dependency inventory from `package.json` (inventory only, no vulnerability database);
+- a dependency inventory from `package.json` (inventory only; advisories are not checked for this
+  ecosystem yet);
 - generated adversarial tests from declared scenarios: the fragments are plain JavaScript, the
   generated tests are ordinary `node:test` modules written with the `.test.mjs` extension, a failing
   case throws the same `CODEWITNESS_COUNTEREXAMPLE|…` protocol line, and a counterexample carries the
@@ -741,8 +754,15 @@ The honest limits of JavaScript support are:
 
 Implemented but limited, and reported as such:
 
-- **Dependency analysis** lists resolved dependencies but does not consult a vulnerability database,
-  so it never claims a project has no vulnerable dependencies.
+- **Dependency advisories** are checked only when you turn the scan on, and only for ecosystems whose
+  inventory carries a resolved version (currently Maven). When it is on, CodeWitness asks OSV which of
+  the resolved dependencies are affected and records the answer, the service it asked and when; when it
+  is off, the report says the dependencies were *not checked* rather than reporting zero
+  vulnerabilities. An advisory at `fail_on` severity or above **fails** the requirements whose own
+  module resolves the vulnerable artifact — the attribution is deliberately narrow, so a requirement in
+  `module-a` is not refuted by a dependency that only `module-b` pulls in. An advisory whose severity the
+  source did not state refutes nothing, and an empty result is not a claim that a dependency is
+  unaffected.
 - **Gradle** support (detection, commands, report parsing) is implemented and unit tested, but the
   end-to-end demonstration in this repository was exercised with Maven only; no Gradle
   distribution was available in the environment it was built in.

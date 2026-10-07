@@ -44,13 +44,12 @@ public final class JavaTestProvider implements VerificationTools.TestRunner {
         if (!project.hasTests()) {
             return TestResult.notExecuted("no test source directory was detected");
         }
-        List<String> executable = launcher.resolve(project, buildSystem.buildRoot(project));
-        if (executable == null) {
+        List<String> command = testCommand(context);
+        if (command.isEmpty()) {
             return TestResult.notExecuted("no " + buildSystem.id() + " executable found");
         }
 
         TestReportParser.clearReports(project);
-        List<String> command = BuildToolLauncher.command(executable, buildSystem.testGoals());
         ProcessResult result = context.runner().run(ProcessSpec.builder(command, buildSystem.buildRoot(project))
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(1_000_000)
@@ -69,6 +68,16 @@ public final class JavaTestProvider implements VerificationTools.TestRunner {
                     parsed.duration(), parsed.cases(), parsed.reports());
         }
         return parsed;
+    }
+
+    @Override
+    public List<String> testCommand(VerificationContext context) {
+        ProjectInfo project = context.projectInfo();
+        List<String> executable = launcher.resolve(project, buildSystem.buildRoot(project));
+        if (executable == null) {
+            return List.of();
+        }
+        return BuildToolLauncher.command(executable, buildSystem.testGoals());
     }
 
     @Override

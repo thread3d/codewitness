@@ -141,6 +141,18 @@ public final class JavaAdapterBundle {
         }
 
         @Override
+        public java.util.List<String> testCommand(
+                dev.codewitness.core.spi.VerificationContext context) {
+            return new JavaTestProvider(new BuildToolLauncher(context.runner()), buildSystem).testCommand(context);
+        }
+
+        @Override
+        public java.util.List<String> dependencyCommand(
+                dev.codewitness.core.spi.VerificationContext context) {
+            return new MavenDependencyAnalyzer(new BuildToolLauncher(context.runner())).dependencyCommand(context);
+        }
+
+        @Override
         public java.util.List<String> replayCommand(
                 dev.codewitness.core.spi.VerificationContext context,
                 dev.codewitness.core.model.TestCaseResult testCase) {
@@ -213,6 +225,12 @@ public final class JavaAdapterBundle {
         public dev.codewitness.core.model.TestResult runTests(
                 dev.codewitness.core.spi.VerificationContext context) {
             return new JavaTestProvider(new BuildToolLauncher(context.runner()), buildSystem).runTests(context);
+        }
+
+        @Override
+        public java.util.List<String> testCommand(
+                dev.codewitness.core.spi.VerificationContext context) {
+            return new JavaTestProvider(new BuildToolLauncher(context.runner()), buildSystem).testCommand(context);
         }
 
         @Override

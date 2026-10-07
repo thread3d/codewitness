@@ -193,4 +193,20 @@ class HtmlReportWriterTest {
         assertTrue(rendered.contains("CODEWITNESS"));
         assertTrue(rendered.contains("&lt;unknown&gt;") || rendered.contains("unknown"));
     }
+
+    @Test
+    void reportsVulnerabilitiesOnlyAlongsideTheSourceThatWasConsulted() {
+        assertTrue(html.contains("Known vulnerabilities: <strong>1</strong> (source <code>osv</code>"),
+                "a count must name the source it came from");
+        assertTrue(html.contains("Prototype pollution in the JSON parser."), "the finding must be listed");
+    }
+
+    @Test
+    void neverClaimsZeroVulnerabilitiesWhenNoSourceWasConsulted() {
+        String unchecked = new HtmlReportWriter().render(ReportFixtures.reportWithoutAdvisoryScan());
+
+        assertFalse(unchecked.contains("0 known vulnerabilities"),
+                "an unscanned dependency set must not be reported as a clean one");
+        assertTrue(unchecked.contains("Known vulnerabilities: <strong>not checked</strong>"), "must say so");
+    }
 }

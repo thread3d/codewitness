@@ -30,14 +30,27 @@ public final class PythonScripts {
         Path directory = context.artifacts().artifactsDirectory().resolve("python");
         return new Scripts(
                 writeScript(directory, "cw_build_check.py", BUILD_CHECK),
-                writeScript(directory, "cw_unittest_runner.py", UNITTEST_RUNNER),
+                writeScript(unittestRunnerPath(context), UNITTEST_RUNNER),
                 writeScript(directory, "cw_mutation.py", MUTATION));
     }
 
+    /**
+     * Where {@link #write} puts the standard-library unittest runner.
+     *
+     * <p>Deriving the path without writing the script lets a caller name the command that will be run
+     * - for evidence, say - without side effects on the run directory.
+     */
+    public static Path unittestRunnerPath(VerificationContext context) {
+        return context.artifacts().artifactsDirectory().resolve("python").resolve("cw_unittest_runner.py");
+    }
+
     private static Path writeScript(Path directory, String fileName, String content) {
-        Path file = directory.resolve(fileName);
+        return writeScript(directory.resolve(fileName), content);
+    }
+
+    private static Path writeScript(Path file, String content) {
         try {
-            Files.createDirectories(directory);
+            Files.createDirectories(file.getParent());
             Files.writeString(file, content, StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new UncheckedIOException("cannot write helper script " + file, e);

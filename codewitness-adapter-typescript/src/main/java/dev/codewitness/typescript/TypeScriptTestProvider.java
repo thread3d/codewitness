@@ -50,7 +50,6 @@ public final class TypeScriptTestProvider implements VerificationTools.TestRunne
             return TestResult.notExecuted("no Node-runnable test file was detected under "
                     + (project.testSourceDirs().isEmpty() ? "the project" : project.testSourceDirs()));
         }
-        String node = NodeRuntime.node(project, context);
         Path report = context.artifacts().artifactsDirectory().resolve("typescript/tests/node-junit.xml");
         try {
             Files.createDirectories(report.getParent());
@@ -60,9 +59,7 @@ public final class TypeScriptTestProvider implements VerificationTools.TestRunne
         }
         context.emit("tests", "running node --test over " + files.size() + " test file(s)");
 
-        List<String> command = new ArrayList<>(List.of(
-                node, "--test", "--test-reporter=junit", "--test-reporter-destination=" + report));
-        files.forEach(file -> command.add(file.toString()));
+        List<String> command = testCommand(context);
 
         ProcessResult result = context.runner().run(ProcessSpec.builder(command, context.projectRoot())
                 .environment(NodeRuntime.environment(context))
@@ -84,6 +81,20 @@ public final class TypeScriptTestProvider implements VerificationTools.TestRunne
         reports.add(report);
         return TypeScriptTestReportParser.parse(report,
                 "parsed from the Node JUnit report; " + result.describeOutcome(), reports);
+    }
+
+    @Override
+    public List<String> testCommand(VerificationContext context) {
+        List<Path> files = testFiles(context);
+        if (files.isEmpty()) {
+            return List.of();
+        }
+        Path report = context.artifacts().artifactsDirectory().resolve("typescript/tests/node-junit.xml");
+        List<String> command = new ArrayList<>(List.of(
+                NodeRuntime.node(context.projectInfo(), context),
+                "--test", "--test-reporter=junit", "--test-reporter-destination=" + report));
+        files.forEach(file -> command.add(file.toString()));
+        return List.copyOf(command);
     }
 
     @Override

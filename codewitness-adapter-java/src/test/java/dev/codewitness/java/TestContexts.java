@@ -69,7 +69,19 @@ public final class TestContexts {
 
     /** A context with the given scenarios declared in code. */
     public static VerificationContext context(Path root, Path runDirectory, List<Scenario> scenarios) {
-        ProjectRef projectRef = ProjectRef.of(root);
+        return context(projectInfo(root), runDirectory, scenarios);
+    }
+
+    /**
+     * A context whose project info the caller supplies.
+     *
+     * <p>Needed when a test cares about the declared build system: the convenience overload above
+     * always reports {@code BuildSystemId.NONE}, so a provider that resolves {@code mvnw} or Gradle
+     * would find nothing to run.
+     */
+    public static VerificationContext context(ProjectInfo info, Path runDirectory, List<Scenario> scenarios) {
+        ProjectRef projectRef = info.project();
+        Path root = projectRef.root();
         WorkspaceManager.Workspace workspace =
                 WorkspaceManager.prepare(projectRef, runDirectory, WorkspaceManager.Mode.IN_PLACE);
         ExecutionSandbox sandbox = new LocalProcessSandbox(List.of(root, runDirectory));
@@ -81,7 +93,7 @@ public final class TestContexts {
         return VerificationContext.builder()
                 .runId("CW-2026-01-01-TEST0")
                 .projectRef(projectRef)
-                .projectInfo(projectInfo(root))
+                .projectInfo(info)
                 .config(config)
                 .workspace(workspace)
                 .artifacts(new ArtifactStore(runDirectory))

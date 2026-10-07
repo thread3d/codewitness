@@ -4,6 +4,7 @@ import dev.codewitness.core.evidence.Evidence;
 import dev.codewitness.core.evidence.EvidenceConfidence;
 import dev.codewitness.core.evidence.EvidenceStatus;
 import dev.codewitness.core.evidence.EvidenceType;
+import dev.codewitness.core.model.AdvisoryScan;
 import dev.codewitness.core.model.CoverageReport;
 import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.DependencyVulnerability;
@@ -1527,7 +1528,14 @@ public final class SqliteVerificationStore implements VerificationStore {
                 "note", dependencies.note(),
                 "totalDependencies", dependencies.totalDependencies(),
                 "directDependencies", dependencies.directDependencies(),
-                "vulnerabilities", vulnerabilities);
+                "dependenciesByModule", dependencies.dependenciesByModule(),
+                "vulnerabilities", vulnerabilities,
+                "advisoryScanPerformed", dependencies.advisoryScan().performed(),
+                "advisoryScanSource", dependencies.advisoryScan().source(),
+                "advisoryScanEndpoint", dependencies.advisoryScan().endpoint(),
+                "advisoryScanPerformedAt", dependencies.advisoryScan().performedAt() == null
+                        ? null : dependencies.advisoryScan().performedAt().toString(),
+                "advisoryScanNote", dependencies.advisoryScan().note());
     }
 
     private static Map<String, Object> reproductionMap(Counterexample.ReproductionRecipe recipe) {
@@ -1619,13 +1627,35 @@ public final class SqliteVerificationStore implements VerificationStore {
                     Json.string(map, "description"),
                     Json.string(map, "source")));
         }
+        // Rows written before advisory scanning existed simply have no scan fields; they come back as
+        // "not performed" rather than as a scan that found nothing.
         return new DependencyReport(
                 Json.bool(row, "analysed", false),
                 Json.string(row, "tool", "unknown"),
                 Json.string(row, "note"),
                 Json.integer(row, "totalDependencies", 0),
                 Json.strings(row.get("directDependencies")),
-                vulnerabilities);
+                stringLists(row.get("dependenciesByModule")),
+                vulnerabilities,
+                new AdvisoryScan(
+                        Json.bool(row, "advisoryScanPerformed", false),
+                        Json.string(row, "advisoryScanSource", "none"),
+                        Json.string(row, "advisoryScanEndpoint"),
+                        instant(Json.string(row, "advisoryScanPerformedAt")),
+                        Json.string(row, "advisoryScanNote")));
+    }
+
+    /** @return a map of string lists, as stored for the per-module dependency breakdown. */
+    private static Map<String, List<String>> stringLists(Object value) {
+        Map<String, List<String>> result = new java.util.LinkedHashMap<>();
+        if (value instanceof Map<?, ?> map) {
+            map.forEach((module, coordinates) -> {
+                if (module != null) {
+                    result.put(String.valueOf(module), Json.strings(coordinates));
+                }
+            });
+        }
+        return Map.copyOf(result);
     }
 
     // ------------------------------------------------------------- utilities

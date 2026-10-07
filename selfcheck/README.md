@@ -77,6 +77,47 @@ kept coverage from being measured. Both are fixed.
 Both findings are instances of the same principle the project documents: infrastructure problems and
 code defects stay distinguishable, and a tool that cannot run something says so instead of guessing.
 
+## Dependency advisories
+
+`security.vulnerabilities` is enabled in [`codewitness.yaml`](codewitness.yaml), so the self-check asks
+OSV which of CodeWitness's own resolved dependencies carry a known advisory. This is the one part of a
+run that talks to a third party, which is why it is off by default and why the report always names the
+service and the time it was asked.
+
+It is also the check that was missing: the report used to end its dependencies section with
+"N dependencies, 0 known vulnerabilities" whether or not anything had been looked for, which reads as
+a clean bill of health. It now says "not checked" unless an advisory source was actually consulted, and
+the raw responses are kept under `artifacts/vulnerabilities/` so a finding can be traced back.
+
+Under the contract's `fail_on: high`, an advisory at that severity or above **fails** the requirements
+whose own module resolves the vulnerable artifact. The attribution is deliberately narrow — the
+counterexample names the module that resolves the artifact — so a requirement in one module is never
+refuted by a dependency that only another module pulls in, and an advisory whose severity the source did
+not state refutes nothing.
+
+Turning this check on the project itself found something, exactly as it should:
+
+1. With Jackson at **2.17.1** the scan reported 15 advisories (8 high, 7 medium) in `jackson-core` and
+   `jackson-databind`. The self-check went from green to `FAILED` — six failed requirements, exit `1` —
+   because CodeWitness's requirements sit in `codewitness-core`, which resolves Jackson. That was the
+   contract working, not a regression: the project shipped dependencies with high severity advisories,
+   and the report said so in a verdict rather than in a footnote.
+2. Jackson was therefore upgraded. **`2.21.7` is the earliest release with no advisory affecting the
+   four Jackson artifacts this project uses**, checked against OSV; 2.18.8, 2.19.4 and 2.20.2 still
+   carried them.
+
+The self-check is green again, and this time the zero is a measurement rather than an absence:
+
+```
+18 dependencies, 0 advisories (source osv, checked <run time>)
+overall PARTIALLY_VERIFIED (6 verified, 1 unverified), verify exit code 0
+```
+
+This is a moving target. The dependencies are clean as of the run recorded in the report, against what
+OSV had recorded at that moment; a later advisory can turn this red again without anything in the
+repository changing. That is the honest reading of an empty result, and the report says so next to the
+count.
+
 ## Known false positives in the report
 
 The static-analysis section reports 18 findings (1 high, 17 medium). They are heuristic and do not

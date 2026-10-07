@@ -1,5 +1,6 @@
 package dev.codewitness.core.config;
 
+import dev.codewitness.core.model.Severity;
 import dev.codewitness.core.result.Budget;
 
 import java.nio.file.Path;
@@ -65,6 +66,8 @@ public record VerificationConfig(
                 .append(propertyTesting.enabled()).append('|').append(propertyTesting.maxScenarios()).append('|')
                 .append(staticAnalysis.enabled()).append('|').append(staticAnalysis.analyzers()).append('|')
                 .append(security.enabled()).append('|')
+                .append(security.vulnerabilities().enabled()).append('|')
+                .append(security.vulnerabilities().source()).append('|')
                 .append(llm.enabled()).append('|').append(llm.provider()).append('|').append(llm.model()).append('|')
                 .append(report).append('|').append(sandbox).append('|');
         for (Scenario scenario : scenarios) {
@@ -137,9 +140,60 @@ public record VerificationConfig(
     }
 
     /** Security analysis configuration. */
-    public record Security(boolean enabled) {
+    public record Security(boolean enabled, VulnerabilityScan vulnerabilities) {
+
+        public Security {
+            vulnerabilities = vulnerabilities == null ? VulnerabilityScan.disabled() : vulnerabilities;
+        }
+
+        /** Source analysis only; no advisory source is consulted. */
+        public Security(boolean enabled) {
+            this(enabled, VulnerabilityScan.disabled());
+        }
+
         public static Security defaults() {
-            return new Security(true);
+            return new Security(true, VulnerabilityScan.disabled());
+        }
+    }
+
+    /**
+     * Dependency advisory scanning.
+     *
+     * <p>Disabled by default, and deliberately so: it is the one part of a run that asks a third party
+     * for information, so it is opt-in in the same way as the language model. The report always records
+     * which service was asked and when - and, when it was not asked, says that the dependencies were
+     * <em>not checked</em> rather than reporting zero vulnerabilities.
+     *
+     * @param enabled         whether to consult an advisory service at all
+     * @param source          advisory source to query; {@code osv} is the only one implemented
+     * @param endpoint        base URL of the service
+     * @param timeout         per-request timeout
+     * @param maxDependencies how many coordinates may be queried in one run
+     * @param failOn          advisories at this severity or above fail the requirements their module
+     *                        ships; {@code null} ({@code fail_on: none}) reports them without failing
+     *                        anything, and {@link Severity#UNKNOWN} is never a failure because an
+     *                        advisory that states no severity refutes nothing
+     */
+    public record VulnerabilityScan(
+            boolean enabled,
+            String source,
+            String endpoint,
+            Duration timeout,
+            int maxDependencies,
+            Severity failOn) {
+
+        public VulnerabilityScan {
+            source = source == null || source.isBlank() ? "osv" : source;
+            endpoint = endpoint == null || endpoint.isBlank() ? "https://api.osv.dev" : endpoint;
+            timeout = timeout == null || timeout.isZero() || timeout.isNegative()
+                    ? Duration.ofSeconds(30) : timeout;
+            maxDependencies = maxDependencies <= 0 ? 500 : maxDependencies;
+        }
+
+        /** The default contract: a HIGH or CRITICAL advisory fails the requirement it ships with. */
+        public static VulnerabilityScan disabled() {
+            return new VulnerabilityScan(false, "osv", "https://api.osv.dev", Duration.ofSeconds(30), 500,
+                    Severity.HIGH);
         }
     }
 

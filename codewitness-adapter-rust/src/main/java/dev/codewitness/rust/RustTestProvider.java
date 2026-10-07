@@ -39,12 +39,10 @@ public final class RustTestProvider implements VerificationTools.TestRunner {
 
     @Override
     public TestResult runTests(VerificationContext context) {
-        ProjectInfo project = context.projectInfo();
-        if (!Cargo.hasManifest(context)) {
+        List<String> command = testCommand(context);
+        if (command.isEmpty()) {
             return TestResult.notExecuted("no Cargo.toml was found, so the tests cannot be run");
         }
-        String cargo = Cargo.cargo(project, context);
-        List<String> command = List.of(cargo, "test", "--no-fail-fast");
         context.emit("tests", "running cargo test");
 
         ProcessResult result = context.runner().run(ProcessSpec.builder(command, context.projectRoot())
@@ -62,6 +60,15 @@ public final class RustTestProvider implements VerificationTools.TestRunner {
         }
         return RustTestReportParser.parse(result.stdout(), result.stderr(),
                 "parsed from cargo test output; " + result.describeOutcome(), reports);
+    }
+
+    @Override
+    public List<String> testCommand(VerificationContext context) {
+        if (!Cargo.hasManifest(context)) {
+            return List.of();
+        }
+        // --no-fail-fast so one failing test binary does not hide the rest of the crate.
+        return List.of(Cargo.cargo(context.projectInfo(), context), "test", "--no-fail-fast");
     }
 
     @Override

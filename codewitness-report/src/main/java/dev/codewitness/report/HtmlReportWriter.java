@@ -1,6 +1,7 @@
 package dev.codewitness.report;
 
 import dev.codewitness.core.evidence.Evidence;
+import dev.codewitness.core.model.AdvisoryScan;
 import dev.codewitness.core.model.CoverageReport;
 import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.DependencyVulnerability;
@@ -578,8 +579,22 @@ public final class HtmlReportWriter {
                     .append("</p>\n");
         } else {
             html.append("<p>Tool <code>").append(esc(dependencies.tool())).append("</code>: ")
-                    .append(dependencies.totalDependencies()).append(" dependencies, ")
-                    .append(dependencies.vulnerabilities().size()).append(" known vulnerabilities.</p>\n");
+                    .append(dependencies.totalDependencies()).append(" dependencies.</p>\n");
+            // Never state a vulnerability count without saying whether anything was looked for: "0 known
+            // vulnerabilities" reads as a clean bill of health, and a run that consulted nothing has not
+            // earned the right to say it.
+            AdvisoryScan scan = dependencies.advisoryScan();
+            if (scan.performed()) {
+                html.append("<p>Known vulnerabilities: <strong>").append(dependencies.vulnerabilities().size())
+                        .append("</strong> (source <code>").append(esc(scan.source())).append("</code>");
+                if (scan.performedAt() != null) {
+                    html.append(", checked ").append(esc(scan.performedAt().toString()));
+                }
+                html.append(")</p>\n");
+            } else {
+                html.append("<p class=\"warn\">Known vulnerabilities: <strong>not checked</strong> &mdash; ")
+                        .append(esc(scan.note())).append("</p>\n");
+            }
         }
         if (!dependencies.vulnerabilities().isEmpty()) {
             html.append("<table>\n<thead><tr><th>Dependency</th><th>Version</th><th>Advisory</th>"
@@ -593,6 +608,10 @@ public final class HtmlReportWriter {
                         .append(esc(vulnerability.source())).append("</td></tr>\n");
             }
             html.append("</tbody>\n</table>\n");
+        }
+        if (!dependencies.advisoryScan().note().isBlank()) {
+            html.append("<p class=\"muted\">Advisory scan: ").append(esc(dependencies.advisoryScan().note()))
+                    .append("</p>\n");
         }
         if (!dependencies.note().isBlank()) {
             html.append("<p class=\"muted\">Note: ").append(esc(dependencies.note())).append("</p>\n");

@@ -35,7 +35,17 @@ public final class MavenBuildSystem implements JavaBuildSystem {
     @Override
     public List<String> testGoals() {
         List<String> goals = new ArrayList<>(BASE);
-        goals.add("surefire:test");
+        // The `test` lifecycle phase, not the `surefire:test` plugin goal. A bare goal invocation
+        // resolves inter-module dependencies from the local repository instead of the reactor, so on
+        // a multi-module project it would test against whatever stale artifacts happen to be
+        // installed there. Running the phase keeps the reactor's own modules on the classpath.
+        //
+        // `-Dmaven.test.failure.ignore=true` keeps the reactor going after a module whose tests fail.
+        // Without it Maven stops at the first failure and skips every later module, so their reports
+        // are never produced and the run silently covers only part of the project. CodeWitness reads
+        // the failures from the reports itself, so a non-zero exit code is not needed to report them.
+        goals.add("-Dmaven.test.failure.ignore=true");
+        goals.add("test");
         return goals;
     }
 

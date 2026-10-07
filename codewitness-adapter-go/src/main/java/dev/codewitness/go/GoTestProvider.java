@@ -38,11 +38,10 @@ public final class GoTestProvider implements VerificationTools.TestRunner {
 
     @Override
     public TestResult runTests(VerificationContext context) {
-        if (!GoTool.hasManifest(context)) {
+        List<String> command = testCommand(context);
+        if (command.isEmpty()) {
             return TestResult.notExecuted("no go.mod was found, so the tests cannot be run");
         }
-        String go = GoTool.go(context.projectInfo(), context);
-        List<String> command = List.of(go, "test", "-json", "-count=1", "./...");
         context.emit("tests", "running go test");
 
         ProcessResult result = context.runner().run(ProcessSpec.builder(command, context.projectRoot())
@@ -60,6 +59,15 @@ public final class GoTestProvider implements VerificationTools.TestRunner {
         }
         return GoTestReportParser.parse(result.stdout(), result.stderr(),
                 "parsed from go test -json; " + result.describeOutcome(), reports);
+    }
+
+    @Override
+    public List<String> testCommand(VerificationContext context) {
+        if (!GoTool.hasManifest(context)) {
+            return List.of();
+        }
+        // -count=1 disables the test cache so the run reflects this build, not an earlier one.
+        return List.of(GoTool.go(context.projectInfo(), context), "test", "-json", "-count=1", "./...");
     }
 
     @Override

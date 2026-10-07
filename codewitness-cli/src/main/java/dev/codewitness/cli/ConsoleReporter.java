@@ -70,6 +70,11 @@ public final class ConsoleReporter {
                 ? report.dependencies().totalDependencies() + " dependencies ("
                         + report.dependencies().note() + ")"
                 : "not analysed (" + report.dependencies().note() + ")").append('\n');
+        // Say whether anything was looked for, so the count above is not read as a clean scan.
+        sb.append("  known vulnerabilities: ").append(report.dependencies().advisoryScan().performed()
+                ? report.dependencies().vulnerabilities().size() + " ("
+                        + report.dependencies().advisoryScan().source() + ")"
+                : "not checked (" + report.dependencies().advisoryScan().note() + ")").append('\n');
 
         sb.append("\nCounterexamples\n");
         if (report.counterexamples().isEmpty()) {

@@ -56,6 +56,8 @@ public record Counterexample(
         PROPERTY_SEARCH,
         /** Static analysis demonstrated the defect directly. */
         STATIC_ANALYSIS,
+        /** An advisory service reports a vulnerable dependency that ships with the requirement's code. */
+        DEPENDENCY_ADVISORY,
         /** A language model suggested it and an independent execution confirmed it. */
         LLM_SUGGESTION_EXECUTED
     }

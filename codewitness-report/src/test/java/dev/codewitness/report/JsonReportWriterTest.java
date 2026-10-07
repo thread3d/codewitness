@@ -37,6 +37,21 @@ class JsonReportWriterTest {
     }
 
     @Test
+    void aReportThatNeverCheckedAdvisoriesSaysSoInsteadOfReportingZero() throws Exception {
+        JsonNode unchecked = MAPPER.readTree(
+                new JsonReportWriter().render(ReportFixtures.reportWithoutAdvisoryScan()))
+                .path("dependencies");
+
+        assertEquals(0, unchecked.path("vulnerabilities").asInt());
+        // The count alone would read as a clean scan; the flag is what makes it honest.
+        assertFalse(unchecked.path("vulnerabilitiesChecked").asBoolean());
+        assertEquals("none", unchecked.path("vulnerabilitySource").asText());
+        assertTrue(unchecked.path("vulnerabilityScanNote").asText().contains("no advisory source"),
+                unchecked.path("vulnerabilityScanNote").asText());
+        assertEquals(0, unchecked.path("vulnerabilityFindings").size());
+    }
+
+    @Test
     void documentContainsRequiredKeysInOrder() {
         List<String> actual = new ArrayList<>();
         Iterator<String> names = json.fieldNames();
@@ -217,21 +232,34 @@ class JsonReportWriterTest {
     @Test
     void securityCountsOnlySecurityFindings() {
         JsonNode security = json.path("security");
-        assertEquals(List.of("critical", "high", "medium", "low", "info", "total"), keys(security));
+        // One column per severity, in enum order; `unknown` exists so that a source which cannot state
+        // a severity is counted rather than dropped.
+        assertEquals(List.of("critical", "high", "medium", "low", "info", "unknown", "total"), keys(security));
         assertEquals(0, security.path("critical").asInt());
         assertEquals(1, security.path("high").asInt());
         assertEquals(0, security.path("medium").asInt());
+        assertEquals(0, security.path("unknown").asInt());
         assertEquals(1, security.path("total").asInt());
     }
 
     @Test
     void dependenciesEnvironmentPhasesBudgetAndLimitations() {
         JsonNode dependencies = json.path("dependencies");
-        assertEquals(List.of("analysed", "tool", "note", "totalDependencies", "vulnerabilities"),
+        assertEquals(List.of("analysed", "tool", "note", "totalDependencies", "vulnerabilities",
+                        "vulnerabilitiesChecked", "vulnerabilitySource", "vulnerabilityEndpoint",
+                        "vulnerabilitiesCheckedAt", "vulnerabilityScanNote", "vulnerabilityFindings"),
                 keys(dependencies));
         assertTrue(dependencies.path("analysed").asBoolean());
         assertEquals(12, dependencies.path("totalDependencies").asInt());
         assertEquals(1, dependencies.path("vulnerabilities").asInt());
+        // A count is only meaningful next to whether anything was looked for.
+        assertTrue(dependencies.path("vulnerabilitiesChecked").asBoolean());
+        assertEquals("osv", dependencies.path("vulnerabilitySource").asText());
+        JsonNode finding = dependencies.path("vulnerabilityFindings").get(0);
+        assertEquals(List.of("dependency", "version", "vulnerabilityId", "severity", "description", "source"),
+                keys(finding));
+        assertEquals("CVE-2024-0001", finding.path("vulnerabilityId").asText());
+        assertEquals("HIGH", finding.path("severity").asText());
 
         JsonNode environment = json.path("environment");
         assertEquals(List.of("codewitnessVersion", "javaVersion", "javaVendor", "operatingSystem", "buildTool",

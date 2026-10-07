@@ -49,6 +49,24 @@ public final class VerificationTools {
         TestResult runTests(VerificationContext context);
 
         /**
+         * The command {@link #runTests} executes, so the test evidence can name the invocation that
+         * produced its result.
+         *
+         * <p>The engine cannot derive this for itself: only the language adapter knows how its tests
+         * are invoked. An empty list means "no command is available", and the evidence record says so
+         * rather than attributing the result to some other command that happened to run earlier.
+         *
+         * <p>Named distinctly from {@link DependencyAnalyzer#dependencyCommand} because one class may
+         * implement both interfaces, and a single shared name would silently answer for the wrong one.
+         *
+         * @param context the run context
+         * @return argv style command, or an empty list when the adapter runs no command
+         */
+        default List<String> testCommand(VerificationContext context) {
+            return List.of();
+        }
+
+        /**
          * Builds the command that re-runs one already-executed test.
          *
          * <p>The core needs a replay command to put in a counterexample, but only the language
@@ -107,6 +125,20 @@ public final class VerificationTools {
         boolean supports(ProjectInfo project);
 
         DependencyReport analyseDependencies(VerificationContext context);
+
+        /**
+         * The command {@link #analyseDependencies} executes, so the dependency evidence can name the
+         * invocation that produced it.
+         *
+         * <p>An empty list means the analysis reads the project's manifests directly and runs no
+         * command, which the evidence record reflects instead of leaving a blank field.
+         *
+         * @param context the run context
+         * @return argv style command, or an empty list when no command is run
+         */
+        default List<String> dependencyCommand(VerificationContext context) {
+            return List.of();
+        }
     }
 
     /**

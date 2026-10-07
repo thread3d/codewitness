@@ -8,7 +8,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.codewitness.core.evidence.Evidence;
 import dev.codewitness.core.model.CoverageReport;
+import dev.codewitness.core.model.AdvisoryScan;
 import dev.codewitness.core.model.DependencyReport;
+import dev.codewitness.core.model.DependencyVulnerability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.FindingCategory;
 import dev.codewitness.core.model.ModuleInfo;
@@ -499,6 +501,26 @@ public final class JsonReportWriter {
         node.put("note", dependencies.note());
         node.put("totalDependencies", dependencies.totalDependencies());
         node.put("vulnerabilities", dependencies.vulnerabilities().size());
+        // "0 vulnerabilities" only means something once the report also says whether anything was looked
+        // for. Without these fields a consumer cannot tell a clean scan from no scan at all.
+        AdvisoryScan scan = dependencies.advisoryScan();
+        node.put("vulnerabilitiesChecked", scan.performed());
+        node.put("vulnerabilitySource", scan.source());
+        node.put("vulnerabilityEndpoint", scan.endpoint());
+        node.put("vulnerabilitiesCheckedAt", scan.performedAt() == null ? null : scan.performedAt().toString());
+        node.put("vulnerabilityScanNote", scan.note());
+        ArrayNode findings = mapper.createArrayNode();
+        for (DependencyVulnerability vulnerability : dependencies.vulnerabilities()) {
+            ObjectNode entry = mapper.createObjectNode();
+            entry.put("dependency", vulnerability.dependency());
+            entry.put("version", vulnerability.version());
+            entry.put("vulnerabilityId", vulnerability.vulnerabilityId());
+            entry.put("severity", vulnerability.severity().name());
+            entry.put("description", vulnerability.description());
+            entry.put("source", vulnerability.source());
+            findings.add(entry);
+        }
+        node.set("vulnerabilityFindings", findings);
         return node;
     }
 

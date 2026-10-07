@@ -47,7 +47,10 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>25</maven.compiler.release>
     <junit.version>5.10.2</junit.version>
-    <jackson.version>2.17.1</jackson.version>
+    <!-- Jackson's own BOM pins every Jackson artifact to one version. 2.17.1 carried high severity
+         advisories in jackson-core and jackson-databind; 2.21.7 is the earliest release with none
+         affecting the artifacts this project uses, checked against OSV. -->
+    <jackson.version>2.21.7</jackson.version>
     <picocli.version>4.7.6</picocli.version>
     <sqlite.version>3.45.3.0</sqlite.version>
     <snakeyaml.version>2.2</snakeyaml.version>

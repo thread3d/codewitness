@@ -1,5 +1,7 @@
 package dev.codewitness.core.config;
 
+import dev.codewitness.core.model.Severity;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -141,6 +143,54 @@ class ConfigLoaderTest {
         assertEquals("MY_KEY", enabled.llm().apiKeyEnvironmentVariable());
         assertEquals(12, enabled.llm().maxCalls());
         assertEquals(0.5, enabled.llm().temperature(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("advisory scanning is parsed but off unless explicitly enabled")
+    void advisoryScanSectionIsParsed() {
+        VerificationConfig offByDefault = load("""
+                security:
+                  enabled: true
+                  vulnerabilities:
+                    endpoint: https://api.osv.dev
+                """).config();
+        assertFalse(offByDefault.security().vulnerabilities().enabled(),
+                "consulting a third party must be opt-in");
+        assertEquals("osv", offByDefault.security().vulnerabilities().source());
+        assertEquals(Severity.HIGH, offByDefault.security().vulnerabilities().failOn(),
+                "the contract is that a HIGH advisory fails a requirement");
+
+        VerificationConfig enabled = load("""
+                security:
+                  vulnerabilities:
+                    enabled: true
+                    source: osv
+                    endpoint: https://mirror.internal/osv
+                    timeout: 5s
+                    max_dependencies: 25
+                """).config();
+        assertTrue(enabled.security().vulnerabilities().enabled());
+        assertEquals("https://mirror.internal/osv", enabled.security().vulnerabilities().endpoint());
+        assertEquals(Duration.ofSeconds(5), enabled.security().vulnerabilities().timeout());
+        assertEquals(25, enabled.security().vulnerabilities().maxDependencies());
+
+        assertNull(load("""
+                security:
+                  vulnerabilities:
+                    fail_on: none
+                """).config().security().vulnerabilities().failOn(),
+                "fail_on: none reports advisories without failing anything");
+        assertEquals(Severity.CRITICAL, load("""
+                security:
+                  vulnerabilities:
+                    fail_on: critical
+                """).config().security().vulnerabilities().failOn());
+        assertEquals(Severity.HIGH, load("""
+                security:
+                  vulnerabilities:
+                    fail_on: hgih
+                """).config().security().vulnerabilities().failOn(),
+                "a typo must tighten the gate, never quietly remove it");
     }
 
     @Test

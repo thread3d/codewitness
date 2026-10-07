@@ -6,7 +6,12 @@ public enum Severity {
     HIGH(1),
     MEDIUM(2),
     LOW(3),
-    INFO(4);
+    INFO(4),
+    /**
+     * The advisory did not state a severity. It sorts last, but that is an ordering convenience, not a
+     * judgement: an advisory of unknown severity must never be read as a harmless one.
+     */
+    UNKNOWN(5);
 
     private final int rank;
 

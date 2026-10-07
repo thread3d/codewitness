@@ -6,6 +6,7 @@ import dev.codewitness.core.evidence.EvidenceStatus;
 import dev.codewitness.core.evidence.EvidenceType;
 import dev.codewitness.core.model.CoverageReport;
 import dev.codewitness.core.model.DependencyReport;
+import dev.codewitness.core.model.AdvisoryScan;
 import dev.codewitness.core.model.DependencyVulnerability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.FindingCategory;
@@ -69,6 +70,23 @@ final class ReportFixtures {
 
     static VerificationReport report() {
         return reportWithFindings(findings());
+    }
+
+    /** @return the standard fixture, but with dependencies whose advisories were never looked for. */
+    static VerificationReport reportWithoutAdvisoryScan() {
+        return VerificationReport.builder(RUN_ID, project(), requirements())
+                .verdicts(List.of(verifiedVerdict(), failedVerdict()))
+                .evidence(evidence())
+                .counterexamples(List.of(counterexample()))
+                .tests(tests())
+                .coverage(coverage())
+                .mutation(mutation())
+                .findings(findings())
+                .dependencies(new DependencyReport(true, "maven-dependencies", "inventory only", 12,
+                        List.of("com.example:lib:1.0"), List.of()))
+                .run(run())
+                .limitations(List.of(LIMITATION))
+                .build();
     }
 
     /** @return the standard fixture with a different set of analyzer findings. */
@@ -282,7 +300,9 @@ final class ReportFixtures {
         DependencyVulnerability vulnerability = new DependencyVulnerability("com.example:lib", "1.0",
                 "CVE-2024-0001", Severity.HIGH, "Prototype pollution in the JSON parser.", "NVD");
         return new DependencyReport(true, "owasp-dependency-check", "", 12,
-                List.of("com.example:lib:1.0"), List.of(vulnerability));
+                List.of("com.example:lib:1.0"), List.of(vulnerability),
+                AdvisoryScan.performed("osv", "https://api.osv.dev", STARTED_AT,
+                        "queried osv for 1 dependency(ies) with a resolved version; 1 advisory(ies) matched"));
     }
 
     static VerificationRun run() {

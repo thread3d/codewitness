@@ -49,10 +49,8 @@ public final class PythonTestProvider implements VerificationTools.TestRunner {
         if (testDirs.isEmpty()) {
             return TestResult.notExecuted("no Python test directory was detected");
         }
-        String interpreter = interpreter(project, context);
-        PythonScripts.Scripts scripts = PythonScripts.write(context);
+        PythonScripts.write(context); // materialise the helper script the command below refers to
         boolean pytest = usePytest(project);
-
         Path report = context.artifacts().artifactsDirectory().resolve("python/tests/junit.xml");
         PythonTestReportParser.deleteIfExists(report);
         try {
@@ -60,7 +58,7 @@ public final class PythonTestProvider implements VerificationTools.TestRunner {
         } catch (IOException e) {
             return TestResult.notExecuted("cannot prepare the JUnit report directory: " + e);
         }
-        List<String> command = command(interpreter, scripts, project, context.projectRoot(), testDirs, pytest, report);
+        List<String> command = testCommand(context);
         context.emit("tests", "running " + (pytest ? "pytest" : "unittest") + " for " + testDirs.size() + " directory(ies)");
 
         ProcessSpec spec = ProcessSpec.builder(command, context.projectRoot())
@@ -76,6 +74,21 @@ public final class PythonTestProvider implements VerificationTools.TestRunner {
         }
         return PythonTestReportParser.parse(List.of(report), context.projectRoot(),
                 "parsed from " + (pytest ? "pytest" : "unittest") + " JUnit XML; " + result.describeOutcome());
+    }
+
+    @Override
+    public List<String> testCommand(VerificationContext context) {
+        ProjectInfo project = context.projectInfo();
+        List<Path> testDirs = project.testSourceDirs();
+        if (testDirs.isEmpty()) {
+            return List.of();
+        }
+        // The unittest runner's path is derived, never written here, so asking for the command has no
+        // side effect on the run directory.
+        Path report = context.artifacts().artifactsDirectory().resolve("python/tests/junit.xml");
+        List<String> command = command(interpreter(project, context), PythonScripts.unittestRunnerPath(context),
+                project, context.projectRoot(), testDirs, usePytest(project), report);
+        return List.copyOf(command);
     }
 
     @Override
@@ -111,7 +124,7 @@ public final class PythonTestProvider implements VerificationTools.TestRunner {
 
     private static List<String> command(
             String interpreter,
-            PythonScripts.Scripts scripts,
+            Path unittestRunner,
             ProjectInfo project,
             Path projectRoot,
             List<Path> testDirs,
@@ -131,7 +144,7 @@ public final class PythonTestProvider implements VerificationTools.TestRunner {
             testDirs.forEach(directory -> command.add(directory.toString()));
             return command;
         }
-        command.add(scripts.unittestRunner().toString());
+        command.add(unittestRunner.toString());
         command.add("--xml");
         command.add(report.toString());
         command.add("--root");

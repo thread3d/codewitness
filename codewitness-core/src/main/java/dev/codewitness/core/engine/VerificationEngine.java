@@ -1,6 +1,7 @@
 package dev.codewitness.core.engine;
 
 import dev.codewitness.core.config.VerificationConfig;
+import dev.codewitness.core.engine.strategy.DependencyAdvisoryStrategy;
 import dev.codewitness.core.engine.strategy.ExistingTestsStrategy;
 import dev.codewitness.core.engine.strategy.GeneratedTestsStrategy;
 import dev.codewitness.core.engine.strategy.LlmAdvisoryStrategy;
@@ -57,6 +58,7 @@ import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.core.spi.VerificationStrategy;
+import dev.codewitness.core.vulnerability.OsvAdvisoryScanner;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -249,13 +251,18 @@ public final class VerificationEngine {
         // ---------------------------------------------------------------- existing tests
         if (!buildBlocked && config.tests().enabled() && adapter.get().capabilities().contains(Capability.TEST)) {
             phases.add(runPhase("tests", listener, () -> {
-                TestResult tests = firstTestRunner(context)
+                Optional<VerificationTools.TestRunner> testRunner = firstTestRunner(context);
+                TestResult tests = testRunner
                         .map(r -> r.runTests(context))
                         .orElseGet(() -> adapter.get().runTests(context));
+                // Evidence must name the command that produced it. The build command is not that
+                // command: it compiles without running tests, so recording it would describe an
+                // invocation that cannot have yielded the result below.
+                List<String> testCommand = testRunner.map(r -> r.testCommand(context)).orElseGet(List::of);
                 state.existingTests(tests);
                 Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.TEST)
                         .description("Existing tests: " + tests.describe())
-                        .command(state.build().command())
+                        .command(testCommand)
                         .confidence(EvidenceConfidence.DETERMINISTIC)
                         .status(!tests.executed() ? EvidenceStatus.INCONCLUSIVE
                                 : (tests.anyFailure() ? EvidenceStatus.REFUTES : EvidenceStatus.SUPPORTS))
@@ -321,19 +328,40 @@ public final class VerificationEngine {
                 DependencyReport report = analyzers.isEmpty()
                         ? DependencyReport.notAnalysed("none", "no dependency analyzer registered")
                         : analyzers.getFirst().analyseDependencies(context);
-                state.dependencies(report);
+                List<String> dependencyCommand = analyzers.isEmpty()
+                        ? List.of() : analyzers.getFirst().dependencyCommand(context);
+                DependencyReport scanned = report;
+                List<Path> advisoryArtifacts = new ArrayList<>();
+                if (report.analysed() && config.security().vulnerabilities().enabled()) {
+                    OsvAdvisoryScanner.Scan scan = OsvAdvisoryScanner.scan(
+                            config.security().vulnerabilities(), report.directDependencies(), artifacts);
+                    scanned = report.withAdvisoryScan(scan.coverage(), scan.vulnerabilities());
+                    advisoryArtifacts.addAll(scan.artifacts());
+                    listener.onEvent("dependencies", "advisory scan: " + scan.coverage().note());
+                }
+                state.dependencies(scanned);
                 Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.DEPENDENCY_SCAN)
-                        .description("Dependency analysis: " + report.totalDependencies() + " dependencies, "
-                                + report.vulnerabilities().size() + " known vulnerabilities")
+                        .description("Dependency analysis: " + scanned.totalDependencies() + " dependencies; "
+                                + (scanned.advisoryScan().performed()
+                                        ? scanned.vulnerabilities().size() + " known vulnerabilities"
+                                        : "vulnerabilities not checked"))
+                        .command(dependencyCommand)
                         .confidence(EvidenceConfidence.DETERMINISTIC)
                         .status(EvidenceStatus.INCONCLUSIVE)
-                        .result(report.analysed() ? report.totalDependencies() + " dependencies"
-                                : "not analysed: " + report.note())
-                        .metadata("vulnerabilities", report.vulnerabilities().size())
+                        .result(scanned.analysed() ? scanned.totalDependencies() + " dependencies"
+                                : "not analysed: " + scanned.note())
+                        .output(scanned.advisoryScan().performed()
+                                ? "advisory source " + scanned.advisoryScan().source() + " at "
+                                        + scanned.advisoryScan().endpoint() + ": " + scanned.advisoryScan().note()
+                                : "no advisory source was consulted: " + scanned.advisoryScan().note())
+                        .metadata("vulnerabilities", scanned.vulnerabilities().size())
+                        .metadata("vulnerabilitiesChecked", scanned.advisoryScan().performed())
+                        .metadata("vulnerabilitySource", scanned.advisoryScan().source())
+                        .artifacts(advisoryArtifacts)
                         .build());
-                return new PhaseOutcome(report.analysed(), report.analysed()
-                        ? report.totalDependencies() + " dependencies" : report.note(),
-                        List.of(evidence.id()), report.analysed() ? null : report.note());
+                return new PhaseOutcome(scanned.analysed(), scanned.analysed()
+                        ? scanned.totalDependencies() + " dependencies" : scanned.note(),
+                        List.of(evidence.id()), scanned.analysed() ? null : scanned.note());
             }));
         }
 
@@ -527,6 +555,7 @@ public final class VerificationEngine {
         return List.of(
                 new ExistingTestsStrategy(mapper, providers),
                 new StaticAnalysisStrategy(mapper),
+                new DependencyAdvisoryStrategy(mapper),
                 new GeneratedTestsStrategy(providers),
                 new MutationStrategy(mapper),
                 new LlmAdvisoryStrategy());

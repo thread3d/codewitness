@@ -293,6 +293,24 @@ public final class RequirementCodeMapper {
         return List.copyOf(unmappedTestFiles);
     }
 
+    /**
+     * @return the files mapped to a requirement, as they were recorded: a declared path, or a source
+     *     file that mentions the requirement's identifier. Callers that need to know <em>where</em> a
+     *     requirement lives - to tie it to a module, say - need this direction of the mapping.
+     */
+    public Set<String> filesFor(String requirementId) {
+        Set<String> result = new LinkedHashSet<>();
+        if (requirementId == null) {
+            return result;
+        }
+        for (Map.Entry<String, Set<String>> entry : requirementIdsByAbsolutePath.entrySet()) {
+            if (entry.getValue().contains(requirementId)) {
+                result.add(entry.getKey());
+            }
+        }
+        return result;
+    }
+
     public boolean hasAnyMapping() {
         return !requirementIdsByAbsolutePath.isEmpty() || !testClassesByRequirement.isEmpty();
     }

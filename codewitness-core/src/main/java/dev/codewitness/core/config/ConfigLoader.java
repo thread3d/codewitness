@@ -1,5 +1,7 @@
 package dev.codewitness.core.config;
 
+import dev.codewitness.core.model.Severity;
+
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
@@ -130,9 +132,18 @@ public final class ConfigLoader {
 
         List<Scenario> scenarios = parseScenarios(map.get("scenarios"), warnings);
 
+        Map<String, Object> vulnerabilitiesMap = mapOf(securityMap, "vulnerabilities");
+        VerificationConfig.VulnerabilityScan vulnerabilityScan = new VerificationConfig.VulnerabilityScan(
+                bool(vulnerabilitiesMap, "enabled", false),
+                string(vulnerabilitiesMap, "source", "osv"),
+                string(vulnerabilitiesMap, "endpoint", "https://api.osv.dev"),
+                DurationParser.parse(string(vulnerabilitiesMap, "timeout", null), Duration.ofSeconds(30)),
+                integer(vulnerabilitiesMap, "max_dependencies", 500),
+                failOnSeverity(string(vulnerabilitiesMap, "fail_on", null)));
+
         VerificationConfig config = new VerificationConfig(project, language, limits,
                 new VerificationConfig.Toggle(bool(testsMap, "enabled", true)), mutation, propertyTesting,
-                staticAnalysis, new VerificationConfig.Security(bool(securityMap, "enabled", true)),
+                staticAnalysis, new VerificationConfig.Security(bool(securityMap, "enabled", true), vulnerabilityScan),
                 llm, report, sandbox, scenarios);
         return new Loaded(config, source, warnings);
     }
@@ -235,6 +246,32 @@ public final class ConfigLoader {
     private static String string(Map<String, Object> map, String key, String fallback) {
         Object value = map.get(key);
         return value == null ? fallback : String.valueOf(value);
+    }
+
+    /**
+     * Parses the severity at which a dependency advisory fails a requirement.
+     *
+     * <p>Absent defaults to {@code HIGH}. {@code none} means advisories are reported but fail nothing.
+     * An unrecognised value falls back to {@code HIGH} rather than to "never": a typo should tighten the
+     * gate, not quietly remove it.
+     *
+     * @return the threshold, or {@code null} when advisories must never fail a requirement
+     */
+    private static Severity failOnSeverity(String value) {
+        if (value == null || value.isBlank()) {
+            return Severity.HIGH;
+        }
+        String normalized = value.strip().toUpperCase(java.util.Locale.ROOT);
+        if (normalized.equals("NONE") || normalized.equals("OFF")) {
+            return null;
+        }
+        try {
+            // UNKNOWN is accepted here but can never match, because nothing is at least as severe as an
+            // advisory that stated no severity.
+            return Severity.valueOf(normalized);
+        } catch (IllegalArgumentException e) {
+            return Severity.HIGH;
+        }
     }
 
     private static boolean bool(Map<String, Object> map, String key, boolean fallback) {
