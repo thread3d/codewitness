@@ -1,30 +1,21 @@
 package dev.codewitness.go.mutation;
 
-import dev.codewitness.core.exec.ProcessResult;
-import dev.codewitness.core.exec.ProcessSpec;
 import dev.codewitness.core.model.LanguageId;
-import dev.codewitness.core.model.MutantStatus;
 import dev.codewitness.core.model.MutationReport;
 import dev.codewitness.core.model.ProjectInfo;
-import dev.codewitness.core.model.SurvivingMutant;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.go.GoProjectDetector;
 import dev.codewitness.go.GoTool;
+import dev.codewitness.support.mutation.CommandMutationProfile;
+import dev.codewitness.support.mutation.CommandMutationTester;
+import dev.codewitness.support.mutation.LanguageLexis;
 import dev.codewitness.support.mutation.TextMutator;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
+import java.util.Map;
 
 /**
  * Mutation testing for Go using a bounded source mutator.
@@ -41,192 +32,107 @@ import java.util.Set;
  * same convention is used for the Java adapter's PIT results, so the mutation score means the same
  * thing in every language. Surviving mutants never change a verdict: they are prominent evidence and
  * a run limitation.
+ *
+ * <p>The loop, its bounds and its restore guarantee live once in {@link CommandMutationTester}; this
+ * class supplies only the Go half through a nested profile - the manifest to look for, the sources, the
+ * go invocation and the lexis.
  */
 public final class GoMutationTester implements VerificationTools.MutationTester {
 
-    /** Upper bound on mutants per run, independent of the wall-clock budget. */
-    private static final int MAX_MUTANTS = 16;
-
-    /** Upper bound on source files considered, so a large module cannot dominate a run. */
-    private static final int MAX_FILES = 20;
-
-    /** Smallest budget a mutant may be given; a process cannot be started with a non-positive timeout. */
-    private static final Duration MINIMUM_MUTANT_BUDGET = Duration.ofMillis(1);
-
-    /** The mutator over Go's own lexis; the loop below is language independent. */
-    private static final TextMutator MUTATOR = new TextMutator(GoLexis.INSTANCE);
+    private final CommandMutationTester delegate = new CommandMutationTester(new GoMutationProfile());
 
     @Override
     public String id() {
-        return "go-text-mutation";
+        return delegate.id();
     }
 
     @Override
     public boolean supports(ProjectInfo project) {
-        return project.language().equals(LanguageId.GO);
+        return delegate.supports(project);
     }
 
     @Override
     public MutationReport analyse(VerificationContext context) {
-        if (!GoTool.hasManifest(context)) {
-            return MutationReport.notMeasured(id(), "no go.mod was found, so mutants cannot be compiled");
-        }
-        List<Path> targets = targetFiles(context);
-        if (targets.isEmpty()) {
-            return MutationReport.notMeasured(id(), "no Go source file was available to mutate");
-        }
-        context.emit("mutation", "mutating " + targets.size() + " Go source file(s) with the built-in mutator");
-
-        Duration budget = context.config().mutation().timeout();
-        Instant deadline = Instant.now().plus(budget);
-        int generated = 0;
-        int killed = 0;
-        int survived = 0;
-        int timedOut = 0;
-        int nonViable = 0;
-        List<SurvivingMutant> survivors = new ArrayList<>();
-
-        for (Path file : targets) {
-            if (generated >= MAX_MUTANTS || Instant.now().isAfter(deadline)) {
-                break;
-            }
-            String original;
-            try {
-                original = Files.readString(file, StandardCharsets.UTF_8);
-            } catch (IOException _) {
-                continue;
-            }
-            List<TextMutator.Site> sites = MUTATOR.sites(original);
-            for (TextMutator.Site site : sites) {
-                if (generated >= MAX_MUTANTS || Instant.now().isAfter(deadline)) {
-                    break;
-                }
-                Duration remaining = Duration.between(Instant.now(), deadline);
-                if (remaining.isNegative() || remaining.isZero()) {
-                    break;
-                }
-                generated++;
-                Outcome outcome = runMutant(context, file, original, site, remaining);
-                switch (outcome.status()) {
-                    case KILLED -> killed++;
-                    case TIMED_OUT -> timedOut++;
-                    case NON_VIABLE -> {
-                        nonViable++;
-                        context.emit("mutation", "mutant " + site.describe() + " at "
-                                + relative(context.projectRoot(), file) + ":" + site.line()
-                                + " did not build and is excluded: " + outcome.detail());
-                    }
-                    default -> {
-                        survived++;
-                        String relative = relative(context.projectRoot(), file);
-                        String description = "the test suite did not detect " + site.describe()
-                                + " at " + relative + ":" + site.line();
-                        survivors.add(new SurvivingMutant(
-                                String.format(Locale.ROOT, "MUT-%03d", generated),
-                                MutantStatus.SURVIVED, site.describe(), relative, null, site.line(),
-                                description,
-                                null));
-                    }
-                }
-            }
-        }
-
-        if (generated == 0) {
-            return MutationReport.notMeasured(id(),
-                    "no mutatable operator was found in the selected sources");
-        }
-        String note = "source-level mutation over " + targets.size() + " file(s); " + nonViable
-                + " non-viable mutant(s) excluded. The operator set is deliberately small (arithmetic, "
-                + "comparison boundaries, boolean operators and the predeclared boolean constants), and "
-                + "only operators surrounded by whitespace are considered.";
-        return new MutationReport(true, "go-text", note, generated, killed, survived, 0, timedOut,
-                survivors, List.of());
+        return delegate.analyse(context);
     }
 
-    /** What happened when one mutant was built and tested. */
-    private enum Status { KILLED, SURVIVED, TIMED_OUT, NON_VIABLE }
+    /** The Go half of the shared mutation loop: its manifest, its sources, its go tool and its lexis. */
+    private static final class GoMutationProfile implements CommandMutationProfile {
 
-    private record Outcome(Status status, String detail) {
-
-        Outcome(Status status) {
-            this(status, null);
+        @Override
+        public String languageName() {
+            return "Go";
         }
-    }
 
-    private Outcome runMutant(
-            VerificationContext context, Path file, String original, TextMutator.Site site, Duration remaining) {
-        Path working = file;
-        Duration runBudget = remaining.compareTo(MINIMUM_MUTANT_BUDGET) < 0 ? MINIMUM_MUTANT_BUDGET : remaining;
-        try {
-            Files.writeString(working, TextMutator.apply(original, site), StandardCharsets.UTF_8);
-            String go = GoTool.go(context.projectInfo(), context);
-            ProcessResult result = context.runner().run(ProcessSpec.builder(
-                            List.of(go, "test", "-count=1", "./..."), context.projectRoot())
-                    .environment(GoTool.environment(context))
-                    .timeout(runBudget)
-                    .maxOutputBytes(1_000_000)
-                    .build());
-            if (result.timedOut()) {
-                return new Outcome(Status.TIMED_OUT);
-            }
-            String output = result.combinedOutput();
-            if (output.contains("[build failed]") || output.contains("[setup failed]") || output.contains("no Go files")) {
+        @Override
+        public LanguageId languageId() {
+            return LanguageId.GO;
+        }
+
+        @Override
+        public String mutationTesterId() {
+            return "go-text-mutation";
+        }
+
+        @Override
+        public String mutationReportToolId() {
+            return "go-text";
+        }
+
+        @Override
+        public LanguageLexis lexis() {
+            return GoLexis.INSTANCE;
+        }
+
+        @Override
+        public String manifestProblem(VerificationContext context) {
+            return GoTool.hasManifest(context)
+                    ? null : "no go.mod was found, so mutants cannot be compiled";
+        }
+
+        @Override
+        public List<Path> sourceFiles(Path sourceRoot) {
+            return GoProjectDetector.goFiles(sourceRoot);
+        }
+
+        @Override
+        public boolean isTestPath(String relative) {
+            // Go has one source tree: tests sit next to the code as *_test.go, and testdata is data the
+            // toolchain ignores rather than a package to mutate.
+            String normalized = relative.replace('\\', '/').toLowerCase(Locale.ROOT);
+            String name = normalized.contains("/")
+                    ? normalized.substring(normalized.lastIndexOf('/') + 1) : normalized;
+            return name.endsWith("_test.go")
+                    || normalized.equals("testdata")
+                    || normalized.startsWith("testdata/")
+                    || normalized.contains("/testdata/");
+        }
+
+        @Override
+        public List<String> testCommand(ProjectInfo project, VerificationContext context) {
+            return List.of(GoTool.go(project, context), "test", "-count=1", "./...");
+        }
+
+        @Override
+        public Map<String, String> environment(VerificationContext context) {
+            return GoTool.environment(context);
+        }
+
+        @Override
+        public String nonViableReason(String output) {
+            if (output.contains("[build failed]") || output.contains("[setup failed]")
+                    || output.contains("no Go files")) {
                 // The mutant did not compile, or no package ran: it is not evidence about test strength.
-                return new Outcome(Status.NON_VIABLE, GoTool.lastLines(output, 3));
+                return GoTool.lastLines(output, 3);
             }
-            return new Outcome(result.success() ? Status.SURVIVED : Status.KILLED);
-        } catch (IOException e) {
-            throw new UncheckedIOException("cannot write mutant for " + file, e);
-        } finally {
-            try {
-                // Restore the exact original bytes even when the run failed, so a crash cannot leave a
-                // mutated tree behind for the next phase to analyse.
-                Files.writeString(working, original, StandardCharsets.UTF_8);
-            } catch (IOException _) {
-                // Restoring is best effort; the workspace is a disposable copy.
-            }
+            return null;
         }
-    }
 
-    private static List<Path> targetFiles(VerificationContext context) {
-        ProjectInfo project = context.projectInfo();
-        List<String> configured = context.config().mutation().targetClasses();
-        Set<Path> files = new LinkedHashSet<>();
-        if (configured != null && !configured.isEmpty()) {
-            for (String target : configured) {
-                Path candidate = context.projectRoot().resolve(target);
-                if (Files.isRegularFile(candidate)) {
-                    files.add(candidate);
-                }
-            }
-        } else {
-            // Go has one source tree: tests sit next to the code as *_test.go, so the same roots yield
-            // both and test files must be filtered out explicitly.
-            for (Path root : project.sourceDirs()) {
-                for (Path file : GoProjectDetector.goFiles(root)) {
-                    if (!isTestPath(relative(context.projectRoot(), file))) {
-                        files.add(file);
-                    }
-                }
-            }
+        @Override
+        public String operatorSetDescription() {
+            return "The operator set is deliberately small (arithmetic, comparison boundaries, boolean "
+                    + "operators and the predeclared boolean constants), and only operators surrounded "
+                    + "by whitespace are considered.";
         }
-        List<Path> result = new ArrayList<>(files);
-        if (result.size() > MAX_FILES) {
-            result = result.subList(0, MAX_FILES);
-        }
-        return List.copyOf(result);
-    }
-
-    private static boolean isTestPath(String relative) {
-        String normalized = relative.replace('\\', '/').toLowerCase(Locale.ROOT);
-        String name = normalized.contains("/") ? normalized.substring(normalized.lastIndexOf('/') + 1) : normalized;
-        return name.endsWith("_test.go")
-                || normalized.equals("testdata")
-                || normalized.startsWith("testdata/")
-                || normalized.contains("/testdata/");
-    }
-
-    private static String relative(Path root, Path file) {
-        return file.startsWith(root) ? root.relativize(file).toString() : file.getFileName().toString();
     }
 }
