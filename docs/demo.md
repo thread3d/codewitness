@@ -16,9 +16,10 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ./demo.sh             # or follow the steps below
 ```
 
-The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript and C#
+The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript, C# and Kotlin
 sections at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for TypeScript, 18.17+
-for JavaScript) and the .NET SDK (8+) respectively, and nothing else.
+for JavaScript), the .NET SDK (8+) and Maven with network access the first time respectively, and nothing
+else: the Kotlin section is a Maven build, so `kotlinc` and the standard library arrive as dependencies.
 
 ## 1. What is in the project?
 
@@ -410,3 +411,46 @@ mutator, so no mutation framework has to be installed. The fixture targets `net8
 SDK, and needs no network: its sandbox config sets `allow_network: false`, and the test host packages it
 restores must already be in the machine's NuGet cache — which they are on any machine that has run
 `dotnet test` before.
+
+## 14. The same thing for Kotlin
+
+The Kotlin fixture is the same ledger once more, this time with `BigDecimal` money and a Maven build with
+`kotlin-maven-plugin`. It needs Maven and nothing else installed — no Kotlin compiler and no Gradle
+distribution, because Maven fetches the plugin and the standard library the way it fetches any dependency:
+
+```bash
+./codewitness verify fixtures/kotlin-withdrawal-ledger \
+    --requirements fixtures/kotlin-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  inputs: {t1=85800000, a1=700, t2=90000000, a2=700}  actual: 1400
+  CE-002  R-003  inputs: {amount=-100}                              actual: 400
+
+Coverage
+  line 100.0% (23/23), branch 80.0% (8/10)
+
+Mutation testing
+  9 mutants, 7 killed, 2 survived, 0 no coverage, score 77.8%
+```
+
+The scenario fragments are Kotlin, the generated tests are Kotlin JUnit 5 classes written into
+`src/test/kotlin` — `Cw_SC_ROLLING_OB_001_Test` and `Cw_SC_NEGATIVE_OB_003_Test` — and the replay command
+is a real Maven invocation, `mvn -Dtest=Cw_SC_ROLLING_OB_001_Test -Dcodewitness.seed=42
+-Dcodewitness.case=0 test`, with the seed and case as system properties that Surefire forwards. The
+compiler diagnostics the build phase reads are the Kotlin compiler's own
+(`[ERROR] file:///path/File.kt:4:23 message`), coverage comes from JaCoCo over the same JVM bytecode a
+Java project produces, and mutation runs through the adapter's own source mutator, whose lexis knows that
+`===` is not `==` and that `..` is not a malformed number.
+
+Kotlin is where the adapters have to be careful about what claims a tree. It shares Gradle and Maven with
+Java, so neither build descriptor is evidence of either language on its own: the Kotlin adapter claims a
+tree with Kotlin sources or a Kotlin plugin, and the Java adapter claims one with Java sources. A tree
+holding both is polyglot and is verified by both, each over its own files.

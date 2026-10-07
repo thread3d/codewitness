@@ -53,7 +53,8 @@ public final class PitMutationTester implements VerificationTools.MutationTester
 
     @Override
     public boolean supports(ProjectInfo project) {
-        return project.buildSystem().id().equals("maven") && project.hasTests();
+        return project.language().equals(dev.codewitness.core.model.LanguageId.JAVA)
+                && project.buildSystem().id().equals("maven") && project.hasTests();
     }
 
     @Override

@@ -39,7 +39,10 @@ public final class JavaBuildProvider implements VerificationTools.Compiler {
 
     @Override
     public boolean supports(ProjectInfo project) {
-        return project.buildSystem().id().equals(buildSystem.id());
+        // The language is part of the claim, not just the build system: a Kotlin project is built by Gradle
+        // too, and the Kotlin adapter answers for those sources.
+        return project.language().equals(dev.codewitness.core.model.LanguageId.JAVA)
+                && project.buildSystem().id().equals(buildSystem.id());
     }
 
     @Override

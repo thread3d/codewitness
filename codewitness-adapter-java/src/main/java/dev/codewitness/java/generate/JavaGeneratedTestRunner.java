@@ -56,7 +56,8 @@ public final class JavaGeneratedTestRunner implements VerificationTools.Generate
 
     @Override
     public boolean supports(ProjectInfo project) {
-        return project.buildSystem().id().equals(buildSystem.id());
+        return project.language().equals(dev.codewitness.core.model.LanguageId.JAVA)
+                && project.buildSystem().id().equals(buildSystem.id());
     }
 
     /**

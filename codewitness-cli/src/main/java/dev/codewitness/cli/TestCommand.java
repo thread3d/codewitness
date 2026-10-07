@@ -19,6 +19,7 @@ import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.csharp.CSharpAdapterBundle;
 import dev.codewitness.go.GoAdapterBundle;
 import dev.codewitness.java.JavaAdapterBundle;
+import dev.codewitness.kotlin.KotlinAdapterBundle;
 import dev.codewitness.javascript.JavaScriptAdapterBundle;
 import dev.codewitness.python.PythonAdapterBundle;
 import dev.codewitness.rust.RustAdapterBundle;
@@ -67,6 +68,7 @@ public final class TestCommand implements Callable<Integer> {
         RustAdapterBundle.register(languages, providers, true);
         GoAdapterBundle.register(languages, providers, true);
         CSharpAdapterBundle.register(languages, providers, true);
+        KotlinAdapterBundle.register(languages, providers, true);
         JavaScriptAdapterBundle.register(languages, providers, true);
         TypeScriptAdapterBundle.register(languages, providers, true);
 

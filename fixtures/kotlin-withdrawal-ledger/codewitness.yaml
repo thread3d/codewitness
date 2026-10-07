@@ -1,0 +1,141 @@
+# CodeWitness configuration for the Kotlin withdrawal-ledger fixture.
+#
+# This file declares how each requirement can be *executed* against the code. CodeWitness supplies boundary
+# enumeration, seeded random search, execution and reproducible counterexamples; the Kotlin fragments below
+# are the oracle, and they are attributed to the user, not to CodeWitness.
+#
+# The scenario fragments are Kotlin statements, not Java ones: the generated test is a Kotlin class compiled
+# by the project's own Kotlin build, so `val ledger = ...` and `java.math.BigDecimal("100")` are what it
+# understands. An input's `type` is the logical type the domain table knows (`long`, `java.math.BigDecimal`,
+# `java.time.Instant`); the generator spells it the Kotlin way in the signature it emits.
+#
+# The project is a Maven build with the Kotlin plugin, so the compiler, the standard library and Surefire
+# arrive from the local repository the way any other dependency does. allow_network is therefore true: the
+# first run on a machine that has never compiled Kotlin needs to fetch them.
+
+project:
+  name: kotlin-withdrawal-ledger
+
+language:
+  adapter: kotlin
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+  # Mutation runs the project's own test command once per mutant, and each of those runs recompiles Kotlin.
+  # Two minutes is enough to mutate a useful number of operators in this file and keeps the fixture's
+  # end-to-end run bounded.
+  max_mutation_time: 2m
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: true
+  tool: kotlin-text
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: true
+
+scenarios:
+  # R-001: two withdrawals an hour and ten minutes apart, across midnight, must still respect the rolling
+  # limit.
+  - id: SC-ROLLING
+    requirement: R-001
+    description: Two withdrawals across midnight, one hour apart
+    mode: sequence
+    setup: "val ledger = com.example.account.WithdrawalLedger()"
+    steps:
+      - call: "ledger.withdraw(${t1}, ${a1})"
+        description: first withdrawal at 23:50
+        inputs:
+          - name: t1
+            type: long
+            domain: long
+            values: ["85800000"]
+            range: {min: 0, max: 172800000}
+          - name: a1
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["700"]
+            range: {min: 100, max: 900, scale: 2}
+      - call: "ledger.withdraw(${t2}, ${a2})"
+        description: second withdrawal at 01:00 the next day
+        inputs:
+          - name: t2
+            type: long
+            domain: long
+            values: ["90000000"]
+            range: {min: 0, max: 172800000}
+          - name: a2
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["700"]
+            range: {min: 100, max: 900, scale: 2}
+    observation: "ledger.totalWithinLast24Hours(${t2})"
+    invariant: "observation.compareTo(java.math.BigDecimal(\"1000\")) <= 0"
+    cases: 300
+    seed: 42
+
+  # R-002: a fee must change the recorded total. The invariant is checked after *every* step, so the whole
+  # experiment is expressed as one step: record 100, apply 0.50, and only then read the total. Split across
+  # two steps it would be checked in between, where the total is legitimately 100.
+  - id: SC-FEE
+    requirement: R-002
+    description: Applying a fee must increase the recorded total
+    mode: single
+    setup: "val ledger = com.example.account.WithdrawalLedger()"
+    steps:
+      - call: "ledger.withdraw(0L, java.math.BigDecimal(\"100\")); ledger.applyFee(java.math.BigDecimal(\"0.50\"))"
+        description: record a withdrawal of 100 and apply a fee of 0.50
+    observation: "ledger.totalWithinLast24Hours(3600000L)"
+    invariant: "observation.compareTo(java.math.BigDecimal(\"100.50\")) == 0"
+    cases: 1
+    seed: 1
+
+  # R-003: negative amounts must be rejected and must not reduce the recorded total.
+  - id: SC-NEGATIVE
+    requirement: R-003
+    description: Negative amounts must be rejected
+    mode: single
+    setup: "val ledger = com.example.account.WithdrawalLedger()"
+    steps:
+      - call: "ledger.withdraw(0L, java.math.BigDecimal(\"500\"))"
+        description: record a withdrawal of 500
+      - call: "ledger.withdraw(3600000L, ${amount})"
+        description: attempt a non-positive withdrawal
+        inputs:
+          - name: amount
+            type: java.math.BigDecimal
+            domain: decimal
+            values: ["-100", "-0.01", "0"]
+            range: {min: -100, max: 100, scale: 2}
+    observation: "ledger.totalWithinLast24Hours(3600000L)"
+    invariant: "observation.compareTo(java.math.BigDecimal(\"500\")) >= 0"
+    cases: 60
+    seed: 7
+
+  # R-004 deliberately has no scenario. CodeWitness must report it as UNVERIFIED rather than assume that
+  # "money arithmetic is exact" is satisfied.

@@ -73,7 +73,9 @@ The image must contain the toolchain for the language under verification: a JDK 
 default), an image with Python 3 plus pytest and coverage.py if you want those phases for a Python
 project, an image with the Rust toolchain for a Rust project, an image with the `go` tool for a Go
 module, an image with a Node runtime for a TypeScript project (22.6+) or a JavaScript project
-(18.17+), or an image with the .NET SDK (8+) for a C# project. The local-process sandbox needs no image
+(18.17+), an image with the .NET SDK (8+) for a C# project, or an image with a JVM and the project's own
+build tool for a Kotlin project — Kotlin needs no image of its own, because it is compiled by the same
+`kotlinc` the project's Maven or Gradle build already invokes. The local-process sandbox needs no image
 and uses the interpreter or toolchain the project already has. A run whose `sandbox.allow_network` is
 false also sets `CARGO_NET_OFFLINE` for Cargo, `GOPROXY=off` for Go and the package-manager offline
 flags for Node, so a build that would need to download something fails loudly instead of reaching the

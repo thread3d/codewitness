@@ -52,7 +52,10 @@ public final class JacocoCoverageProvider implements VerificationTools.CoverageP
 
     @Override
     public boolean supports(ProjectInfo project) {
-        return project.buildSystem().id().equals("maven") || project.buildSystem().id().equals("gradle");
+        // Java only, even though JaCoCo itself would measure Kotlin bytecode just as happily: the Kotlin
+        // adapter has its own provider, and two providers claiming one project would both run.
+        return project.language().equals(dev.codewitness.core.model.LanguageId.JAVA)
+                && (project.buildSystem().id().equals("maven") || project.buildSystem().id().equals("gradle"));
     }
 
     @Override

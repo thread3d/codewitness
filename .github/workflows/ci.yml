@@ -49,6 +49,9 @@ jobs:
       # `./mvnw -Pe2e test` runs the fixture projects through their own toolchains: Maven for the
       # Java fixture, Python 3, Cargo, `go`, Node for the others (Node 22.18+ for TypeScript, where
       # type stripping is on by default, and 18.17+ for JavaScript) and the .NET SDK for the C# fixture.
+      # The Kotlin fixture is a Maven build with the Kotlin plugin, so its toolchain is the Maven and the
+      # network this job already has: the compiler, the standard library and Surefire are fetched the way
+      # a dependency is, and the step below warms them so that the fixture cannot silently skip.
       # Each end-to-end test skips itself (a JUnit assumption) when its toolchain is absent, so a missing
       # tool produces a green build with those languages never having run. Installing each one here, then
       # asserting it below, is what keeps that from happening silently.
@@ -94,6 +97,14 @@ jobs:
         uses: stCarolas/setup-maven@12eb41b233df95d49b0c11fc1b5bc8312e5d4ce0 # v5.1
         with:
           maven-version: 3.9.16
+
+      # Warm the Kotlin toolchain into the Maven cache. The Kotlin fixture resolves the Kotlin compiler,
+      # the standard library and Surefire from the repository on first use, which needs the network that
+      # every other step in this job also uses; doing it here means the end-to-end run is measuring the
+      # adapter rather than a download, and a repository that stops answering fails this step loudly
+      # instead of failing one fixture's build.
+      - name: Warm the Kotlin toolchain
+        run: ./mvnw -B -ntp -f fixtures/kotlin-withdrawal-ledger/pom.xml -DskipTests test-compile
 
       # Fail loudly rather than trust the runner image. Absent tools make the end-to-end tests skip
       # themselves (a JUnit assumption), which is a green build with those languages never having run.

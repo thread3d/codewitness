@@ -1,17 +1,30 @@
 package dev.codewitness.languages;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
- * Recognises {@code Kotlin} projects, which CodeWitness has no adapter for.
+ * Recognises {@code Kotlin} projects.
  *
- * <p>Reported as present and not verified. Nothing here builds, tests or analyses anything; it exists so
- * that a tree containing {@code Kotlin} code does not have every verdict computed as though that code
- * were absent.
+ * <p>Kotlin is no longer in the position this detector exists for: {@code codewitness-adapter-kotlin}
+ * claims Kotlin trees and reports them as {@code kotlin}. Declaring that here means a tree the adapter
+ * verified is not described a second time as present and unverifiable, which would contradict the rest of
+ * the report.
+ *
+ * <p>The detector is still registered, and still looks for a {@code .kt} file, because the suppression only
+ * applies when the adapter actually claimed the tree. A Kotlin source file the adapter never saw - one
+ * nested deeper than its own scan, or under a directory it skips - is reported here rather than being
+ * silently absent.
  */
 public final class KotlinLanguageDetector extends DescriptorLanguageDetector {
 
     public KotlinLanguageDetector() {
         super("kotlin", "Kotlin", List.of(), List.of(".kt"));
+    }
+
+    /** @return {@code kotlin}, because an adapter for that language decides the verdicts itself. */
+    @Override
+    public Optional<String> verifiedAsAdapterLanguage() {
+        return Optional.of("kotlin");
     }
 }

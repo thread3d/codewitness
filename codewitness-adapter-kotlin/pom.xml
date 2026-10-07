@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>dev.codewitness</groupId>
+    <artifactId>codewitness-parent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>codewitness-adapter-kotlin</artifactId>
+  <name>CodeWitness :: Kotlin Adapter</name>
+  <description>Kotlin language adapter: Gradle and Maven detection, kotlinc diagnostics, JUnit XML test
+    reports, Kotlin rule table, JaCoCo coverage over JVM bytecode, a Maven and Gradle dependency
+    inventory, bounded source mutation and scenario-generated Kotlin tests. Needs the project's own
+    build tool and nothing else.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-core</artifactId>
+    </dependency>
+
+    <!-- The text-mutation loop, which is shared with the Rust, Go and C# adapters: a mutant is a source
+         text edit and a re-run of the project's own test command, which is the same job in every
+         language. Kotlin supplies only its lexis. -->
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-adapter-support</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

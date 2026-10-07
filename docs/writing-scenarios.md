@@ -8,12 +8,14 @@ scheduling, execution, and reproducible counterexamples.
 Scenarios live in `codewitness.yaml` under `scenarios:`. The fragments (`setup`, `call`,
 `observation`, `invariant`) are written in the **project's own language**: Java for a Java project,
 Python for a Python project, Rust for a Rust project, Go for a Go module, TypeScript for a TypeScript
-project, plain JavaScript for a JavaScript project, C# for a C#/.NET project. Everything else — modes,
+project, plain JavaScript for a JavaScript project, C# for a C#/.NET project, Kotlin for a Kotlin
+project. Everything else — modes,
 inputs, ranges, seeds, the counterexample protocol — is identical. The examples below are Java; the
-Python, Rust, Go, TypeScript, JavaScript and C# forms are shown in
+Python, Rust, Go, TypeScript, JavaScript, C# and Kotlin forms are shown in
 [Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
 [TypeScript projects](#typescript-projects), [JavaScript projects](#javascript-projects) and
-[C# projects](#c-projects).
+[C# projects](#c-projects) and
+[Kotlin projects](#kotlin-projects).
 
 ```yaml
 scenarios:
@@ -76,7 +78,7 @@ Each step declares the inputs it searches over:
 | Field | Meaning |
 | --- | --- |
 | `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
-| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), or a C# type such as `long`, `decimal`, `double`, `bool` or `string`. |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, or a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`. |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -537,6 +539,84 @@ throw rather than letting it escape:
 ```yaml
 steps:
   - call: "Assert.Throws<System.ArgumentOutOfRangeException>(() => l.Withdraw(0, ${amount}));"
+    description: an amount above the limit must be rejected by throwing
+```
+
+## Kotlin projects
+
+For a Kotlin project the fragments are Kotlin statements, and the generated test is an ordinary Kotlin
+JUnit 5 class written into the tree's own test sources — `src/test/kotlin` for a Maven build, the Kotlin
+test source set for a Gradle one — so it is compiled and run by the build the project already uses:
+
+```yaml
+language:
+  adapter: kotlin
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    mode: sequence
+    setup: "val ledger = com.example.account.WithdrawalLedger()"
+    steps:
+      - call: "ledger.withdraw(${t1}, ${a1})"
+        inputs:
+          - {name: t1, type: long, domain: long, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: java.math.BigDecimal, domain: decimal, values: ["700"],
+             range: {min: 100, max: 900, scale: 2}}
+    observation: "ledger.totalWithinLast24Hours(${t1})"
+    invariant: "observation.compareTo(java.math.BigDecimal(\"1000\")) <= 0"
+    cases: 200
+    seed: 42
+```
+
+Notes specific to Kotlin:
+
+- the fragments are Kotlin **statements**. `${name}` becomes a Kotlin local, so a `call` is written the
+  way the API is used — `ledger.withdraw(t1, a1)`, with no semicolon and no `new`;
+- `type` is the type the generator names in the case-runner signature. Java-primitive spellings are
+  translated (`long` → `Long`, `int` → `Int`, `double` → `Double`, `boolean` → `Boolean`,
+  `java.lang.String` → `String`), because those are also the spellings the `domain` table understands;
+  anything else — a JVM class such as `java.math.BigDecimal`, `java.time.Instant` or a type from the
+  project itself — is spelled the same way in Kotlin and is passed through unchanged. Every other local
+  is declared with `val` and no annotation, so the initialiser decides its type and a scenario never has
+  to name a Kotlin type for an input it draws;
+- `domain: double` writes the literal with a decimal point (`1000.0`), because Kotlin has no `d` suffix
+  and a bare integer literal does not convert to a `Double`;
+- a `$` in an invariant or a step description is escaped in the generated string literal; Kotlin would
+  otherwise read it as the start of a string template. The fragments themselves are code, so `${name}`
+  is the only substitution CodeWitness performs on them;
+- a failing case is reported by throwing `AssertionError` carrying the single
+  `CODEWITNESS_COUNTEREXAMPLE|case=…|seed=…|inputs={…}|…` line. That is what puts the structured line
+  into the JUnit failure text, which is where the engine reads it from — which is why a counterexample
+  contains the exact inputs rather than only a stack trace. It throws rather than calling
+  `Assertions.fail`, whose type variable Kotlin cannot always infer from a statement position;
+- `mode: concurrent` runs the step list from eight threads against one shared subject, released
+  together by a `CountDownLatch` so that a race is not hidden by thread start-up skew, and then checks
+  the invariant once;
+- generated classes are written into the test source root while they run and are removed afterwards
+  unless `report.keep_generated_tests` is set; a copy is always kept in the run's artefact store. Each
+  class carries its own private helpers, so two scenarios in one project cannot collide;
+- a project whose generated test does not compile reports the requirement as `UNVERIFIED` with the
+  compiler's own diagnostics in the evidence, rather than as a defect in the code.
+
+A generated class is named after the scenario and the obligation and lives in
+`dev.codewitness.generated`, so `SC-ROLLING` and `OB-001` become
+`dev.codewitness.generated.Cw_SC_ROLLING_OB_001_Test`. The seed and the case index are passed as system
+properties, which Surefire forwards to the test JVM; the generated class also reads the environment, so
+the same class replays under Gradle, which does not forward system properties:
+
+```bash
+mvn -Dtest=Cw_SC_ROLLING_OB_001_Test -Dcodewitness.seed=42 -Dcodewitness.case=37 test
+```
+
+`./codewitness reproduce <run-id> --counterexample CE-001` prints exactly the command the run used.
+
+Kotlin rejection is expressed the same way, in Kotlin. A step that throws is a failure by default, so
+assert the throw rather than letting it escape:
+
+```yaml
+steps:
+  - call: "runCatching { ledger.withdraw(0L, ${amount}) }.also { check(it.isFailure) }"
     description: an amount above the limit must be rejected by throwing
 ```
 

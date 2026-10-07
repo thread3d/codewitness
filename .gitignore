@@ -32,6 +32,10 @@ fixtures/**/bin/
 fixtures/**/obj/
 fixtures/**/TestResults/
 
+# Kotlin build output. The Kotlin fixture is built by Maven, whose output is already ignored, but a
+# developer who opens it in Gradle or IntelliJ gets a .kotlin directory and a Gradle build directory.
+fixtures/**/.kotlin/
+
 # CodeWitness run data produced inside the repository
 .codewitness/
 **/.codewitness/

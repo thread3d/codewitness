@@ -29,6 +29,15 @@ public record LanguageId(String id) {
      */
     public static final LanguageId CSHARP = new LanguageId("csharp");
     /**
+     * Kotlin on the JVM, compiled by {@code kotlinc} through the project's own Gradle or Maven build.
+     *
+     * <p>Kotlin is named for the language and not for the platform, exactly as C# is not called
+     * {@code dotnet}: it shares a bytecode target, a build tool and a coverage agent with Java, and
+     * none of that makes it Java. A tree holding both is polyglot, and each adapter verifies the
+     * sources written in its own language.
+     */
+    public static final LanguageId KOTLIN = new LanguageId("kotlin");
+    /**
      * More than one language, verified together because more than one adapter claimed part of the
      * project. Reported instead of silently naming whichever language happened to be inspected first.
      */

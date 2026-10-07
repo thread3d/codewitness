@@ -94,6 +94,12 @@ or a C#/.NET project:
 ./codewitness verify ./my-dotnet-project --requirements requirements.md
 ```
 
+or a Kotlin project:
+
+```bash
+./codewitness verify ./my-kotlin-project --requirements requirements.md
+```
+
 The language is detected, and a project may be written in several. `LanguageAdapterRegistry.selectAll`
 runs **every** adapter that claims part of the tree — a Java service with a TypeScript frontend is two
 verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
@@ -112,7 +118,8 @@ the file that gave it away — a language that appears nowhere in the report is 
 that is not there. Recognition comes from `LanguageDetector` implementations discovered like adapters are,
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
-`language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript` or `csharp` *narrows* the run
+`language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp` or `kotlin`
+*narrows* the run
 to that one adapter instead of being merged with the automatic choice. It is not forced: the named adapter
 is used when it exists and actually claims the project, and otherwise the run falls back to
 auto-detection — an unknown id is silently ignored rather than reported.
@@ -133,7 +140,12 @@ runtime it already has, with generated scenarios becoming ordinary `node:test` m
 needs only the .NET SDK: a solution is built with `dotnet build` and tested with `dotnet test`,
 restore is left enabled but `-p:NuGetAudit=false` is passed on every command, because CodeWitness runs
 its own advisory scan and NuGet's own audit would make each build depend on api.nuget.org, and
-generated scenarios become xUnit cases in the tree's own test project.
+generated scenarios become xUnit cases in the tree's own test project. Kotlin support needs only the
+project's own build tool: a Maven build with `kotlin-maven-plugin` or a Gradle build with the Kotlin
+plugin is compiled by `kotlinc` through that build, its Kotlin compiler diagnostics are read from the
+format the compiler itself prints, coverage comes from JaCoCo over the same JVM bytecode a Java
+project produces, and generated scenarios become ordinary Kotlin JUnit 5 classes in the tree's own
+test sources.
 
 ---
 
@@ -468,7 +480,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp
+  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin
 
 verification:
   timeout: 15m           # per build or test command
@@ -531,7 +543,7 @@ also indexed in `<project>/.codewitness/codewitness.db` (SQLite).
 
 A report is only useful if it can be reproduced, so every run records: the project identifier, the
 source revision, the CodeWitness version, the runtime version (the Java version for a Java project,
-the .NET SDK version for a C# one), the build tool and its version, the verification configuration
+the .NET SDK version for a C# one, the Kotlin release for a Kotlin one), the build tool and its version, the verification configuration
 fingerprint, every tool version, the language model identifier if any, the requirements hash, the
 isolation level, timestamps and every command that was executed. Evidence records carry their command
 and inputs, and counterexamples carry a replayable command.
@@ -592,6 +604,9 @@ codewitness/
 ├── codewitness-adapter-csharp/  C#/.NET projects: dotnet build over the tree's solution, dotnet test
 │                               with TRX parsing, Roslyn diagnostics, heuristics, security, coverlet
 │                               cobertura coverage, bounded source mutation, NuGet inventory
+├── codewitness-adapter-kotlin/  Kotlin projects: Gradle or Maven with the Kotlin plugin, kotlinc
+│                               diagnostics, JUnit XML reports, heuristics, security, JaCoCo
+│                               coverage, bounded source mutation, Maven and Gradle inventories
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -604,7 +619,7 @@ engine. Recognising a language CodeWitness has no adapter for is the same shape:
 `dev.codewitness.core.spi.LanguageDetector`, discovered the same way, and the detectors for the languages
 nothing here implements live in `codewitness-language-detectors`. A few platform defaults do remain in core
 — the `LanguageId` and `BuildSystemId` constants (`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`,
-`TYPESCRIPT`, `CSHARP`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
+`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
 needs, and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
 vocabulary and platform defaults, not language logic, and the engine never switches on a language.
 Nothing in core names a language it cannot already verify.
@@ -622,7 +637,9 @@ mvn -pl codewitness-core test   # one module
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
 plus Python 3, Cargo, Go, Node and the .NET SDK for the Python, Rust, Go, TypeScript, JavaScript and
-C# fixtures, and network access the first time, because it builds real projects. The C# fixture is
+C# fixtures, and network access the first time, because it builds real projects. The Kotlin fixture
+needs no toolchain of its own beyond Maven: it is a Maven build with `kotlin-maven-plugin`, so the
+compiler, the standard library and Surefire are resolved from a repository the way a dependency is. The C# fixture is
 the one that needs none: its sandbox config sets `allow_network: false`, and it works because the
 SDK's test host packages are already in the machine's NuGet cache on any machine that has run
 `dotnet test` before. An end-to-end test is skipped rather than failed when its toolchain is absent.
@@ -908,6 +925,74 @@ The honest limits of C#/.NET support are:
 - a tree that holds `.cs` sources but no project file at all is claimed with a warning: the sources can
   be analysed, but there is no project for the SDK to build, so nothing can be compiled, tested or
   mutated.
+
+The Kotlin adapter is implemented and exercised end to end as well
+(`fixtures/kotlin-withdrawal-ledger`):
+
+- detection of Kotlin trees in the two ways one announces itself — a Gradle build applying the Kotlin
+  plugin, or a Maven POM with `kotlin-maven-plugin` — with the conventional `src/main/kotlin` and
+  `src/test/kotlin` split and multi-module layouts on both. What claims a tree is Kotlin source or a
+  Kotlin plugin, never the build descriptor alone: Kotlin shares Gradle and Maven with Java, so a
+  `build.gradle.kts` on its own is evidence of neither language. A tree that holds both is polyglot,
+  and each adapter verifies the sources written in its own language;
+- a build through the project's own build tool — `testClasses` for Gradle, `test-compile` for Maven —
+  so `kotlinc` compiles against exactly the classpath the project uses. The Kotlin compiler's own
+  diagnostics are read in all four shapes it prints them (`[ERROR] file:///path/File.kt:4:23 message`
+  from `kotlin-maven-plugin` 2.x, the older bracketed position, `e: file:///path/File.kt:4:23 message`
+  from Gradle and the command line compiler, and `path/File.kt:4:23: error: message` from `kotlinc`),
+  so a compile error is `BLOCKED` and never a code defect. The Maven goals ask for the compiler's
+  in-process execution strategy, because the default starts a daemon that outlives the run by hours
+  and holds file handles inside the workspace CodeWitness is about to delete;
+- existing tests through the project's own test task, read from the JUnit XML report Surefire and
+  Gradle both write: a Kotlin class appears under its fully qualified name and a Kotlin function under
+  its own name, and the failure text is carried verbatim;
+- static analysis over a Kotlin rule table (`kotlin-heuristics`, ids `CW-KT-SEC-*`, `CW-KT-NUM-*`,
+  `CW-KT-DATE-001`, `CW-KT-REL-*`, `CW-KT-CONC-*` and `CW-KT-TEST-001`), read through one
+  `KotlinSourceScan` that knows Kotlin's literals: a raw string spans lines, a template's `${…}` hole
+  is consumed with its nested braces and strings, a backtick name is a name, and block comments nest.
+  The mutation lexis reads source through that same scanner, so the two can never disagree about
+  where a literal ends. A separate security rule set is filtered out of the same table;
+- coverage from JaCoCo over the same JVM bytecode a Java project produces. For Maven the agent is
+  attached to the project's own test run when no report exists; for Gradle the `jacoco` plugin has to
+  be in the build already, which is stated rather than worked around. A Kotlin file's top-level
+  functions are reported under the synthetic `<File>Kt` class the compiler gives them;
+- mutation testing through the shared `CommandMutationTester` and a `KotlinLexis` that knows what a
+  text mutator gets wrong in Kotlin: `===` and `!==` are not `==`, `..` and `..<` must not expose their
+  `<`, `?:`, `?.`, `!!` and `::` are single operators, and `1..5` is not a malformed number. Each
+  mutant is re-run with a command that *fails* on a failing test, unlike the test phase, because the
+  exit status is the only signal a mutation run has;
+- a dependency inventory from two sources, and the difference is stated in the note rather than
+  hidden: Maven is asked for the graph it resolves with `dependency:list` (transitives, dependency
+  management and imported BOMs included), while a Gradle project's manifests are read directly —
+  `gradle/libs.versions.toml` for the versions a project centralises, `gradle.lockfile` for the
+  versions it locked, and the build scripts for the declarations — so the inventory still works on a
+  machine with no Gradle installed. A version that is dynamic, a range or an unresolvable catalog
+  alias is reported unresolved rather than guessed;
+- generated adversarial tests from declared scenarios: the fragments are Kotlin, the generated test is
+  a Kotlin JUnit 5 class written into the tree's own test sources, it is run with
+  `mvn -Dtest=<class>` or `gradle test --tests <class>`, and it is removed afterwards unless
+  `report.keep_generated_tests` is set. A failing case reaches the engine as a
+  `CODEWITNESS_COUNTEREXAMPLE|…` line carried in the JUnit failure text, so a counterexample carries
+  the exact inputs plus a replayable command.
+
+The honest limits of Kotlin support are:
+
+- a Gradle Kotlin project needs a Gradle distribution: the adapter drives `./gradlew` when the tree
+  has one and `gradle` on `PATH` otherwise. With neither, the build cannot be attempted at all, so the
+  run is `BLOCKED` and the limitation says which tool was missing; that is why the fixture in this
+  repository is a Maven build;
+- the compiler's in-process execution strategy is requested for Maven only. A Gradle build keeps
+  Gradle's own daemon behaviour, which the adapter does not override;
+- a Gradle dependency inventory reports the *declared* versions read from the manifests, not the
+  resolved graph, unless the project has a `gradle.lockfile`; the report says which of the two it is;
+- coverage for a Gradle project needs the `jacoco` plugin to be applied by the project itself, which
+  CodeWitness does not add;
+- mutation uses a deliberately small operator set rather than PIT, whose bytecode mutants do not map
+  back to Kotlin source lines; only operators surrounded by whitespace are considered, and the shared
+  tokenizer does not nest block comments, so a nested comment is read as if the outer one had ended at
+  the first `*/` — at worst one extra mutant, which is excluded as non-viable if it does not compile;
+- a tree that holds `.kt` sources but no build descriptor at all is claimed with a warning: the
+  sources can be analysed, but there is nothing there that could compile them.
 
 Implemented but limited, and reported as such:
 

@@ -40,7 +40,8 @@ public final class MavenDependencyAnalyzer implements VerificationTools.Dependen
 
     @Override
     public boolean supports(ProjectInfo project) {
-        return project.buildSystem().id().equals("maven");
+        return project.language().equals(dev.codewitness.core.model.LanguageId.JAVA)
+                && project.buildSystem().id().equals("maven");
     }
 
     @Override

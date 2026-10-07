@@ -39,6 +39,8 @@ class DetectorAdapterAgreementTest {
 
         assertTrue(adapters.ids().contains("csharp"),
                 "the C# adapter must be on the classpath of the CLI: " + adapters.ids());
+        assertTrue(adapters.ids().contains("kotlin"),
+                "the Kotlin adapter must be on the classpath of the CLI: " + adapters.ids());
 
         for (LanguageDetector detector : detectors.all()) {
             detector.verifiedAsAdapterLanguage().ifPresent(language -> assertTrue(
@@ -70,6 +72,29 @@ class DetectorAdapterAgreementTest {
                 .map(LanguageDetectorRegistry.Detection::displayName).toList();
         assertTrue(uncovered.contains("C# or F#"),
                 "an F# project is still recognised and still not verifiable: " + uncovered);
+    }
+
+    @Test
+    @DisplayName("a Kotlin project is verified rather than reported as present and unverifiable")
+    void kotlinIsNotReportedTwice(@TempDir Path project) throws IOException {
+        write(project, "src/main/kotlin/com/example/Ledger.kt", "package com.example\n\nclass Ledger\n");
+        LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
+
+        List<String> covered = detectors.detect(project, Set.of(LanguageId.KOTLIN)).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(covered.isEmpty(),
+                "the Kotlin adapter claimed this tree, so nothing about it is unverifiable: " + covered);
+
+        // A tree the adapter does not claim - here, one with no Kotlin in it at all - is still the
+        // detector's to speak for, which is the point of keeping the detector registered rather than
+        // deleting it. Ruby is the example because nothing verifies it: the languages with adapters have
+        // no detector at all, so only the unverifiable ones can appear here.
+        Path other = project.resolve("ruby");
+        write(other, "ledger.rb", "def total\n  0\nend\n");
+        List<String> uncovered = detectors.detect(other, Set.of()).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(uncovered.contains("Ruby"),
+                "a language no adapter claimed is still named: " + uncovered);
     }
 
     private static void write(Path base, String relative, String content) throws IOException {

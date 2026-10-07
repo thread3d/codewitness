@@ -54,14 +54,87 @@ public final class JavaProjectDetector {
     private JavaProjectDetector() {
     }
 
-    /** @return {@code true} when the directory looks like a Java project this adapter can handle. */
+    /**
+     * @return {@code true} when the directory looks like a Java project this adapter can handle.
+     *
+     * <p>The sources decide and the build descriptor is only the fallback, in this order:
+     *
+     * <ol>
+     *   <li>a tree that holds Java source is this adapter's, wherever the build file is;</li>
+     *   <li>a tree that holds Kotlin source and no Java source is not: Kotlin uses Gradle and Maven too, so
+     *       {@code build.gradle.kts} and a {@code pom.xml} are exactly what a Kotlin project looks like, and
+     *       the Kotlin adapter claims those trees itself. Claiming them here as well would make every Kotlin
+     *       project a polyglot one that two adapters then both build, and the report would name a language
+     *       the tree does not contain;</li>
+     *   <li>a build descriptor with neither language's sources is claimed, which is what a Maven or Gradle
+     *       aggregator looks like: its modules hold the sources and it holds the build.</li>
+     * </ol>
+     *
+     * <p>Naming Kotlin here is the price of the two adapters not being able to see each other. The check is
+     * the same one the Kotlin detector makes in the other direction - the source files, not the plugin
+     * coordinates - so a tree with both languages' sources is claimed by both, which is the polyglot case
+     * the engine already handles.
+     */
     public static boolean looksLikeJavaProject(Path root) {
+        if (root == null || !Files.isDirectory(root)) {
+            return false;
+        }
+        if (Files.isDirectory(root.resolve("src/main/java"))
+                || Files.isDirectory(root.resolve("src/test/java"))
+                || hasSourceFile(root, ".java")) {
+            return true;
+        }
+        if (Files.isDirectory(root.resolve("src/main/kotlin"))
+                || Files.isDirectory(root.resolve("src/test/kotlin"))
+                || hasSourceFile(root, ".kt")) {
+            return false;
+        }
         return Files.isRegularFile(root.resolve("pom.xml"))
                 || Files.isRegularFile(root.resolve("build.gradle"))
                 || Files.isRegularFile(root.resolve("build.gradle.kts"))
                 || Files.isRegularFile(root.resolve("settings.gradle"))
-                || Files.isRegularFile(root.resolve("settings.gradle.kts"))
-                || Files.isDirectory(root.resolve("src/main/java"));
+                || Files.isRegularFile(root.resolve("settings.gradle.kts"));
+    }
+
+    /** Directories whose contents are build output, dependencies or sample projects, never the project. */
+    private static final List<String> NOT_THE_PROJECT = List.of(
+            "target", "build", "out", "bin", "obj", ".git", ".gradle", ".idea", "node_modules", "fixtures",
+            "testdata");
+
+    /**
+     * @param root   the tree to search
+     * @param suffix the file name suffix that decides the answer
+     * @return {@code true} when the tree holds a file with that suffix, outside build output and dependencies
+     */
+    private static boolean hasSourceFile(Path root, String suffix) {
+        boolean[] found = {false};
+        try {
+            Files.walkFileTree(root, java.util.EnumSet.noneOf(java.nio.file.FileVisitOption.class),
+                    Integer.MAX_VALUE, new java.nio.file.SimpleFileVisitor<Path>() {
+                        @Override
+                        public java.nio.file.FileVisitResult preVisitDirectory(
+                                Path directory, java.nio.file.attribute.BasicFileAttributes attributes) {
+                            if (!directory.equals(root)
+                                    && NOT_THE_PROJECT.contains(directory.getFileName().toString())) {
+                                return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+                            }
+                            return java.nio.file.FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public java.nio.file.FileVisitResult visitFile(
+                                Path file, java.nio.file.attribute.BasicFileAttributes attributes) {
+                            if (file.getFileName().toString().endsWith(suffix)) {
+                                found[0] = true;
+                                return java.nio.file.FileVisitResult.TERMINATE;
+                            }
+                            return java.nio.file.FileVisitResult.CONTINUE;
+                        }
+                    });
+        } catch (IOException _) {
+            return false;
+        }
+        return found[0];
     }
 
     /** Inspects the project and returns everything later phases need to know. */

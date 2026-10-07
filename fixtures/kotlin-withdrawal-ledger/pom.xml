@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The CodeWitness Kotlin fixture.
+
+  It is a plain Maven build with the Kotlin plugin, because that is the one Kotlin toolchain a machine with
+  Maven and a network can always assemble: `./codewitness verify .` finds `mvn` exactly as it does for the
+  Java fixture, and the Kotlin plugin, the compiler and the standard library arrive from the repository the
+  way any other dependency does. A Gradle project would need a Gradle distribution as well.
+
+  `kotlin.compiler.execution.strategy=in-process` keeps the compiler inside the Maven JVM. The plugin's
+  default starts a compiler daemon that outlives the run by hours and holds file handles inside the
+  disposable workspace CodeWitness copies the project into and then deletes.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.example</groupId>
+  <artifactId>kotlin-withdrawal-ledger</artifactId>
+  <version>1.0.0</version>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- The Kotlin release this fixture is pinned to. Both the plugin and the standard library read it, so
+         the compiler and the library it links against cannot drift apart. -->
+    <kotlin.version>2.2.20</kotlin.version>
+    <maven.compiler.release>25</maven.compiler.release>
+    <kotlin.compiler.execution.strategy>in-process</kotlin.compiler.execution.strategy>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.jetbrains.kotlin</groupId>
+      <artifactId>kotlin-stdlib</artifactId>
+      <version>${kotlin.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <!-- Kotlin sources live beside the Java convention rather than in it; the plugin compiles whichever
+         directories are declared here. -->
+    <sourceDirectory>src/main/kotlin</sourceDirectory>
+    <testSourceDirectory>src/test/kotlin</testSourceDirectory>
+
+    <plugins>
+      <plugin>
+        <groupId>org.jetbrains.kotlin</groupId>
+        <artifactId>kotlin-maven-plugin</artifactId>
+        <version>${kotlin.version}</version>
+        <executions>
+          <execution>
+            <id>compile</id>
+            <phase>compile</phase>
+            <goals>
+              <goal>compile</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>test-compile</id>
+            <phase>test-compile</phase>
+            <goals>
+              <goal>test-compile</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- Surefire has to be recent enough to run the JUnit Platform; the version Maven ships with does
+           not know JUnit 5 at all and would report zero tests. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>

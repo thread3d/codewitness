@@ -22,6 +22,9 @@ change has to respect.
   `net8.0` and needs only the test host packages the project already references, which must already be
   in the machine's NuGet cache — they are on any machine that has run `dotnet test` before — because
   the fixture's sandbox config sets `allow_network: false`)
+- Maven and network access for the Kotlin adapter and its end-to-end fixture: the fixture is a Maven
+  build with `kotlin-maven-plugin`, so `kotlinc`, the standard library and Surefire are fetched from a
+  repository the way a dependency is. No Kotlin or Gradle installation is required
 - Network access for the first build (dependencies) and for the end-to-end tests, except the C# fixture,
   which needs none
 
@@ -81,8 +84,10 @@ To add one:
    `fixtures/rust-withdrawal-ledger` (Rust, `Cargo.toml`, libtest),
    `fixtures/go-withdrawal-ledger` (Go, `go.mod`, `go test`),
    `fixtures/typescript-withdrawal-ledger` (TypeScript, `tsconfig.json`, `node:test`),
-   `fixtures/javascript-withdrawal-ledger` (JavaScript, `package.json`, `node:test`) or
-   `fixtures/csharp-withdrawal-ledger` (C#, `WithdrawalLedger.sln`, `dotnet test`). Keep at least
+   `fixtures/javascript-withdrawal-ledger` (JavaScript, `package.json`, `node:test`),
+   `fixtures/csharp-withdrawal-ledger` (C#, `WithdrawalLedger.sln`, `dotnet test`) or
+   `fixtures/kotlin-withdrawal-ledger` (Kotlin, `pom.xml` with `kotlin-maven-plugin`, `kotlin.test`/
+   JUnit 5). Keep at least
    one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
    adapter's "Java 17+" claim stays exercised against real bytecode.
 2. Introduce **one** defect, and state it in a comment at the top of the class — the comment is part
@@ -104,8 +109,10 @@ To add one:
    inspectable class, like `JavaProjectDetector`.
 3. Implement the tool providers you need from `VerificationTools` and register them where the CLI
    wires everything (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`,
-   `GoAdapterBundle`, `TypeScriptAdapterBundle`, `JavaScriptAdapterBundle` and `CSharpAdapterBundle`
-   are the worked examples). If your
+   `GoAdapterBundle`, `TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle` and
+   `KotlinAdapterBundle` are the worked examples). Two languages can share a build tool — Kotlin and
+   Java both use Gradle and Maven — so a provider has to select on the project's *language* as well as
+   on its build system, or both adapters answer for one tree. If your
    tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
    counterexample carries a command that actually runs.
 4. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the
@@ -165,8 +172,9 @@ outcomes. You cannot assign a verdict; the engine does that from your evidence. 
       `./codewitness verify fixtures/python-withdrawal-ledger` still reports R-001 and R-003 as `FAILED`
       and R-002 as `VERIFIED`, and `./codewitness verify fixtures/rust-withdrawal-ledger`,
       `fixtures/go-withdrawal-ledger`, `fixtures/typescript-withdrawal-ledger`,
-      `fixtures/javascript-withdrawal-ledger` and `fixtures/csharp-withdrawal-ledger` still report
-      R-001 and R-003 as `FAILED`, R-002 as `VERIFIED` and R-004 as `UNVERIFIED`.
+      `fixtures/javascript-withdrawal-ledger`, `fixtures/csharp-withdrawal-ledger` and
+      `fixtures/kotlin-withdrawal-ledger` still report R-001 and R-003 as `FAILED`, R-002 as
+      `VERIFIED` and R-004 as `UNVERIFIED`.
 - [ ] No `.codewitness` run data, build output or generated test sources are committed.
 - [ ] The README's "honest status" section still describes what the tool actually does.
 - [ ] Any new limitation is stated in the README and, where it affects a run, in the report's

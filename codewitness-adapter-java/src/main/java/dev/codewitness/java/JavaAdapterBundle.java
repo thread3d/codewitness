@@ -125,7 +125,10 @@ public final class JavaAdapterBundle {
 
         @Override
         public boolean supports(dev.codewitness.core.model.ProjectInfo project) {
-            return project.buildSystem().id().equals("maven");
+            // The language is part of the claim, not just the build system. Kotlin projects use Maven and
+            // Gradle too, and the Kotlin adapter's own providers answer for those sources.
+            return project.language().equals(dev.codewitness.core.model.LanguageId.JAVA)
+                    && project.buildSystem().id().equals("maven");
         }
 
         @Override
@@ -212,7 +215,9 @@ public final class JavaAdapterBundle {
 
         @Override
         public boolean supports(dev.codewitness.core.model.ProjectInfo project) {
-            return project.buildSystem().id().equals("gradle");
+            // Gradle builds Kotlin as readily as Java, so the language has to be part of the claim.
+            return project.language().equals(dev.codewitness.core.model.LanguageId.JAVA)
+                    && project.buildSystem().id().equals("gradle");
         }
 
         @Override

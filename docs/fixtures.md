@@ -18,6 +18,7 @@ not install a `codewitness` command on `PATH`.
 | `typescript-withdrawal-ledger` | TypeScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language executed by Node's type stripper: detection, syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
 | `javascript-withdrawal-ledger` | JavaScript: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for plain JavaScript, with no compiler and no type check anywhere: detection, `node --check` syntax build, `node:test` with JUnit parsing, scenario-generated `node:test` modules, counterexamples, V8 coverage and bounded source mutation, with no third-party package. |
 | `csharp-withdrawal-ledger` | C#/.NET: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for the .NET SDK: solution and project detection, `dotnet build` with Roslyn/MSBuild diagnostics, `dotnet test` with TRX parsing, scenario-generated xUnit facts written into the test project, counterexamples, coverlet cobertura coverage and bounded source mutation, with nothing installed beyond the SDK and the test host packages the project already references. |
+| `kotlin-withdrawal-ledger` | Kotlin: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for Kotlin on the JVM: Gradle/Maven detection by Kotlin source rather than by the build descriptor it shares with Java, `kotlinc` diagnostics read from the compiler's own four shapes, JUnit XML reports, scenario-generated Kotlin test classes compiled by the project's own build, counterexamples, JaCoCo coverage over JVM bytecode and bounded source mutation, with nothing installed beyond the build tool and the Kotlin plugin it already declares. |
 | `polyglot-service` | six languages in one directory, plus a `Gemfile` nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
@@ -259,6 +260,57 @@ the way Cargo's `--offline` or Go's `GOPROXY=off` do, so what keeps this fixture
 cache rather than the flag; the adapter still disables NuGet's own vulnerability audit on every command,
 so nothing in a build goes looking for advisory data.
 
+### `kotlin-withdrawal-ledger`
+
+The Kotlin counterpart of the reference fixture: a Maven build with `kotlin-maven-plugin` whose
+`WithdrawalLedger` applies its limit per calendar day instead of over a rolling 24-hour window (R-001)
+and accepts a negative amount and reduces the recorded total (R-003). Money is a `BigDecimal`, as it is
+in the Java fixture, because that is what a Kotlin service handling money would use — and because a
+`JVM` class such as `java.math.BigDecimal` is spelled the same way in both languages, so the scenario
+fragments that reference it read almost exactly like the Java ones.
+
+The fixture is a Maven build rather than a Gradle one on purpose. Both are supported, but Maven needs no
+Kotlin or Gradle installation at all: the compiler, the standard library and Surefire are resolved from a
+repository the way a dependency is, so the project can be verified on any machine with Maven and a
+network the first time. The `pom.xml` asks for the Kotlin compiler's in-process execution strategy, which
+keeps the compiler inside the Maven JVM instead of leaving a daemon running for hours with file handles
+inside the workspace the run is about to delete.
+
+```bash
+./codewitness verify fixtures/kotlin-withdrawal-ledger \
+    --requirements fixtures/kotlin-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  inputs: {t1=85800000, a1=700, t2=90000000, a2=700}  actual: 1400
+  CE-002  R-003  inputs: {amount=-100}                              actual: 400
+
+Coverage:         line 100.0% (23/23), branch 80.0% (8/10)   (JaCoCo)
+Mutation testing: 9 mutants, 7 killed, 2 survived          (built-in source mutator)
+```
+
+R-001 and R-003 fail through generated Kotlin classes written into `src/test/kotlin` —
+`dev.codewitness.generated.Cw_SC_ROLLING_OB_001_Test` for the midnight crossing and
+`Cw_SC_NEGATIVE_OB_003_Test` for the accepted negative amount — and R-002 is discharged by an executed
+generated test, which is the only path to `VERIFIED`; R-004 declares no scenario and stays `UNVERIFIED`.
+Each counterexample carries the exact inputs and a replay command that is a real Maven invocation,
+`mvn -Dtest=Cw_SC_ROLLING_OB_001_Test -Dcodewitness.seed=42 -Dcodewitness.case=0 test`, so the failing
+case can be re-run by hand.
+
+One Kotlin-specific detail is worth knowing when writing scenarios for it. A generated test is a Kotlin
+class, so a step that is followed by the generated observation block is written as `kotlin.run { … }`
+rather than a bare `{ … }`: in Kotlin a brace that follows a call is a trailing lambda argument to it, so
+the bare block would be read as an extra argument to the scenario's own call. The generated file is also
+where a `$` in an invariant or a step description is escaped, because Kotlin would otherwise read it as
+the start of a string template.
+
 ### `polyglot-service`
 
 One directory holding six languages' projects and a `Gemfile`: a Maven project, a Python package with a
@@ -397,6 +449,7 @@ with the `./codewitness` launcher:
 ./codewitness verify fixtures/typescript-withdrawal-ledger --requirements fixtures/typescript-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/javascript-withdrawal-ledger --requirements fixtures/javascript-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/csharp-withdrawal-ledger --requirements fixtures/csharp-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/kotlin-withdrawal-ledger --requirements fixtures/kotlin-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 

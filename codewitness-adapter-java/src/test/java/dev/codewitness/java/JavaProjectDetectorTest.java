@@ -6,6 +6,7 @@ import dev.codewitness.core.model.ModuleInfo;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.w3c.dom.Document;
@@ -241,6 +242,66 @@ class JavaProjectDetectorTest {
         assertTrue(warning.contains("pom.xml could not be parsed"), warning);
         assertFalse(info.modules().get(0).sourceDirs().isEmpty(),
                 "the conventional source directory is still detected");
+    }
+
+    @Test
+    @DisplayName("a tree whose only sources are Kotlin is the Kotlin adapter's, not this one's")
+    void aKotlinTreeIsNotClaimed() throws IOException {
+        Path root = tmp.resolve("kotlin");
+        write(root, "pom.xml", """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project xmlns="http://maven.apache.org/POM/4.0.0">
+                  <modelVersion>4.0.0</modelVersion>
+                  <artifactId>kotlin-service</artifactId>
+                  <build>
+                    <sourceDirectory>src/main/kotlin</sourceDirectory>
+                    <plugins>
+                      <plugin>
+                        <groupId>org.jetbrains.kotlin</groupId>
+                        <artifactId>kotlin-maven-plugin</artifactId>
+                      </plugin>
+                    </plugins>
+                  </build>
+                </project>
+                """);
+        write(root, "src/main/kotlin/example/Ledger.kt", "package example\n\nclass Ledger\n");
+
+        assertFalse(JavaProjectDetector.looksLikeJavaProject(root),
+                "Kotlin projects use Maven and Gradle too, so a descriptor is not Java evidence: claiming "
+                        + "them here would make every Kotlin project polyglot and would name a language the "
+                        + "tree does not contain");
+    }
+
+    @Test
+    @DisplayName("a tree with both languages' sources is claimed, because that is genuinely polyglot")
+    void aMixedTreeIsClaimed() throws IOException {
+        Path root = tmp.resolve("mixed");
+        write(root, "pom.xml", "<project><artifactId>mixed</artifactId></project>");
+        write(root, "src/main/kotlin/example/Kt.kt", "package example\n");
+        write(root, "src/main/java/example/Java.java", "package example; class Java {}\n");
+
+        assertTrue(JavaProjectDetector.looksLikeJavaProject(root),
+                "the Java half is still this adapter's to verify");
+    }
+
+    @Test
+    @DisplayName("an aggregator with a build descriptor and no sources of either language is claimed")
+    void anAggregatorIsClaimed() throws IOException {
+        Path root = tmp.resolve("aggregator");
+        write(root, "pom.xml", "<project><artifactId>aggregator</artifactId></project>");
+        Files.createDirectories(root.resolve("module-a/src/main/java/example"));
+
+        assertTrue(JavaProjectDetector.looksLikeJavaProject(root),
+                "the modules hold the sources and the root holds the build");
+    }
+
+    @Test
+    @DisplayName("a Java source file outside the conventional layout is found at any depth")
+    void javaSourcesAreFoundWhereverTheyAre() throws IOException {
+        Path root = tmp.resolve("deep");
+        write(root, "app/service/src/com/example/Ledger.java", "package com.example; class Ledger {}\n");
+
+        assertTrue(JavaProjectDetector.looksLikeJavaProject(root));
     }
 
     @Test
