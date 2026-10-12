@@ -32,6 +32,11 @@ public final class SqlAdapterBundle {
 
         providers.register(new SqlBuildProvider());
         providers.register(new SqlTestProvider());
+        // The schema-derived probes are the experiment that can verify a SQL requirement: a declared
+        // constraint is tested by the row that violates it, and a constraint that does not fire is the
+        // defect.
+        providers.register(new SqlTestGenerator());
+        providers.register(new SqlGeneratedTestExecutor());
 
         if (includeAnalysis) {
             providers.register((VerificationTools.StaticAnalyzer) new SqlHeuristicAnalyzer());

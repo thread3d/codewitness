@@ -1679,6 +1679,20 @@ rather than a mock:
   running without error is not evidence that anything held. A failing script is an ordinary failing test
   case, so it maps to the requirement whose id its file mentions and carries a `sqlite3` replay recipe
   when that tool is installed;
+- generated adversarial tests from the schema itself (`sql-constraint-probes`): the DDL already states
+  the rules, so each declared constraint becomes a probe — a row that violates it, preceded by
+  `-- expect: error` — executed against a fresh database on a connection with foreign keys enforced. A
+  constraint that does not fire is the defect this finds, which is exactly what a migration that quietly
+  dropped or weakened a `NOT NULL`, a `CHECK` or a foreign key produces. Probes are chosen for the
+  obligation at hand rather than dumped wholesale: a `REJECTION` or boundary obligation is tested by the
+  `CHECK`s, a `NULL_HANDLING` one by the `NOT NULL`s, and only a general invariant by everything the
+  schema declares. A requirement that names a column is not credited with a constraint on a different
+  one, so a requirement about negative amounts is not "verified" by a check on a transaction's kind —
+  it stays `UNVERIFIED`, and the absence of a rule that would refuse the value is the honest answer.
+  This is what makes a SQL requirement capable of reaching `VERIFIED`: the probe is executed, it asserts,
+  and the database's own refusal is the evidence. Probes are deliberately conservative — a constraint
+  whose expression the reader cannot understand produces no probe, because one rejected for a different
+  reason would pass without the constraint ever firing;
 - static analysis over a SQL rule table (`sql-heuristics`) read through a literal-aware `SqlSourceScan`
   that blanks comments and quoted regions, so a rule sees what the database would execute: `SELECT *`,
   an `UPDATE` or `DELETE` with no `WHERE`, a comparison with `NULL` using `=` or `<>`, `NOT IN` over a
@@ -1707,9 +1721,16 @@ The honest limits of SQL support are:
 - the schema loader splits scripts itself, because JDBC runs only the first statement of a
   multi-statement string and reports success for the whole thing. String literals, comments and trigger
   bodies containing semicolons are handled; a procedural body written for a database that has stored
-  procedures is not, and is documented rather than silently misread.
+  procedures is not, and is documented rather than silently misread;
+- generated probes cover the constraint shapes this reader understands: nullability, single- and
+  multi-column keys, references, and simple bound comparisons (`>=`, `>`, `<=`, `<`, `BETWEEN`, `IN`,
+  `length`). A constraint expressed in a shape it cannot read produces no probe, so a requirement about
+  such a rule stays `UNVERIFIED` rather than being credited with a probe that could pass for the wrong
+  reason;
+- mutation testing is not measured. The adapter declares no mutation capability, so a run on a SQL tree
+  reports mutation as not measured rather than inventing a score.
 
-
+Implemented but limited, and reported as such:
 
 - **Dependency advisories** are checked only when you turn the scan on. It covers every ecosystem the
   adapters can inventory at a resolved version: Maven (from `dependency:list`), npm and PyPI and

@@ -12,8 +12,6 @@ import dev.codewitness.support.database.SqlDatabase;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
@@ -27,9 +25,10 @@ import java.util.Locale;
  *
  * <p>Each script gets its own database, so one test's rows cannot decide another's result - a shared
  * database would make the suite's outcome depend on the order it ran in. The script's conventions are
- * {@link SqlTestScript}'s: a statement marked {@code -- expect: error} must be rejected, a final
- * {@code SELECT} must return no rows, and a script that does neither is recorded as skipped rather than
- * passed, because running without error is not evidence that anything held.
+ * {@link SqlTestScript}'s, and {@link SqlScriptRunner} is the interpreter both this runner and the
+ * schema-derived probe executor use: a statement marked {@code -- expect: error} must be rejected, a
+ * final {@code SELECT} must return no rows, and a script that does neither is recorded as skipped rather
+ * than passed, because running without error is not evidence that anything held.
  *
  * <p>A failing assertion becomes an ordinary failing test case, so it flows through the same evidence
  * chain as any other language's failure: mapped to the requirement whose id its file mentions, turned
@@ -73,54 +72,32 @@ public final class SqlTestProvider implements VerificationTools.TestRunner {
         Path database = SqlBuildProvider.databaseFile(context, "tests/" + safeName(suite) + ".db");
         SqlDatabase.Load load = SqlDatabase.load(database, schema);
         if (!load.loaded()) {
-            return failure(suite, name, start, "SCHEMA",
+            return result(suite, name, start, TestOutcome.FAILED, "SCHEMA",
                     "the schema did not load, so the script could not run: " + load.failure().describe());
         }
-        List<SqlTestScript.Statement> statements = SqlTestScript.parse(SqlProjectDetector.readString(test));
-        if (statements.isEmpty()) {
-            return skipped(suite, name, start, "the script holds no statement");
-        }
-        boolean asserted = false;
-        try (Connection connection = DriverManager.getConnection(SqlDatabase.url(database))) {
-            for (int index = 0; index < statements.size(); index++) {
-                SqlTestScript.Statement statement = statements.get(index);
-                boolean last = index == statements.size() - 1;
-                if (statement.expectError()) {
-                    asserted = true;
-                    if (!isRejected(connection, statement.sql())) {
-                        return failure(suite, name, start, "EXPECTED_REJECTION",
-                                "the statement was expected to be rejected and it succeeded: "
-                                        + SqlDatabase.summarize(statement.sql()));
-                    }
-                    continue;
-                }
-                if (last && SqlTestScript.isAssertionQuery(statement.sql())) {
-                    asserted = true;
-                    List<String> rows = rows(connection, statement.sql());
-                    if (!rows.isEmpty()) {
-                        return failure(suite, name, start, "ASSERTION",
-                                "the assertion query returned " + rows.size()
-                                        + " row(s), so the condition it names holds somewhere: "
-                                        + String.join("; ", rows.stream().limit(5).toList()));
-                    }
-                    continue;
-                }
-                try (Statement jdbc = connection.createStatement()) {
-                    jdbc.execute(statement.sql());
-                } catch (SQLException e) {
-                    return failure(suite, name, start, "SQL", "statement " + (index + 1) + " failed: "
-                            + e.getMessage() + " (" + SqlDatabase.summarize(statement.sql()) + ")");
-                }
-            }
+        try (Connection connection = open(database)) {
+            SqlScriptRunner.Outcome outcome =
+                    SqlScriptRunner.run(connection, SqlProjectDetector.readString(test));
+            return result(suite, name, start, outcome.outcome(), outcome.failureType(), outcome.failureMessage());
         } catch (SQLException e) {
-            return failure(suite, name, start, "DATABASE",
+            return result(suite, name, start, TestOutcome.FAILED, "DATABASE",
                     "the database could not be opened: " + e.getMessage());
         }
-        if (!asserted) {
-            return skipped(suite, name, start,
-                    "the script declared no assertion: no final SELECT and no `-- expect: error` directive");
+    }
+
+    /**
+     * Opens a connection with foreign keys enforced.
+     *
+     * <p>SQLite does not enforce foreign keys unless the connection asks it to, which silently makes an
+     * orphan insert succeed and a declared foreign key unverifiable. Every connection this adapter runs a
+     * script on turns the pragma on, so a constraint the schema declares is a constraint the run tests.
+     */
+    static Connection open(Path database) throws SQLException {
+        Connection connection = DriverManager.getConnection(SqlDatabase.url(database));
+        try (Statement jdbc = connection.createStatement()) {
+            jdbc.execute("PRAGMA foreign_keys = ON");
         }
-        return TestCaseResult.passed(suite, name, Duration.between(start, Instant.now()));
+        return connection;
     }
 
     @Override
@@ -163,47 +140,10 @@ public final class SqlTestProvider implements VerificationTools.TestRunner {
                 .orElse(candidate);
     }
 
-    /** @return {@code true} when the database rejects the statement. */
-    private static boolean isRejected(Connection connection, String sql) {
-        try (Statement jdbc = connection.createStatement()) {
-            jdbc.execute(sql);
-            return false;
-        } catch (SQLException _) {
-            return true;
-        }
-    }
-
-    /** @return a readable preview of the rows a query returned, at most five of them. */
-    private static List<String> rows(Connection connection, String sql) {
-        List<String> preview = new ArrayList<>();
-        try (Statement jdbc = connection.createStatement();
-                ResultSet result = jdbc.executeQuery(sql)) {
-            ResultSetMetaData meta = result.getMetaData();
-            while (result.next() && preview.size() < 5) {
-                StringBuilder row = new StringBuilder("{");
-                for (int column = 1; column <= meta.getColumnCount(); column++) {
-                    if (column > 1) {
-                        row.append(", ");
-                    }
-                    row.append(meta.getColumnLabel(column)).append('=').append(result.getString(column));
-                }
-                preview.add(row.append('}').toString());
-            }
-        } catch (SQLException e) {
-            preview.add("the assertion query could not be run: " + e.getMessage());
-        }
-        return preview;
-    }
-
-    private static TestCaseResult failure(
-            String suite, String name, Instant start, String type, String message) {
-        return new TestCaseResult(suite, name, TestOutcome.FAILED, Duration.between(start, Instant.now()),
+    static TestCaseResult result(
+            String suite, String name, Instant start, TestOutcome outcome, String type, String message) {
+        return new TestCaseResult(suite, name, outcome, Duration.between(start, Instant.now()),
                 type, message, null);
-    }
-
-    private static TestCaseResult skipped(String suite, String name, Instant start, String message) {
-        return new TestCaseResult(suite, name, TestOutcome.SKIPPED, Duration.between(start, Instant.now()),
-                null, message, null);
     }
 
     static String safeName(String value) {
