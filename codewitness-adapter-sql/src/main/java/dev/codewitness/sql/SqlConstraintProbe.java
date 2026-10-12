@@ -114,8 +114,95 @@ final class SqlConstraintProbe {
                         Map.of("table", table.name(), "column", column, "value", violating.get())));
     }
 
-    private static Optional<Probe> foreignKey(SqlSchemaModel.Table table, SqlSchemaModel.Constraint constraint) {
-        if (constraint.columns().size() != 1) {
+    /**
+     * A probe for a bound the requirement itself states, built without consulting what the schema
+     * declares.
+     *
+     * <p>This is the adversarial half of schema-derived verification. Probing the schema's own check
+     * can only ever confirm the schema; it cannot find the defect that matters, which is a constraint
+     * that is missing or weaker than the requirement. So the bound comes from the requirement: a row
+     * exactly at the bound must be accepted, and a row one step outside it must be rejected. A schema
+     * with no check at all accepts the second row and fails the probe; a schema whose check is looser
+     * than the requirement does the same.
+     *
+     * <p>Every column that would make the two rows collide - the single-column key and any unique
+     * column - is given a different value in each row, so the second insert is rejected for being out
+     * of bounds rather than for being a duplicate. A table whose keys or unique constraints are
+     * composite is skipped: with several columns to vary there is no safe way to keep the two rows
+     * identical in everything but the value under test.
+     *
+     * @param upper {@code true} for a bound the value must not exceed, {@code false} for a floor
+     * @return the probe, or empty when the table's shape cannot support one
+     */
+    static Optional<Probe> boundProbe(
+            SqlSchemaModel model, String tableName, String column, BigDecimal bound, boolean upper) {
+        Optional<SqlSchemaModel.Table> found = model.table(tableName);
+        if (found.isEmpty()) {
+            return Optional.empty();
+        }
+        SqlSchemaModel.Table table = found.get();
+        if (table.column(column).isEmpty()) {
+            return Optional.empty();
+        }
+        if (table.constraints().stream().anyMatch(constraint ->
+                (constraint.kind() == SqlSchemaModel.ConstraintKind.PRIMARY_KEY
+                        || constraint.kind() == SqlSchemaModel.ConstraintKind.UNIQUE)
+                        && constraint.columns().size() > 1)) {
+            return Optional.empty();
+        }
+        if (table.singlePrimaryKey().map(key -> key.name().equalsIgnoreCase(column)).orElse(false)) {
+            // A key is not a bounded value, and varying it would be varying the value under test.
+            return Optional.empty();
+        }
+        List<String> distinguishing = new ArrayList<>();
+        table.singlePrimaryKey().map(SqlSchemaModel.Column::name)
+                .filter(name -> !name.equalsIgnoreCase(column))
+                .ifPresent(distinguishing::add);
+        for (SqlSchemaModel.Constraint constraint : table.constraints()) {
+            if (constraint.kind() != SqlSchemaModel.ConstraintKind.UNIQUE || constraint.columns().size() != 1) {
+                continue;
+            }
+            String name = constraint.columns().getFirst();
+            if (!name.equalsIgnoreCase(column) && distinguishing.stream().noneMatch(name::equalsIgnoreCase)) {
+                distinguishing.add(name);
+            }
+        }
+        String atBound = bound.stripTrailingZeros().toPlainString();
+        String outside = bound.add(BigDecimal.valueOf(upper ? 1 : -1)).stripTrailingZeros().toPlainString();
+        Optional<Map<String, String>> setup = boundRow(table, column, atBound, distinguishing, 1);
+        Optional<Map<String, String>> violating = boundRow(table, column, outside, distinguishing, 2);
+        if (setup.isEmpty() || violating.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new Probe(
+                List.of(insert(table, setup.get())),
+                insert(table, violating.get()),
+                "a value " + (upper ? "above" : "below") + " the stated bound " + atBound + " on "
+                        + table.name() + "." + column + " must be rejected, and the bound itself accepted",
+                Map.of("table", table.name(), "column", column, "bound", atBound, "value", outside)));
+    }
+
+    /** @return a row in which the target column and every distinguishing column carry the given step. */
+    private static Optional<Map<String, String>> boundRow(
+            SqlSchemaModel.Table table, String column, String value, List<String> distinguishing, int step) {
+        Map<String, String> overrides = new LinkedHashMap<>();
+        overrides.put(column, value);
+        for (String name : distinguishing) {
+            Optional<SqlSchemaModel.Column> found = table.column(name);
+            if (found.isEmpty()) {
+                return Optional.empty();
+            }
+            overrides.put(name, distinctLiteral(found.get(), step));
+        }
+        return withOverride(table, overrides);
+    }
+
+    /** @return a literal for a key or unique column that differs between the setup and violating rows. */
+    private static String distinctLiteral(SqlSchemaModel.Column column, int step) {
+        return isNumeric(column.type()) ? String.valueOf(step) : "'cw" + step + "'";
+    }
+
+    private static Optional<Probe> foreignKey(SqlSchemaModel.Table table, SqlSchemaModel.Constraint constraint) {        if (constraint.columns().size() != 1) {
             return Optional.empty();
         }
         String column = constraint.columns().getFirst();
@@ -281,7 +368,19 @@ final class SqlConstraintProbe {
     }
 
     private static String insert(SqlSchemaModel.Table table, Map<String, String> row) {
-        List<String> columns = new ArrayList<>(row.keySet());
+        // Columns are listed in the table's own declaration order rather than in whatever order the
+        // overrides were applied, so a generated script reads like the schema it probes.
+        List<String> columns = new ArrayList<>();
+        for (SqlSchemaModel.Column column : table.columns()) {
+            if (row.containsKey(column.name())) {
+                columns.add(column.name());
+            }
+        }
+        for (String name : row.keySet()) {
+            if (!columns.contains(name)) {
+                columns.add(name);
+            }
+        }
         List<String> values = columns.stream().map(row::get).toList();
         return "INSERT INTO " + table.name() + " (" + String.join(", ", columns) + ") VALUES ("
                 + String.join(", ", values) + ")";

@@ -74,12 +74,28 @@ final class ReportFixtures {
     }
 
     /** @return the standard fixture, but with dependencies whose advisories were never looked for. */
-    static VerificationReport reportWithoutAdvisoryScan() {
-        return VerificationReport.builder(RUN_ID, project(), requirements())
+    static VerificationReport reportWithoutAdvisoryScan() {        return VerificationReport.builder(RUN_ID, project(), requirements())
                 .verdicts(List.of(verifiedVerdict(), failedVerdict()))
                 .evidence(evidence())
                 .counterexamples(List.of(counterexample()))
                 .tests(tests())
+                .coverage(coverage())
+                .mutation(mutation())
+                .findings(findings())
+                .dependencies(new DependencyReport(true, "maven-dependencies", "inventory only", 12,
+                        List.of("com.example:lib:1.0"), List.of()))
+                .run(run())
+                .limitations(List.of(LIMITATION))
+                .build();
+    }
+
+    /** @return the standard fixture with the given test result, for a renderer test that varies it. */
+    static VerificationReport reportWithTests(TestResult tests) {
+        return VerificationReport.builder(RUN_ID, project(), requirements())
+                .verdicts(List.of(verifiedVerdict(), failedVerdict()))
+                .evidence(evidence())
+                .counterexamples(List.of(counterexample()))
+                .tests(tests)
                 .coverage(coverage())
                 .mutation(mutation())
                 .findings(findings())

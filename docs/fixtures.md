@@ -25,6 +25,7 @@ not install a `codewitness` command on `PATH`.
 | `swift-withdrawal-ledger` | Swift: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language whose build system and test runner both ship with the toolchain: detection from `Package.swift`, `swift build --build-tests` with swiftc diagnostics parsed from the compiler's own lines, `swift test` with XCTest results read from the runner's console, scenario-generated XCTest classes written into the tree's own test target, counterexamples with a real `swift test --filter` replay command, LLVM coverage from SwiftPM's own export, and bounded source mutation — with no package resolved and no network needed. |
 | `verilog-withdrawal-ledger` | Verilog: an accepted withdrawal adds one cent back, and a withdrawal of exactly the balance is rejected | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a hardware description language with no package manager and no manifest: detection from `.v`/`.sv` sources, an Icarus `iverilog -g2012` build, one test case per testbench simulated with `vvp -N`, scenario-generated testbenches that instantiate the design under test as `dut`, counterexamples whose inputs are signal values, and bounded source mutation — with coverage and dependencies both declared not measured, because Icarus exports no coverage and HDL has no advisory ecosystem. |
 | `polyglot-service` | six languages in one directory, plus a `mix.exs` for Elixir that nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
+| `sql-withdrawal-ledger` | SQL: a balance floor the schema never declares is accepted, and the project's own script finds an overdraft | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The first fixture whose language's own specification is the thing under test: schema against test scripts, the declared DDL loaded into SQLite as the language's first failure, a probe built from the requirement's stated bound that fails because the constraint is missing, a probe meeting a check that is enforced and making its requirement `VERIFIED`, the project's own assertion script refuting a third requirement, and a fourth left `UNVERIFIED` — with mutation reporting 2 mutants generated and 2 killed, and no toolchain needed at all, so its end-to-end test never skips. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
 | `security-vulnerability` | hardcoded credential, SQL built by concatenation | `FAILED` | 2 `FAILED` | Static security rules produce counterexamples with file, line and rule id, without any test running. |
@@ -652,6 +653,56 @@ simulates, both come from the machine, and `-g2012` and the `$fatal` exit-code b
 relies on are present in 12.0. The end-to-end test skips itself when either executable is absent, and CI
 installs `iverilog` (which brings `vvp`) and asserts both, so the Verilog path is exercised rather than
 silently skipped.
+
+### `sql-withdrawal-ledger`
+
+A SQL schema with one deliberate omission: the `ledger` table declares `amount NUMERIC NOT NULL CHECK
+(amount <= 1000)` but no check on `balance`, so nothing refuses a balance below zero. Two of the four
+requirements state a bound, and the difference between them is the whole point of the fixture.
+
+```text
+Requirements
+  ✗ R-001  The balance must be at least 0         FAILED
+  ✓ R-002  The amount must not exceed 1000        VERIFIED
+  ✗ R-003  A withdrawal beyond the balance …      FAILED
+  ? R-004  Statements are recorded per ledger id  UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  the statement was expected to be rejected and it succeeded:
+                 INSERT INTO ledger (id, amount, balance) VALUES (2, 1000, -1)
+  CE-002  R-003  the assertion query returned 1 row(s): {id=1, balance=-50}
+```
+
+R-001 states a floor the schema does not enforce. The generated probe is built from the **requirement's**
+bound, not from the schema's constraints - a row exactly at the bound must be accepted and a row one step
+outside it must be rejected - so it inserts a balance of `-1`, finds the database accepts it, and reports
+the counterexample. A probe built only from the schema's own checks could never see a check that is not
+there, and that distinction is what this fixture pins down.
+
+R-002 states a bound the schema does enforce, and the same kind of probe passes: the row at `1000` is
+accepted, the row at `1001` is rejected by the declared check, and the requirement is `VERIFIED` - the one
+status that requires an executed experiment. R-003 is refuted by the project's own assertion script
+(`tests/overdraft_test.sql`), whose final `SELECT` returns the overdraft row it should not find. R-004
+declares nothing executable and stays `UNVERIFIED`.
+
+The two scripts also give mutation something to work with. `tests/amount_test.sql` inserts exactly `1000`
+(must succeed), `1001` (must be rejected) and `NULL` (must be rejected), which is what kills both of the
+schema's mutants:
+
+```text
+Mutation testing
+  2 mutants, 2 killed, 0 survived, 0 no coverage, score 100.0%
+```
+
+The mutants are the boundary of the declared check moved one step (`amount <= 1000` becoming
+`amount < 1000`, which only the `1000` insert detects) and the check removed altogether
+(`CHECK (amount <= 1000)` becoming `CHECK (1)`, which only the `1001` insert detects). A suite that
+ignored the boundary would report them as survivors instead - the adapter reports a score only when the
+scripts earned it.
+
+The fixture needs no toolchain at all: the schema is loaded into SQLite through the JDBC driver already in
+the build, so unlike the compiler and runtime fixtures this end-to-end test never skips itself, which is
+what keeps SQL covered in every CI job.
 
 ### `polyglot-service`
 

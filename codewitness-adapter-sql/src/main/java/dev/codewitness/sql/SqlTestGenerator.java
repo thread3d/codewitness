@@ -9,6 +9,7 @@ import dev.codewitness.core.spi.GeneratedTest;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -59,7 +60,7 @@ public final class SqlTestGenerator implements VerificationTools.TestGenerator {
         List<GeneratedTest> tests = new ArrayList<>();
         int index = 0;
         for (VerificationObligation obligation : obligations) {
-            List<SqlConstraintProbe.Probe> probes = probesFor(model, requirement, obligation.kind());
+            List<SqlConstraintProbe.Probe> probes = probesFor(model, requirement, obligation);
             if (probes.isEmpty()) {
                 context.emit("generate", "no schema constraint bears on " + obligation.id()
                         + " (" + obligation.kind() + "), so nothing was generated for it");
@@ -87,15 +88,70 @@ public final class SqlTestGenerator implements VerificationTools.TestGenerator {
     }
 
     /**
-     * @return the probes that bear on an obligation of this kind <em>and</em> on this requirement
+     * @return the probes that bear on an obligation <em>and</em> on this requirement
      */
     private static List<SqlConstraintProbe.Probe> probesFor(
-            SqlSchemaModel model, Requirement requirement, ObligationKind kind) {
-        List<SqlSchemaModel.Constraint> candidates = candidatesFor(model, kind);
+            SqlSchemaModel model, Requirement requirement, VerificationObligation obligation) {
+        // A bound the requirement states is probed against that bound, not against whatever the schema
+        // declares: probing the schema's own check could only ever confirm the schema. This is the path
+        // that finds a constraint which is missing, or weaker than the requirement.
+        Optional<SqlConstraintProbe.Probe> stated = statedBoundProbe(model, requirement, obligation);
+        if (stated.isPresent()) {
+            return List.of(stated.get());
+        }
+        List<SqlSchemaModel.Constraint> candidates = candidatesFor(model, obligation.kind());
         return relevant(model, requirement, candidates).stream()
                 .map(constraint -> SqlConstraintProbe.forConstraint(model, constraint))
                 .flatMap(Optional::stream)
                 .toList();
+    }
+
+    /**
+     * @return a probe for a numeric bound the requirement states, when one is derivable and exactly one
+     *     schema column is named; empty otherwise, so a general obligation falls back to the schema's own
+     *     constraints rather than guessing which column a bound belongs to
+     */
+    private static Optional<SqlConstraintProbe.Probe> statedBoundProbe(
+            SqlSchemaModel model, Requirement requirement, VerificationObligation obligation) {
+        if (obligation.kind() != ObligationKind.UPPER_BOUND
+                && obligation.kind() != ObligationKind.LOWER_BOUND
+                && obligation.kind() != ObligationKind.BOUNDARY_VALUE) {
+            return Optional.empty();
+        }
+        Optional<BigDecimal> bound = decimal(obligation.parameters().get("value"));
+        if (bound.isEmpty()) {
+            return Optional.empty();
+        }
+        boolean upper = !"lower".equalsIgnoreCase(String.valueOf(obligation.parameters().get("direction")));
+        Set<String> mentioned = mentionedColumns(model, requirement);
+        if (mentioned.size() != 1) {
+            return Optional.empty();
+        }
+        String column = mentioned.iterator().next();
+        for (SqlSchemaModel.Table table : model.tables()) {
+            if (table.column(column).isPresent()) {
+                return SqlConstraintProbe.boundProbe(model, table.name(), column, bound.get(), upper);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** @return the bound an obligation carries as a number, whatever shape the planner recorded it in. */
+    private static Optional<BigDecimal> decimal(Object value) {
+        if (value instanceof BigDecimal decimal) {
+            return Optional.of(decimal);
+        }
+        if (value instanceof Number number) {
+            return Optional.of(new BigDecimal(number.toString()));
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Optional.of(new BigDecimal(text.trim().replace(",", "")));
+            } catch (NumberFormatException _) {
+                return Optional.empty();
+            }
+        }
+        return Optional.empty();
     }
 
     /**

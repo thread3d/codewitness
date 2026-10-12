@@ -37,6 +37,8 @@ public final class SqlAdapterBundle {
         // defect.
         providers.register(new SqlTestGenerator());
         providers.register(new SqlGeneratedTestExecutor());
+        // Mutation judges how much of the schema's own rules the project's scripts actually constrain.
+        providers.register(new SqlMutationTester());
 
         if (includeAnalysis) {
             providers.register((VerificationTools.StaticAnalyzer) new SqlHeuristicAnalyzer());

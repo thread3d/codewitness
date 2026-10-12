@@ -128,6 +128,53 @@ class SqlConstraintProbeTest {
     }
 
     @Test
+    @DisplayName("a stated bound is probed at the bound and one step outside it, with the key varied")
+    void boundProbeStepsOutsideTheStatedBound() {
+        SqlSchemaModel model = model("""
+                CREATE TABLE ledger (id INTEGER PRIMARY KEY, amount NUMERIC NOT NULL);
+                """);
+
+        SqlConstraintProbe.Probe probe = SqlConstraintProbe
+                .boundProbe(model, "ledger", "amount", new java.math.BigDecimal("1000"), true)
+                .orElseThrow();
+
+        assertEquals(1, probe.setup().size(), "the row at the bound must be inserted and must succeed");
+        assertTrue(probe.setup().getFirst().contains("VALUES (1, 1000)"), probe.setup().getFirst());
+        assertTrue(probe.violating().contains("VALUES (2, 1001)"), probe.violating());
+        assertFalse(probe.setup().getFirst().equals(probe.violating()),
+                "the key must differ, or the second insert would be rejected as a duplicate");
+    }
+
+    @Test
+    @DisplayName("a stated bound produces a probe even when the schema declares no check for it")
+    void boundProbeDoesNotRequireASchemaCheck() {
+        // This is the adversarial half: probing the schema's own check could only confirm the schema. The
+        // requirement's bound is what the probe tests, which is how a missing or weakened check is found.
+        SqlSchemaModel model = model("""
+                CREATE TABLE ledger (id INTEGER PRIMARY KEY, amount NUMERIC NOT NULL);
+                """);
+
+        assertTrue(SqlConstraintProbe.boundProbe(model, "ledger", "amount",
+                new java.math.BigDecimal("1000"), true).isPresent());
+    }
+
+    @Test
+    @DisplayName("a bound on the key itself, or on a table with composite keys, produces no probe")
+    void boundProbeDeclinesShapesItCannotIsolate() {
+        SqlSchemaModel keyBound = model("CREATE TABLE ledger (id INTEGER PRIMARY KEY);");
+        assertTrue(SqlConstraintProbe.boundProbe(keyBound, "ledger", "id",
+                new java.math.BigDecimal("10"), true).isEmpty());
+
+        SqlSchemaModel composite = model("""
+                CREATE TABLE posting (account_id INTEGER NOT NULL, seq INTEGER NOT NULL, amount NUMERIC NOT NULL,
+                  PRIMARY KEY (account_id, seq));
+                """);
+        assertTrue(SqlConstraintProbe.boundProbe(composite, "posting", "amount",
+                new java.math.BigDecimal("10"), true).isEmpty(),
+                "two rows cannot be kept identical in everything but the value when the key is composite");
+    }
+
+    @Test
     @DisplayName("a value that satisfies a numeric bound is derived for the row template")
     void satisfyingValueForBound() {
         assertEquals("0", SqlConstraintProbe.satisfyingValueFor("amount >= 0", "amount").orElseThrow());

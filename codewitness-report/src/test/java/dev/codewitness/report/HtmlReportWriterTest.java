@@ -7,14 +7,18 @@ import dev.codewitness.core.model.LanguageId;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.Severity;
+import dev.codewitness.core.model.TestCaseResult;
+import dev.codewitness.core.model.TestResult;
 import dev.codewitness.core.requirements.RequirementSet;
 import dev.codewitness.core.result.VerificationReport;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -45,6 +49,22 @@ class HtmlReportWriterTest {
         assertTrue(html.indexOf("CODEWITNESS") < html.indexOf("id=\"requirements\""),
                 "executive summary must come first");
         assertTrue(html.contains("Executive summary"));
+    }
+
+    @Test
+    @DisplayName("a test result with no note of its own still renders a complete report")
+    void aNullTestNoteDoesNotAbortTheReport() {
+        // TestResult documents its note as optional and treats null as "no note", so the renderer has to
+        // agree. Calling isBlank() on it aborted the whole HTML report for a runner that had nothing to
+        // add, which is what the SQL adapter's runner does.
+        VerificationReport noNote = ReportFixtures.reportWithTests(TestResult.from(
+                List.of(TestCaseResult.passed("ledger", "isBalanced", Duration.ofMillis(2))),
+                Duration.ofMillis(2), List.of(), null));
+
+        String rendered = new HtmlReportWriter().render(noNote);
+
+        assertTrue(rendered.contains("</html>"), "the report must still be complete");
+        assertFalse(rendered.contains("Note: null"), "a missing note must not be printed");
     }
 
     @Test

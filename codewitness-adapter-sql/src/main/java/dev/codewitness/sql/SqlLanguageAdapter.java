@@ -84,6 +84,7 @@ public final class SqlLanguageAdapter implements LanguageAdapter {
         // GENERATED_TESTS is what makes a requirement verifiable rather than only refutable: the
         // schema-derived constraint probes are executed, and a constraint that does not fire fails.
         return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.SECURITY_SCAN, Capability.GENERATED_TESTS, Capability.PROPERTY_TESTING);
+                Capability.SECURITY_SCAN, Capability.GENERATED_TESTS, Capability.PROPERTY_TESTING,
+                Capability.MUTATION);
     }
 }

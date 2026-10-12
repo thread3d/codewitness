@@ -1,0 +1,18 @@
+# Verification configuration for the SQL fixture.
+#
+# The fixture needs no toolchain: the schema is loaded into SQLite through the JDBC driver already in
+# the build, so the end-to-end test that drives it never skips. The network is forbidden for the same
+# reason it is forbidden in every other fixture: nothing here should reach out.
+project:
+  name: sql-withdrawal-ledger
+
+sandbox:
+  mode: local-process
+  allow_network: false
+
+tests:
+  enabled: true
+
+property_testing:
+  enabled: true
+  max_scenarios: 20

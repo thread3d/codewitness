@@ -201,6 +201,50 @@ class SqlGeneratedTestsTest {
     }
 
     @Test
+    @DisplayName("a stated bound is probed against the requirement, so a schema without the check fails")
+    void probesTheStatedBoundNotTheSchema() throws IOException {
+        // The requirement says the amount must not exceed 1000; the schema declares no check for it. A
+        // probe built from the schema's own constraints would find nothing to test, which is exactly how a
+        // dropped constraint goes unnoticed.
+        write("db/schema.sql", "CREATE TABLE ledger (id INTEGER PRIMARY KEY, amount NUMERIC NOT NULL);\n");
+        Requirement bounded = Requirement.builder("R-002", "The amount must not exceed 1000.")
+                .title("Upper bound").build();
+        VerificationObligation bound = new VerificationObligation("OB-B", "R-002",
+                "values above the bound must be rejected", ObligationKind.UPPER_BOUND,
+                ObligationOrigin.REQUIREMENT_TEXT, null,
+                Map.of("value", new java.math.BigDecimal("1000"), "direction", "upper"), false);
+
+        List<GeneratedTest> tests = new SqlTestGenerator().generate(context(), bounded, List.of(bound));
+        assertEquals(1, tests.size(), tests.toString());
+
+        GeneratedTestExecution execution = new SqlGeneratedTestExecutor().execute(context(), tests);
+
+        assertEquals(TestOutcome.FAILED, execution.result().cases().getFirst().outcome(),
+                "the schema accepts a value above the stated bound, which is the defect");
+        assertTrue(execution.result().cases().getFirst().failureMessage().contains("1001"),
+                execution.result().cases().getFirst().failureMessage());
+    }
+
+    @Test
+    @DisplayName("a stated bound passes when the schema enforces it")
+    void statedBoundPassesWhenEnforced() throws IOException {
+        write("db/schema.sql", "CREATE TABLE ledger (id INTEGER PRIMARY KEY, "
+                + "amount NUMERIC NOT NULL CHECK (amount <= 1000));\n");
+        Requirement bounded = Requirement.builder("R-002", "The amount must not exceed 1000.")
+                .title("Upper bound").build();
+        VerificationObligation bound = new VerificationObligation("OB-B", "R-002",
+                "values above the bound must be rejected", ObligationKind.UPPER_BOUND,
+                ObligationOrigin.REQUIREMENT_TEXT, null,
+                Map.of("value", new java.math.BigDecimal("1000"), "direction", "upper"), false);
+
+        List<GeneratedTest> tests = new SqlTestGenerator().generate(context(), bounded, List.of(bound));
+        GeneratedTestExecution execution = new SqlGeneratedTestExecutor().execute(context(), tests);
+
+        assertEquals(TestOutcome.PASSED, execution.result().cases().getFirst().outcome(),
+                execution.result().cases().getFirst().failureMessage());
+    }
+
+    @Test
     @DisplayName("a tree with no CREATE TABLE yields no probes and says so rather than guessing")
     void noSchemaYieldsNoProbes() throws IOException {
         write("db/query.sql", "SELECT 1;\n");

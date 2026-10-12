@@ -760,8 +760,9 @@ codewitness/
 │                               no coverage export and no dependency inventory
 ├── codewitness-adapter-sql/    SQL projects: schema and migration loading into an ephemeral SQLite
 │                               database as the language's first failure, declared SQL test scripts
-│                               whose assertion queries must return no rows, heuristics and security;
-│                               no coverage and no dependency inventory
+│                               whose assertion queries must return no rows, generated constraint probes,
+│                               schema mutation, heuristics and security; no coverage and no dependency
+│                               inventory
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -1672,8 +1673,15 @@ The honest limits of Verilog support are:
   evidence therefore carries no command, and reproducing a failure means running the two steps;
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
-The SQL adapter is implemented and exercised by its own tests, which load a real SQLite database
-rather than a mock:
+The SQL adapter is implemented and exercised end to end (`fixtures/sql-withdrawal-ledger`), and it is
+the one fixture whose end-to-end test never skips: it needs no toolchain, because the schema is loaded
+into SQLite through the JDBC driver already in the build. The fixture's defect is a constraint the schema
+never declares — R-001 states a floor that nothing enforces — and the run reports R-001 `FAILED` with the
+generated probe's counterexample, R-002 `VERIFIED` where the same kind of probe meets a check that is
+enforced, R-003 `FAILED` from the project's own assertion script, and R-004 `UNVERIFIED`. Its two scripts
+also exercise the declared bound from both sides, so mutation reports 2 mutants generated and 2 killed —
+the fixture's suite constrains the schema's one value rule. Its tests load
+a real SQLite database rather than a mock:
 
 - detection of SQL trees by extension (`.sql`, `.ddl`) and the one split that matters: schema and
   migration scripts against test scripts. A file is a test when it sits under a `test`, `tests` or
@@ -1693,19 +1701,30 @@ rather than a mock:
   case, so it maps to the requirement whose id its file mentions and carries a `sqlite3` replay recipe
   when that tool is installed;
 - generated adversarial tests from the schema itself (`sql-constraint-probes`): the DDL already states
-  the rules, so each declared constraint becomes a probe — a row that violates it, preceded by
+  some of the rules, so each declared constraint becomes a probe — a row that violates it, preceded by
   `-- expect: error` — executed against a fresh database on a connection with foreign keys enforced. A
-  constraint that does not fire is the defect this finds, which is exactly what a migration that quietly
-  dropped or weakened a `NOT NULL`, a `CHECK` or a foreign key produces. Probes are chosen for the
+  requirement that states a numeric bound is probed against **that** bound rather than against whatever
+  the schema declares: a row exactly at the bound must be accepted and a row one step outside it must be
+  rejected, so a constraint that is missing, or weaker than the requirement, makes the probe fail. That
+  distinction is the difference between confirming the schema and finding the defect — a probe built only
+  from the schema's own checks can never see a check that is not there. Probes are chosen for the
   obligation at hand rather than dumped wholesale: a `REJECTION` or boundary obligation is tested by the
-  `CHECK`s, a `NULL_HANDLING` one by the `NOT NULL`s, and only a general invariant by everything the
-  schema declares. A requirement that names a column is not credited with a constraint on a different
-  one, so a requirement about negative amounts is not "verified" by a check on a transaction's kind —
-  it stays `UNVERIFIED`, and the absence of a rule that would refuse the value is the honest answer.
-  This is what makes a SQL requirement capable of reaching `VERIFIED`: the probe is executed, it asserts,
-  and the database's own refusal is the evidence. Probes are deliberately conservative — a constraint
-  whose expression the reader cannot understand produces no probe, because one rejected for a different
-  reason would pass without the constraint ever firing;
+  `CHECK`s and by a stated bound, a `NULL_HANDLING` one by the `NOT NULL`s, and only a general invariant
+  by everything the schema declares. A requirement that names a column is not credited with a constraint
+  on a different one, so a requirement about negative amounts is not "verified" by a check on a
+  transaction's kind — it stays `UNVERIFIED`, and the absence of a rule that would refuse the value is
+  the honest answer. This is what makes a SQL requirement capable of reaching `VERIFIED`: the probe is
+  executed, it asserts, and the database's own refusal is the evidence. Probes are deliberately
+  conservative — a constraint whose expression the reader cannot understand produces no probe, because one
+  rejected for a different reason would pass without the constraint ever firing, and a stated-bound probe
+  is only built when the requirement names exactly one schema column, so an ambiguous bound falls back to
+  the schema's own constraints instead of guessing;
+- mutation testing over the schema (`sql-schema-mutation`, report tool `sql-schema`): each `CHECK` clause
+  is mutated — a comparison boundary moved one step, and the clause replaced by `CHECK (1)` — loaded into a
+  database and judged by the project's own test scripts, each of which runs against its own fresh database
+  loaded from that mutant. A mutant no script detects is a survivor, reported as a test-strength
+  limitation exactly as the other adapters report one, and a mutant whose schema does not load is
+  non-viable and excluded from the score rather than counted as killed;
 - static analysis over a SQL rule table (`sql-heuristics`) read through a literal-aware `SqlSourceScan`
   that blanks comments and quoted regions, so a rule sees what the database would execute: `SELECT *`,
   an `UPDATE` or `DELETE` with no `WHERE`, a comparison with `NULL` using `=` or `<>`, `NOT IN` over a
@@ -1726,7 +1745,12 @@ The honest limits of SQL support are:
 - a test script should mention exactly one requirement id. The core attributes a test file to the
   requirement whose id it names, and its case-level attribution is single-valued, so a script that names
   two requirements has its executed cases counted for only one of them. One script per requirement is
-  the convention the adapter documents and the one it is tested against;
+  the convention the adapter documents and the one it is tested against. This is a deliberate decision
+  rather than an oversight: making that attribution multi-valued in the core would change which
+  requirements a test supports for **every** language - a Java test class that mentions two ids in
+  comments would begin to support both - so it would move verdicts across the whole tool. The fixture
+  therefore keeps one script per requirement, and the convention is stated here rather than fixed
+  silently;
 - a schema that is not SQLite is out of reach for now: the adapter loads into SQLite because the driver
   is already in the build and needs no server. A `database:` declaration in `codewitness.yaml` prepares
   a database for a project's **own** tests in any language and is independent of this adapter, which
@@ -1740,8 +1764,12 @@ The honest limits of SQL support are:
   `length`). A constraint expressed in a shape it cannot read produces no probe, so a requirement about
   such a rule stays `UNVERIFIED` rather than being credited with a probe that could pass for the wrong
   reason;
-- mutation testing is not measured. The adapter declares no mutation capability, so a run on a SQL tree
-  reports mutation as not measured rather than inventing a score.
+- mutation testing covers the `CHECK` constraints only. The operator set is deliberately small — a
+  comparison boundary inside a `CHECK` (`<=` becomes `<` and the reverse) and a `CHECK` replaced by
+  `CHECK (1)`, which accepts every row — and `NOT NULL`, `UNIQUE` and key constraints are not mutated,
+  because a small set whose every survivor is unambiguous is worth more than a larger one whose survivors
+  are not. Mutation is not measured when the project has no test script to kill anything, or when the
+  schema declares no `CHECK`.
 
 Implemented but limited, and reported as such:
 

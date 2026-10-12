@@ -427,7 +427,7 @@ public final class HtmlReportWriter {
                 .append("</td><td class=\"num\">").append(tests.skipped())
                 .append("</td><td class=\"num\">").append(tests.duration().toMillis())
                 .append("</td></tr>\n</tbody>\n</table>\n");
-        if (!tests.note().isBlank()) {
+        if (hasNote(tests.note())) {
             html.append("<p class=\"muted\">Note: ").append(esc(tests.note())).append("</p>\n");
         }
         List<TestCaseResult> failures = tests.failures();
@@ -477,7 +477,7 @@ public final class HtmlReportWriter {
                 .append("</td><td class=\"num\">").append(mutation.timedOut())
                 .append("</td><td class=\"num\">").append(percent(mutation.scorePercent()))
                 .append("</td></tr>\n</tbody>\n</table>\n");
-        if (!mutation.note().isBlank()) {
+        if (hasNote(mutation.note())) {
             html.append("<p class=\"muted\">Note: ").append(esc(mutation.note())).append("</p>\n");
         }
         html.append("<h3>Surviving mutants</h3>\n");
@@ -526,7 +526,7 @@ public final class HtmlReportWriter {
                 .append("</td><td class=\"num\">").append(coverage.branchCovered()).append(" / ")
                 .append(coverage.branchTotal())
                 .append("</td></tr>\n</tbody>\n</table>\n");
-        if (!coverage.note().isBlank()) {
+        if (hasNote(coverage.note())) {
             html.append("<p class=\"muted\">Note: ").append(esc(coverage.note())).append("</p>\n");
         }
         // Per-file coverage is computed and stored by several adapters, so it is shown here rather than
@@ -632,11 +632,11 @@ public final class HtmlReportWriter {
             }
             html.append("</tbody>\n</table>\n");
         }
-        if (!dependencies.advisoryScan().note().isBlank()) {
+        if (hasNote(dependencies.advisoryScan().note())) {
             html.append("<p class=\"muted\">Advisory scan: ").append(esc(dependencies.advisoryScan().note()))
                     .append("</p>\n");
         }
-        if (!dependencies.note().isBlank()) {
+        if (hasNote(dependencies.note())) {
             html.append("<p class=\"muted\">Note: ").append(esc(dependencies.note())).append("</p>\n");
         }
         html.append("</section>\n");
@@ -934,6 +934,19 @@ public final class HtmlReportWriter {
      * @param value value to escape, may be {@code null}
      * @return escaped text, never {@code null}
      */
+    /**
+     * @return {@code true} when a note is present and worth printing.
+     *
+     * <p>A note is optional by contract - {@link dev.codewitness.core.model.TestResult} documents it as
+     * "explanation when tests were not executed, or extra context" and its own {@code describeWithNote}
+     * treats {@code null} as no note - so the renderer has to treat it the same way. Calling
+     * {@code isBlank()} on it instead aborted the whole HTML report for any adapter whose runner had
+     * nothing extra to say.
+     */
+    private static boolean hasNote(String note) {
+        return note != null && !note.isBlank();
+    }
+
     private static String esc(String value) {
         if (value == null) {
             return "";
