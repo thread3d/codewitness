@@ -288,6 +288,7 @@ class DependencyAdvisoryStrategyTest {
                 .artifacts(new ArtifactStore(tmp.resolve("artifacts")))
                 .budget(new BudgetUsage.Tracker(Budget.defaults()))
                 .sandbox(new LocalProcessSandbox(List.of(tmp)))
+                .codeMap(RequirementCodeMapper.build(project(), new RequirementSet(List.of(requirement))))
                 .evidenceLedger(new EvidenceLedger("CW-2026-01-01-TEST0"))
                 .build();
         context.state().dependencies(dependencies);
@@ -325,6 +326,8 @@ class DependencyAdvisoryStrategyTest {
                         true, "osv", "https://api.osv.dev", Duration.ofSeconds(5), 100, Severity.HIGH)),
                 defaults.llm(), defaults.report(), defaults.sandbox(), List.of());
 
+        Requirement requirement = Requirement.builder("REQ-TS", "The frontend must behave.").title("TS")
+                .attribute("paths", "ledger.test.ts").build();
         VerificationContext context = VerificationContext.builder()
                 .runId("CW-2026-01-01-TEST0")
                 .projectRef(ProjectRef.of(tmp))
@@ -334,11 +337,10 @@ class DependencyAdvisoryStrategyTest {
                 .artifacts(new ArtifactStore(tmp.resolve("artifacts")))
                 .budget(new BudgetUsage.Tracker(Budget.defaults()))
                 .sandbox(new LocalProcessSandbox(List.of(tmp)))
+                .codeMap(RequirementCodeMapper.build(single, new RequirementSet(List.of(requirement))))
                 .evidenceLedger(new EvidenceLedger("CW-2026-01-01-TEST0"))
                 .build();
         context.state().dependencies(dependencies);
-        Requirement requirement = Requirement.builder("REQ-TS", "The frontend must behave.").title("TS")
-                .attribute("paths", "ledger.test.ts").build();
         return new Fixture(context, requirement);
     }
 
@@ -347,9 +349,7 @@ class DependencyAdvisoryStrategyTest {
     }
 
     private StrategyOutcome verify(Fixture fixture, VerificationProviderRegistry providers) {
-        RequirementCodeMapper mapper = RequirementCodeMapper.build(
-                fixture.context().projectInfo(), new RequirementSet(List.of(fixture.requirement())));
-        return new DependencyAdvisoryStrategy(mapper, providers)
+        return new DependencyAdvisoryStrategy(providers)
                 .verify(fixture.context(), fixture.requirement(), List.of());
     }
 

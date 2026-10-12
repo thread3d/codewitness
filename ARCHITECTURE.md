@@ -528,9 +528,12 @@ two-step replay recipe itself, because the core has no single command to ask for
 executor does the same for a generated testbench, and its mutation tester wraps the pair in one shell
 command per mutant, which is the shape the shared mutator's one-command-per-mutant loop accepts.
 
-**Another verification strategy.** Implement `VerificationStrategy`. It receives the context, the
-requirement and its obligations, and returns evidence plus per-obligation outcomes. It cannot assign
-a verdict; only the engine can.
+**Another verification strategy.** Implement `VerificationStrategy` and register it on the
+`VerificationProviderRegistry`, exactly like a tool. It receives the context, the requirement and its
+obligations, and returns evidence plus per-obligation outcomes. It cannot assign a verdict; only the
+engine can. The requirement-to-code mapping is not a constructor argument - it is created after
+inspection and read from `VerificationContext.codeMap()`, which is what lets a strategy be registered
+before the run rather than built by the engine during it.
 
 ## 8. Isolation and reproducibility
 

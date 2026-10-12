@@ -143,6 +143,24 @@ public final class VerificationProviderRegistry {
         return strategies.stream().filter(c -> c.supports(project)).toList();
     }
 
+    /**
+     * @return {@code true} when any strategy has been registered, regardless of whether it claims the
+     *     project.
+     *
+     * <p>The distinction from {@link #strategies(ProjectInfo)} matters to the engine's default: an empty
+     * registry means the caller wired no strategies and the built-in set should run, while a registry with
+     * strategies that all decline this project means the caller chose a set on purpose and the engine must
+     * honour that choice rather than quietly substituting its own.
+     */
+    public boolean hasStrategies() {
+        return !strategies.isEmpty();
+    }
+
+    /** @return every registered strategy, unfiltered by project, in registration order. */
+    public List<VerificationStrategy> strategies() {
+        return List.copyOf(strategies);
+    }
+
     public List<String> providerIds() {
         List<String> ids = new ArrayList<>();
         compilers.forEach(c -> ids.add("compiler:" + c.id()));

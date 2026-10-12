@@ -37,6 +37,7 @@ public final class VerificationContext {
     private final ExecutionSandbox sandbox;
     private final Instant startedAt;
     private final RunState state;
+    private final RequirementCodeMap codeMap;
     private final dev.codewitness.core.evidence.EvidenceLedger evidenceLedger;
 
     private VerificationContext(Builder builder) {
@@ -53,6 +54,7 @@ public final class VerificationContext {
         this.startedAt = builder.startedAt;
         this.state = builder.state;
         this.evidenceLedger = builder.evidenceLedger;
+        this.codeMap = builder.codeMap;
         this.projectInfo = rebase(builder.projectInfo);
     }
 
@@ -117,6 +119,18 @@ public final class VerificationContext {
     /** Results of the deterministic phases completed so far. */
     public RunState state() {
         return state;
+    }
+
+    /**
+     * The requirement-to-code mapping for this run.
+     *
+     * <p>It is never {@code null}: a context built without one carries {@link RequirementCodeMap#empty()},
+     * so a strategy can always ask and correctly gets "nothing is mapped" rather than failing. A strategy
+     * reads the mapping here instead of being constructed with it, which is what lets a strategy be
+     * registered as a provider rather than created by the engine.
+     */
+    public RequirementCodeMap codeMap() {
+        return codeMap;
     }
 
     /** The evidence ledger of this run; strategies record their observations here. */
@@ -197,6 +211,7 @@ public final class VerificationContext {
         private ExecutionSandbox sandbox;
         private Instant startedAt = Instant.now();
         private RunState state = new RunState();
+        private RequirementCodeMap codeMap = RequirementCodeMap.empty();
         private dev.codewitness.core.evidence.EvidenceLedger evidenceLedger;
 
         public Builder runId(String value) {
@@ -262,6 +277,17 @@ public final class VerificationContext {
         /** Shares the mutable phase-result holder between contexts of the same run. */
         public Builder state(RunState value) {
             this.state = value;
+            return this;
+        }
+
+        /**
+         * Sets the requirement-to-code mapping the strategies read.
+         *
+         * <p>A {@code null} value keeps the empty mapping: a context without attribution is honest,
+         * while a context that cannot answer at all would be a crash waiting in a strategy.
+         */
+        public Builder codeMap(RequirementCodeMap value) {
+            this.codeMap = value == null ? RequirementCodeMap.empty() : value;
             return this;
         }
 

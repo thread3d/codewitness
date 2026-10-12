@@ -12,15 +12,19 @@ import dev.codewitness.core.model.TestResult;
 import dev.codewitness.core.requirements.Requirement;
 import dev.codewitness.core.requirements.RequirementSet;
 import dev.codewitness.core.requirements.RequirementStatus;
+import dev.codewitness.core.requirements.VerificationObligation;
 import dev.codewitness.core.result.Budget;
+import dev.codewitness.core.result.Counterexample;
 import dev.codewitness.core.result.RunStatus;
 import dev.codewitness.core.result.VerificationReport;
 import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
 import dev.codewitness.core.spi.LanguageDetector;
 import dev.codewitness.core.spi.LanguageDetectorRegistry;
+import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
+import dev.codewitness.core.spi.VerificationStrategy;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -118,6 +123,93 @@ class VerificationEngineTest {
         assertTrue(report.evidence().stream().anyMatch(e -> e.type()
                         == dev.codewitness.core.evidence.EvidenceType.PROJECT_INSPECTION),
                 "inspection is always recorded");
+    }
+
+    @Test
+    @DisplayName("a verification strategy registered as a provider runs, exactly like a tool")
+    void aRegisteredStrategyRuns() {
+        // Strategies used to be a list the engine built for itself, so an adapter or an embedder could
+        // add a compiler, a test runner or an analyzer but never a strategy; the only way to run one was
+        // to edit the engine. Registering one now has the same standing as registering a tool, which is
+        // what a data-logic strategy - or any third party's - needs in order to exist outside this tree.
+        VerificationProviderRegistry providers = VerificationProviderRegistry.empty();
+        providers.register(new DeclaringStrategy());
+        LanguageAdapterRegistry languages = LanguageAdapterRegistry.of(
+                adapter(Set.of(Capability.INSPECT, Capability.BUILD), true));
+
+        VerificationReport report = new VerificationEngine(languages, providers)
+                .verify(ProjectRef.of(tmp), requirements(), VerificationConfig.defaults(),
+                        (phase, message) -> { });
+
+        assertEquals(RequirementStatus.FAILED, report.verdicts().getFirst().status(),
+                "the registered strategy's counterexample must reach the verdict: " + report.verdicts());
+    }
+
+    @Test
+    @DisplayName("a registry that has strategies is honoured even when none claims the project")
+    void aRegistryWithStrategiesIsNotSubstituted() {
+        // The default set is a fallback for an empty registry, not a floor under every run. A caller that
+        // registers a strategy that declines this project has made a choice, and the engine must not
+        // quietly add its own strategies on top - that is the difference between a fallback and a surprise.
+        VerificationProviderRegistry providers = VerificationProviderRegistry.empty();
+        providers.register(new DecliningStrategy());
+        LanguageAdapterRegistry languages = LanguageAdapterRegistry.of(
+                adapter(Set.of(Capability.INSPECT, Capability.BUILD), true));
+
+        VerificationReport report = new VerificationEngine(languages, providers)
+                .verify(ProjectRef.of(tmp), requirements(), VerificationConfig.defaults(),
+                        (phase, message) -> { });
+
+        assertEquals(RequirementStatus.UNVERIFIED, report.verdicts().getFirst().status(),
+                "no registered strategy claimed the requirement, so nothing verified it: " + report.verdicts());
+    }
+
+    /**
+     * The shape an embedder registers: it claims the project and refutes the requirement with a single
+     * counterexample, so whether it ran is visible in the verdict rather than only in a log.
+     */
+    private static final class DeclaringStrategy implements VerificationStrategy {
+
+        @Override
+        public String id() {
+            return "declaring-strategy";
+        }
+
+        @Override
+        public boolean supports(ProjectInfo project) {
+            return true;
+        }
+
+        @Override
+        public StrategyOutcome verify(VerificationContext context, Requirement requirement,
+                List<VerificationObligation> obligations) {
+            Counterexample counterexample = new Counterexample("CE-STRATEGY", requirement.id(), null,
+                    "the registered strategy ran", Map.<String, Object>of(), "expected", "observed",
+                    "the strategy must be consulted", "declaring-strategy", null, null, null,
+                    Counterexample.DiscoveryMethod.STATIC_ANALYSIS);
+            return new StrategyOutcome(id(), requirement.id(), List.of(), List.of(counterexample), List.of(),
+                    List.of("the registered strategy ran"));
+        }
+    }
+
+    /** A registered strategy that claims nothing, so the engine must run nothing. */
+    private static final class DecliningStrategy implements VerificationStrategy {
+
+        @Override
+        public String id() {
+            return "declining-strategy";
+        }
+
+        @Override
+        public boolean supports(ProjectInfo project) {
+            return false;
+        }
+
+        @Override
+        public StrategyOutcome verify(VerificationContext context, Requirement requirement,
+                List<VerificationObligation> obligations) {
+            throw new AssertionError("a strategy that declines the project must never be called");
+        }
     }
 
     // ------------------------------------------------------------------ polyglot projects

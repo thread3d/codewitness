@@ -1,12 +1,7 @@
 package dev.codewitness.core.engine;
 
 import dev.codewitness.core.config.VerificationConfig;
-import dev.codewitness.core.engine.strategy.DependencyAdvisoryStrategy;
-import dev.codewitness.core.engine.strategy.ExistingTestsStrategy;
-import dev.codewitness.core.engine.strategy.GeneratedTestsStrategy;
-import dev.codewitness.core.engine.strategy.LlmAdvisoryStrategy;
-import dev.codewitness.core.engine.strategy.MutationStrategy;
-import dev.codewitness.core.engine.strategy.StaticAnalysisStrategy;
+import dev.codewitness.core.engine.strategy.DefaultStrategies;
 import dev.codewitness.core.evidence.Evidence;
 import dev.codewitness.core.evidence.EvidenceConfidence;
 import dev.codewitness.core.evidence.EvidenceLedger;
@@ -59,6 +54,7 @@ import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
 import dev.codewitness.core.spi.LanguageDetectorRegistry;
 import dev.codewitness.core.spi.ProgressListener;
+import dev.codewitness.core.spi.RequirementCodeMap;
 import dev.codewitness.core.spi.RunState;
 import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
@@ -282,7 +278,8 @@ public final class VerificationEngine {
                 List<BuildResult> results = new ArrayList<>();
                 for (Inspection inspection : builders) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
+                            RequirementCodeMap.empty());
                     BuildResult build = firstCompiler(languageContext)
                             .map(compiler -> compiler.build(languageContext))
                             .orElseGet(() -> inspection.adapter().build(languageContext));
@@ -342,7 +339,8 @@ public final class VerificationEngine {
                     // against, and a language whose suite did not run is not one to spend mutant budget on.
 
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
+                            RequirementCodeMap.empty());
                     Optional<VerificationTools.TestRunner> testRunner = firstTestRunner(languageContext);
                     TestResult tests = testRunner
                             .map(runner -> runner.runTests(languageContext))
@@ -388,7 +386,8 @@ public final class VerificationEngine {
                 List<Finding> findings = new ArrayList<>();
                 for (Inspection inspection : analysable) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
+                            RequirementCodeMap.empty());
                     // Registered providers are the extension point, and every bundled adapter registers
                     // one. Calling adapter.analyze() as well ran the whole pass twice - including a second
                     // -Xlint:all compile - for findings that were then deduplicated away. The adapter level
@@ -437,7 +436,8 @@ public final class VerificationEngine {
                 List<Finding> findings = new ArrayList<>();
                 for (Inspection inspection : analysable) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
+                            RequirementCodeMap.empty());
                     var analyzers = providers.securityAnalyzers(inspection.info());
                     List<Finding> found = new ArrayList<>();
                     for (var analyzer : analyzers) {
@@ -468,7 +468,8 @@ public final class VerificationEngine {
                 List<LanguageInventory> inventories = new ArrayList<>();
                 for (Inspection inspection : analysable(inspections, builds)) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
+                            RequirementCodeMap.empty());
                     List<VerificationTools.DependencyAnalyzer> analyzers =
                             providers.dependencyAnalyzers(inspection.info());
                     DependencyReport report = analyzers.isEmpty()
@@ -528,7 +529,8 @@ public final class VerificationEngine {
                 List<CoverageReport> results = new ArrayList<>();
                 for (Inspection inspection : coverable) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
+                            RequirementCodeMap.empty());
                     List<VerificationTools.CoverageProvider> coverageProviders =
                             providers.coverageProviders(inspection.info());
                     CoverageReport coverage = coverageProviders.isEmpty()
@@ -573,7 +575,8 @@ public final class VerificationEngine {
                 List<MutationReport> results = new ArrayList<>();
                 for (Inspection inspection : mutable) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
+                            RequirementCodeMap.empty());
                     List<VerificationTools.MutationTester> testers = providers.mutationTesters(inspection.info());
                     MutationReport report = testers.isEmpty()
                             ? MutationReport.notMeasured("none", "no mutation tester registered for "
@@ -626,7 +629,17 @@ public final class VerificationEngine {
         RequirementSet plannedSet = new RequirementSet(planned);
 
         // ---------------------------------------------------------------- requirement strategies
-        List<VerificationStrategy> strategies = defaultStrategies(mapper);
+        // Strategies are providers, exactly like compilers and test runners: the composition root
+        // registers the ones it wants and the engine runs whatever it finds, in registration order. A bare
+        // engine with an empty registry - a unit test, an embedder that wired only tools - runs the built-in
+        // set rather than silently running none, because a run with no strategies would report every
+        // requirement UNVERIFIED for a reason that is about our wiring, not about the code. A registry that
+        // has strategies is honoured as it stands, even when every one of them declines this project.
+        List<VerificationStrategy> strategies = providers.hasStrategies()
+                ? providers.strategies(info)
+                : DefaultStrategies.create(providers).stream()
+                        .filter(strategy -> strategy.supports(info))
+                        .toList();
         Map<String, List<ObligationOutcome>> outcomesByRequirement = new LinkedHashMap<>();
         Map<String, List<Counterexample>> counterexamplesByRequirement = new LinkedHashMap<>();
         Map<String, List<String>> notesByRequirement = new LinkedHashMap<>();
@@ -642,7 +655,7 @@ public final class VerificationEngine {
             Inspection owner = ownerOf(requirement, mapper, inspections);
             Inspection running = owner != null ? owner : inspections.getFirst();
             VerificationContext requirementContext = contextFor(running, runId, project, config, workspace,
-                    artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt);
+                    artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt, mapper);
             if (inspections.size() > 1 && owner == null) {
                 notes.add("This requirement could not be attributed to any language in the project, so its "
                         + "strategies ran against " + running.adapter().id()
@@ -802,7 +815,7 @@ public final class VerificationEngine {
         for (LanguageAdapter adapter : adapters) {
             VerificationContext inspectContext = context(runId, project, emptyInfo(project), config, workspace,
                     artifacts, budget, requirements, LlmProvider.disabled("not initialised"), listener, sandbox,
-                    state, ledger, startedAt);
+                    state, ledger, startedAt, RequirementCodeMap.empty());
             inspections.add(new Inspection(adapter, adapter.inspect(project, inspectContext)));
         }
         return inspections;
@@ -877,9 +890,10 @@ public final class VerificationEngine {
             ExecutionSandbox sandbox,
             RunState state,
             EvidenceLedger ledger,
-            Instant startedAt) {
+            Instant startedAt,
+            RequirementCodeMap codeMap) {
         return context(runId, project, inspection.info(), config, workspace, artifacts, budget, requirements, llm,
-                listener, sandbox, state, ledger, startedAt);
+                listener, sandbox, state, ledger, startedAt, codeMap);
     }
 
     /**
@@ -1211,16 +1225,6 @@ public final class VerificationEngine {
         }
     }
 
-    private List<VerificationStrategy> defaultStrategies(RequirementCodeMapper mapper) {
-        return List.of(
-                new ExistingTestsStrategy(mapper, providers),
-                new StaticAnalysisStrategy(mapper),
-                new DependencyAdvisoryStrategy(mapper, providers),
-                new GeneratedTestsStrategy(providers),
-                new MutationStrategy(mapper),
-                new LlmAdvisoryStrategy());
-    }
-
     private Optional<dev.codewitness.core.spi.VerificationTools.Compiler> firstCompiler(VerificationContext context) {
         var compilers = providers.compilers(context.projectInfo());
         return compilers.isEmpty() ? Optional.empty() : Optional.of(compilers.getFirst());
@@ -1256,7 +1260,8 @@ public final class VerificationEngine {
             ExecutionSandbox sandbox,
             RunState state,
             EvidenceLedger ledger,
-            Instant startedAt) {
+            Instant startedAt,
+            RequirementCodeMap codeMap) {
         return VerificationContext.builder()
                 .runId(runId.value())
                 .projectRef(project)
@@ -1270,6 +1275,7 @@ public final class VerificationEngine {
                 .progress(listener)
                 .sandbox(sandbox)
                 .state(state)
+                .codeMap(codeMap)
                 .evidenceLedger(ledger)
                 .startedAt(startedAt)
                 .build();

@@ -1,6 +1,5 @@
 package dev.codewitness.core.engine.strategy;
 
-import dev.codewitness.core.engine.RequirementCodeMapper;
 import dev.codewitness.core.evidence.Evidence;
 import dev.codewitness.core.evidence.EvidenceConfidence;
 import dev.codewitness.core.evidence.EvidenceStatus;
@@ -15,6 +14,7 @@ import dev.codewitness.core.model.Severity;
 import dev.codewitness.core.requirements.Requirement;
 import dev.codewitness.core.requirements.VerificationObligation;
 import dev.codewitness.core.result.Counterexample;
+import dev.codewitness.core.spi.RequirementCodeMap;
 import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
@@ -50,15 +50,10 @@ import java.util.Optional;
  */
 public final class DependencyAdvisoryStrategy implements VerificationStrategy {
 
-    private final RequirementCodeMapper mapper;
     private final VerificationProviderRegistry providers;
 
-    public DependencyAdvisoryStrategy(RequirementCodeMapper mapper) {
-        this(mapper, VerificationProviderRegistry.empty());
-    }
-
-    public DependencyAdvisoryStrategy(RequirementCodeMapper mapper, VerificationProviderRegistry providers) {
-        this.mapper = mapper;
+    /** @param providers the registered analyzers, used to explain an advisory in its own ecosystem. */
+    public DependencyAdvisoryStrategy(VerificationProviderRegistry providers) {
         this.providers = providers == null ? VerificationProviderRegistry.empty() : providers;
     }
 
@@ -86,7 +81,7 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
         }
 
         Severity threshold = context.config().security().vulnerabilities().failOn();
-        List<String> modules = modulesOf(requirement, context.projectInfo());
+        List<String> modules = modulesOf(requirement, context.projectInfo(), context.codeMap());
         if (modules.isEmpty()) {
             notes.add("Dependency advisories were not attributed to " + requirement.id()
                     + ": no file covered by this requirement could be traced to a module, so CodeWitness "
@@ -198,7 +193,7 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
     }
 
     /** @return the modules that own the files this requirement covers, most specific first. */
-    private List<String> modulesOf(Requirement requirement, ProjectInfo project) {
+    private List<String> modulesOf(Requirement requirement, ProjectInfo project, RequirementCodeMap mapper) {
         List<String> modules = new ArrayList<>();
         for (String file : mapper.filesFor(requirement.id())) {
             String module = moduleOf(file, project);

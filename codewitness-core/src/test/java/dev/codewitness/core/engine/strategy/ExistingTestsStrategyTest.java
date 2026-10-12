@@ -99,7 +99,7 @@ class ExistingTestsStrategyTest {
     // ------------------------------------------------------------------ fixture
 
     private record Fixture(VerificationContext context, Requirement requirement,
-            List<VerificationObligation> obligations, RequirementCodeMapper mapper) {
+            List<VerificationObligation> obligations) {
     }
 
     private Fixture fixture(List<TestCaseResult> cases) {
@@ -122,6 +122,7 @@ class ExistingTestsStrategyTest {
                 .artifacts(new ArtifactStore(tmp.resolve("artifacts")))
                 .budget(new BudgetUsage.Tracker(Budget.defaults()))
                 .sandbox(new LocalProcessSandbox(List.of(tmp)))
+                .codeMap(mapper)
                 .evidenceLedger(new EvidenceLedger("CW-2026-01-01-TEST0"))
                 .build();
         context.state().existingTests(TestResult.from(cases, Duration.ofMillis(3), List.of(), null));
@@ -129,11 +130,11 @@ class ExistingTestsStrategyTest {
         VerificationObligation obligation = new VerificationObligation(
                 OBLIGATION_ID, REQUIREMENT_ID, "The limit must hold", ObligationKind.UPPER_BOUND,
                 ObligationOrigin.USER_DECLARED, null, Map.of(), false);
-        return new Fixture(context, requirement, List.of(obligation), mapper);
+        return new Fixture(context, requirement, List.of(obligation));
     }
 
     private static StrategyOutcome verify(Fixture fixture) {
-        return new ExistingTestsStrategy(fixture.mapper(), VerificationProviderRegistry.empty())
+        return new ExistingTestsStrategy(VerificationProviderRegistry.empty())
                 .verify(fixture.context(), fixture.requirement(), fixture.obligations());
     }
 

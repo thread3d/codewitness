@@ -1,6 +1,5 @@
 package dev.codewitness.core.engine.strategy;
 
-import dev.codewitness.core.engine.RequirementCodeMapper;
 import dev.codewitness.core.evidence.Evidence;
 import dev.codewitness.core.evidence.EvidenceConfidence;
 import dev.codewitness.core.evidence.EvidenceStatus;
@@ -14,6 +13,7 @@ import dev.codewitness.core.requirements.RequirementStatus;
 import dev.codewitness.core.requirements.VerificationObligation;
 import dev.codewitness.core.result.Counterexample;
 import dev.codewitness.core.result.ObligationOutcome;
+import dev.codewitness.core.spi.RequirementCodeMap;
 import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationStrategy;
@@ -45,12 +45,6 @@ import java.util.Map;
  */
 public final class StaticAnalysisStrategy implements VerificationStrategy {
 
-    private final RequirementCodeMapper mapper;
-
-    public StaticAnalysisStrategy(RequirementCodeMapper mapper) {
-        this.mapper = mapper;
-    }
-
     @Override
     public String id() {
         return "static-analysis";
@@ -73,6 +67,7 @@ public final class StaticAnalysisStrategy implements VerificationStrategy {
         List<Finding> relevant = new ArrayList<>();
         List<Finding> serious = new ArrayList<>();
         List<Finding> heuristicSerious = new ArrayList<>();
+        RequirementCodeMap mapper = context.codeMap();
         for (Finding finding : context.state().findings()) {
             boolean mapped = mapper.requirementsForFile(finding.file()).contains(requirement.id())
                     || mentions(finding.message(), requirement.id());

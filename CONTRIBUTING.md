@@ -191,6 +191,14 @@ obligations to attempt. Return `StrategyOutcome` with evidence, counterexamples 
 outcomes. You cannot assign a verdict; the engine does that from your evidence. Prefer
 `UNVERIFIED` over optimism.
 
+A strategy is a provider exactly like a tool: register it on the `VerificationProviderRegistry`
+(`providers.register(new MyStrategy(...))`) next to where the adapters register theirs, and the engine
+runs it in registration order for every requirement it claims. The one thing a strategy must not ask
+for at construction time is the requirement-to-code mapping, because the engine creates that after
+inspection: read it from `VerificationContext.codeMap()` inside `verify` instead, as the built-in
+strategies do. The engine falls back to `DefaultStrategies.create(...)` only when nothing at all is
+registered, so a bare embedder still gets verification rather than an empty report.
+
 ## Code style
 
 - Java 25, records for value types, immutable models with builders where a type has many optional

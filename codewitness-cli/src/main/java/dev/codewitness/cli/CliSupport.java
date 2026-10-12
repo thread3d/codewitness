@@ -3,6 +3,7 @@ package dev.codewitness.cli;
 import dev.codewitness.core.config.ConfigLoader;
 import dev.codewitness.core.config.VerificationConfig;
 import dev.codewitness.core.engine.VerificationEngine;
+import dev.codewitness.core.engine.strategy.DefaultStrategies;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
 import dev.codewitness.core.spi.LanguageDetectorRegistry;
@@ -73,6 +74,11 @@ final class CliSupport {
         JavaScriptAdapterBundle.register(languages, providers, true);
         TypeScriptAdapterBundle.register(languages, providers, true);
         languages.discover();
+        // The verification strategies are providers, exactly like the tools above: this composition root
+        // registers the ones that ship, and a caller that wants a different set registers its own. The
+        // engine falls back to this same set only when nothing at all is registered, so an embedder that
+        // wires no strategies gets verification rather than an empty report.
+        DefaultStrategies.create(providers).forEach(providers::register);
         return new Wiring(languages, providers);
     }
 

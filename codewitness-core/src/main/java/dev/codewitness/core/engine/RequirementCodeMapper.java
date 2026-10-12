@@ -2,6 +2,7 @@ package dev.codewitness.core.engine;
 
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.requirements.RequirementSet;
+import dev.codewitness.core.spi.RequirementCodeMap;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -27,8 +28,12 @@ import java.util.stream.Stream;
  *
  * <p>Anything not mapped stays unmapped, and the report says so. CodeWitness never silently
  * attributes a passing test to a requirement it does not mention.
+ *
+ * <p>It implements {@link RequirementCodeMap}, the interface a strategy reads from the
+ * {@link dev.codewitness.core.spi.VerificationContext}, so a strategy depends on the mapping rather
+ * than on the class that produces it.
  */
-public final class RequirementCodeMapper {
+public final class RequirementCodeMapper implements RequirementCodeMap {
 
     private final Map<String, Set<String>> testClassesByRequirement = new LinkedHashMap<>();
     private final Map<String, Set<String>> requirementIdsByAbsolutePath = new LinkedHashMap<>();
@@ -360,11 +365,13 @@ public final class RequirementCodeMapper {
     }
 
     /** @return test classes that mention the requirement. */
+    @Override
     public List<String> testClassesFor(String requirementId) {
         return List.copyOf(testClassesByRequirement.getOrDefault(requirementId, Set.of()));
     }
 
     /** @return the requirement a test class was mapped to, if any. */
+    @Override
     public Optional<String> requirementForTestClass(String className) {
         if (className == null) {
             return Optional.empty();
@@ -386,6 +393,7 @@ public final class RequirementCodeMapper {
     }
 
     /** @return requirements whose mapped files cover the given path, matched by suffix. */
+    @Override
     public Set<String> requirementsForFile(String relativeOrAbsolutePath) {
         Set<String> result = new LinkedHashSet<>();
         if (relativeOrAbsolutePath == null) {
@@ -410,6 +418,7 @@ public final class RequirementCodeMapper {
      *     file that mentions the requirement's identifier. Callers that need to know <em>where</em> a
      *     requirement lives - to tie it to a module, say - need this direction of the mapping.
      */
+    @Override
     public Set<String> filesFor(String requirementId) {
         Set<String> result = new LinkedHashSet<>();
         if (requirementId == null) {

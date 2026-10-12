@@ -1,6 +1,5 @@
 package dev.codewitness.core.engine.strategy;
 
-import dev.codewitness.core.engine.RequirementCodeMapper;
 import dev.codewitness.core.evidence.Evidence;
 import dev.codewitness.core.evidence.EvidenceConfidence;
 import dev.codewitness.core.evidence.EvidenceStatus;
@@ -12,6 +11,7 @@ import dev.codewitness.core.requirements.Requirement;
 import dev.codewitness.core.requirements.VerificationObligation;
 import dev.codewitness.core.result.Counterexample;
 import dev.codewitness.core.result.ObligationOutcome;
+import dev.codewitness.core.spi.RequirementCodeMap;
 import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
@@ -41,12 +41,10 @@ import java.util.Map;
  */
 public final class ExistingTestsStrategy implements VerificationStrategy {
 
-    private final RequirementCodeMapper mapper;
     private final VerificationProviderRegistry providers;
 
-    public ExistingTestsStrategy(RequirementCodeMapper mapper, VerificationProviderRegistry providers) {
-        this.mapper = mapper;
-        this.providers = providers;
+    public ExistingTestsStrategy(VerificationProviderRegistry providers) {
+        this.providers = providers == null ? VerificationProviderRegistry.empty() : providers;
     }
 
     @Override
@@ -69,6 +67,7 @@ public final class ExistingTestsStrategy implements VerificationStrategy {
         List<ObligationOutcome> outcomes = new ArrayList<>();
 
         TestResult tests = context.state().existingTests();
+        RequirementCodeMap mapper = context.codeMap();
         List<String> mappedClasses = mapper.testClassesFor(requirement.id());
 
         if (!tests.executed()) {

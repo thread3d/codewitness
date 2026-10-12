@@ -129,15 +129,19 @@ class StaticAnalysisStrategyTest {
     private Fixture fixture(List<Finding> findings, boolean analyzersRan) {
         Requirement requirement = Requirement.builder(REQUIREMENT_ID, "The requirement holds.")
                 .title("R").attribute("paths", FILE).build();
+        ProjectInfo project = ProjectInfo.builder(ProjectRef.of(tmp)).language(LanguageId.JAVA).build();
+        RequirementCodeMapper mapper =
+                RequirementCodeMapper.build(project, new RequirementSet(List.of(requirement)));
         VerificationContext context = VerificationContext.builder()
                 .runId("CW-2026-01-01-TEST0")
                 .projectRef(ProjectRef.of(tmp))
-                .projectInfo(ProjectInfo.builder(ProjectRef.of(tmp)).language(LanguageId.JAVA).build())
+                .projectInfo(project)
                 .config(VerificationConfig.defaults())
                 .workspace(new WorkspaceManager.Workspace(tmp, WorkspaceManager.Mode.IN_PLACE, "test"))
                 .artifacts(new ArtifactStore(tmp.resolve("artifacts")))
                 .budget(new BudgetUsage.Tracker(Budget.defaults()))
                 .sandbox(new LocalProcessSandbox(List.of(tmp)))
+                .codeMap(mapper)
                 .evidenceLedger(new EvidenceLedger("CW-2026-01-01-TEST0"))
                 .build();
         context.state().addFindings(findings);
@@ -146,12 +150,10 @@ class StaticAnalysisStrategyTest {
     }
 
     private static StrategyOutcome verify(Fixture fixture) {
-        RequirementCodeMapper mapper = RequirementCodeMapper.build(
-                fixture.context().projectInfo(), new RequirementSet(List.of(fixture.requirement())));
         VerificationObligation obligation = new VerificationObligation(
                 OBLIGATION_ID, REQUIREMENT_ID, "Static analysis must not report a serious finding",
                 ObligationKind.STATIC, ObligationOrigin.USER_DECLARED, null, Map.of(), false);
-        return new StaticAnalysisStrategy(mapper)
+        return new StaticAnalysisStrategy()
                 .verify(fixture.context(), fixture.requirement(), List.of(obligation));
     }
 
