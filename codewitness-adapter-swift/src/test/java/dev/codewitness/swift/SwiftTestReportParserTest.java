@@ -123,4 +123,32 @@ class SwiftTestReportParserTest {
         assertTrue(result.cases().stream().anyMatch(c -> c.outcome() == TestOutcome.FAILED),
                 result.cases().toString());
     }
+
+    @Test
+    @DisplayName("swift-corelibs-xctest's dot-separated dialect is read, because a Linux toolchain prints it")
+    void readsCorelibsDialect() {
+        String output = """
+                Test Suite 'All tests' started at 2026-10-12 07:14:06.147
+                Test Case 'WithdrawalLedgerTests.CwScSC_ROLLINGTests.testCwSearch' started at 2026-10-12 07:14:06.148
+                /work/Tests/WithdrawalLedgerTests/Generated/CwScSC_ROLLINGTests.swift:44: error: WithdrawalLedgerTests.CwScSC_ROLLINGTests.testCwSearch : failed - CODEWITNESS_COUNTEREXAMPLE|case=0|seed=42|inputs={t1=85800000, t2=90000000}|actual=140000
+                Test Case 'WithdrawalLedgerTests.CwScSC_ROLLINGTests.testCwSearch' failed (0.010 seconds)
+                Test Case 'WithdrawalLedgerTests.WithdrawalLedgerTests.testAdd' started at 2026-10-12 07:14:06.150
+                Test Case 'WithdrawalLedgerTests.WithdrawalLedgerTests.testAdd' passed (0.001 seconds)
+                \t Executed 2 tests, with 1 failure (0 unexpected) in 0.011 (0.011) seconds
+                """;
+
+        TestResult result = SwiftTestReportParser.parse(output, null, "linux");
+
+        assertTrue(result.executed(), result.note());
+        assertEquals(2, result.total());
+        assertEquals(1, result.passed());
+        assertEquals(1, result.failed());
+        TestCaseResult failed = result.cases().stream()
+                .filter(c -> c.outcome() == TestOutcome.FAILED).findFirst().orElseThrow();
+        assertEquals("WithdrawalLedgerTests.CwScSC_ROLLINGTests", failed.suite(),
+                "the module-qualified suite the engine matches against a generated test's name");
+        assertEquals("testCwSearch", failed.name());
+        assertTrue(failed.failureMessage().contains("CODEWITNESS_COUNTEREXAMPLE"),
+                failed.failureMessage());
+    }
 }

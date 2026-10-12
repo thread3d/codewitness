@@ -325,6 +325,10 @@ public final class SwiftScenarioTestGenerator implements VerificationTools.TestG
         }
         sb.append('\n');
         sb.append("import XCTest\n");
+        // Foundation is imported explicitly rather than relied on transitively: the helpers read the
+        // replay variables through ProcessInfo, and whether importing XCTest re-exports Foundation is a
+        // property of the toolchain, not of this file.
+        sb.append("import Foundation\n");
         sb.append("@testable import ").append(module).append("\n\n");
         sb.append("final class ").append(simpleName).append(": XCTestCase {\n\n");
 

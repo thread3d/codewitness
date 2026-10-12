@@ -10,8 +10,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -23,14 +25,20 @@ import java.util.regex.Pattern;
  * {@code --xunit-output} option exists but, on the toolchains this adapter drives, writes only the
  * results of a Swift Testing run and nothing for XCTest - a pass over an XCTest suite produces no file
  * at all. The stable artifact is therefore the runner's own console, and the lines it prints are as
- * fixed as a report format: every case opens with
- * {@code Test Case '-[Module.Class method]' started.} and closes with the same line ending in
- * {@code passed}, {@code failed} or {@code skipped} and a duration. That is what this parser reads.
+ * fixed as a report format. This parser reads both dialects of that format, because they are not the
+ * same text: Apple's XCTest, which a macOS toolchain ships, prints every case as
+ * {@code Test Case '-[Module.Class method]' started.} and closes it with the same line ending in
+ * {@code passed}, {@code failed} or {@code skipped} and a duration, while swift-corelibs-xctest, which a
+ * Linux toolchain ships, prints {@code Test Case 'Module.Class.method' started at <date>} and closes it
+ * the same way. Reading only Apple's spelling would make every suite on a Linux runner look like it
+ * never ran a case, which is why {@link #identify(String)} normalises the case token from either form to
+ * one suite and method name.
  *
  * <p>A failure's message is not on the closing line. XCTest prints it as a compiler-style diagnostic
- * before the close, {@code /path/File.swift:12: error: -[Module.Class method] : message}, which is
+ * before the close, {@code /path/File.swift:12: error: -[Module.Class method] : message} on Apple's
+ * XCTest and {@code /path/File.swift:12: error: Module.Class.method : message} on corelibs, which is
  * exactly where a generated test's {@code CODEWITNESS_COUNTEREXAMPLE|...} line ends up. The parser
- * collects those lines for the case that is currently running and carries them as its failure message,
+ * records those lines against the case each one names and carries them as that case's failure message,
  * so the counterexample protocol survives a format this project does not control.
  *
  * <p>The suite is recorded exactly as XCTest spells it: {@code Module.Class}. The engine matches it
@@ -51,25 +59,38 @@ public final class SwiftTestReportParser {
     /** Appended to a failure text that was capped, so a reader can tell it was cut rather than ended. */
     private static final String TRUNCATION_MARK = "...";
 
-    /** A case opening: {@code Test Case '-[Module.Class method]' started.} */
-    private static final Pattern STARTED = Pattern.compile(
-            "^\\s*Test Case '-\\[(?<suite>\\S+) (?<name>[^\\]]+)\\]' started\\.?\\s*$");
-
-    /** A case closing: {@code Test Case '-[Module.Class method]' passed (0.001 seconds).} */
-    private static final Pattern FINISHED = Pattern.compile(
-            "^\\s*Test Case '-\\[(?<suite>\\S+) (?<name>[^\\]]+)\\]' "
-                    + "(?<outcome>passed|failed|skipped)(?: \\((?<seconds>[0-9.]+) seconds\\))?\\.?\\s*$");
+    /** The method name recorded when a case token names no method this parser can decompose. */
+    private static final String UNKNOWN = "unknown";
 
     /**
-     * A failure diagnostic that names its case: {@code /path/File.swift:12: error: -[Module.Class method] : message}.
+     * A case line, in either of XCTest's two console dialects.
+     *
+     * <p>Apple's XCTest prints a case as {@code Test Case '-[Module.Class method]' started.} and
+     * {@code … passed (0.001 seconds).}, while swift-corelibs-xctest - the XCTest a Linux toolchain
+     * ships - prints the same case as {@code Test Case 'Module.Class.method' started at <date>} and
+     * {@code … passed (0.001 seconds)}: no square-bracket wrapper, a dot-separated name, a timestamp
+     * after "started", and no trailing period. Both name the case identically in the failure line, and
+     * only the token and the words after it differ, so one pattern captures both and
+     * {@link #identify(String)} normalises the token. Reading only Apple's spelling would make every
+     * suite on a Linux runner look like it never ran a case.
      */
-    private static final Pattern LOCATED_FAILURE = Pattern.compile(
-            "^\\s*(?<file>.+?):(?<line>\\d+):\\s*(?<severity>error|warning):\\s*"
-                    + "-\\[(?<suite>\\S+) (?<name>[^\\]]+)\\]\\s*:?\\s*(?<message>.*)$");
+    private static final Pattern CASE = Pattern.compile("^\\s*Test Case '(?<token>.+?)' (?<rest>.*)$");
 
-    /** A failure diagnostic with no case named, attributed to whatever case is running. */
-    private static final Pattern PLAIN_FAILURE = Pattern.compile(
-            "^\\s*(?<file>.+?):(?<line>\\d+):\\s*(?<severity>error|warning):\\s*(?<message>.*)$");
+    /**
+     * A failure diagnostic, in either dialect:
+     * {@code /path/File.swift:12: error: -[Module.Class method] : message} on Apple's XCTest and
+     * {@code /path/File.swift:12: error: Module.Class.method : message} on corelibs.
+     *
+     * <p>The token between the severity and the message is the case, in the same two spellings
+     * {@link #CASE} handles; it is non-greedy up to the first {@code " : "}, which is the separator in
+     * both dialects and is not something a case name contains.
+     */
+    private static final Pattern FAILURE = Pattern.compile(
+            "^\\s*(?<file>.+?):(?<line>\\d+):\\s*(?<severity>error|warning):\\s*"
+                    + "(?<token>.+?)\\s*:\\s*(?<message>.*)$");
+
+    /** The duration XCTest prints in a case's closing line, in either dialect. */
+    private static final Pattern CASE_SECONDS = Pattern.compile("\\((?<seconds>[0-9.]+) seconds\\)");
 
     /** SwiftPM's own summary: {@code Executed 2 tests, with 1 failure (0 unexpected) in 0.193 seconds}. */
     private static final Pattern SUMMARY = Pattern.compile(
@@ -94,48 +115,45 @@ public final class SwiftTestReportParser {
             return TestResult.notExecuted("swift test produced no output, so no test result was observed");
         }
         List<TestCaseResult> cases = new ArrayList<>();
-        String suite = null;
-        String name = null;
-        List<String> messages = new ArrayList<>();
+        // Failure messages are keyed by the case the failure line names, not by "the case currently
+        // running": both dialects name the case on the failure line itself. That is what makes a parallel
+        // run's interleaved output safe to read, and it means a case whose opening line was never printed
+        // still carries its failure text.
+        Map<String, List<String>> messagesByCase = new LinkedHashMap<>();
         Duration total = Duration.ZERO;
         Integer reportedTotal = null;
         Integer reportedFailed = null;
 
         for (String line : output.split("\\R")) {
-            Matcher started = STARTED.matcher(line);
-            if (started.matches()) {
-                suite = started.group("suite");
-                name = started.group("name");
-                messages = new ArrayList<>();
+            Matcher failure = FAILURE.matcher(line);
+            if (failure.matches()) {
+                CaseId failed = identify(failure.group("token"));
+                if (failed != null) {
+                    messagesByCase.computeIfAbsent(failed.key(), key -> new ArrayList<>())
+                            .add(failure.group("message").strip());
+                }
                 continue;
             }
-            Matcher located = LOCATED_FAILURE.matcher(line);
-            if (located.matches()) {
-                // A diagnostic that names its own case is recorded against that case even when it arrives
-                // out of order, which is what makes a parallel run's interleaving safe to read.
-                messages.add(located.group("message").strip());
-                continue;
-            }
-            Matcher finished = FINISHED.matcher(line);
-            if (finished.matches()) {
-                Duration duration = seconds(finished.group("seconds"));
+            Matcher caseLine = CASE.matcher(line);
+            if (caseLine.matches()) {
+                CaseId id = identify(caseLine.group("token"));
+                String rest = caseLine.group("rest").strip();
+                if (id == null || rest.startsWith("started")) {
+                    // An opening line only names the case; it carries no result.
+                    continue;
+                }
+                TestOutcome outcome = outcomeOf(rest);
+                if (outcome == null) {
+                    // A line the dialect prints for something other than a result - a performance
+                    // measurement, say - is not a case result and is not invented into one.
+                    continue;
+                }
+                List<String> messages = messagesByCase.getOrDefault(id.key(), List.of());
+                Duration duration = seconds(firstGroup(CASE_SECONDS, rest));
                 total = total.plus(duration);
                 cases.add(new TestCaseResult(
-                        finished.group("suite"),
-                        finished.group("name"),
-                        outcome(finished.group("outcome")),
-                        duration,
-                        failureType(messages),
-                        failureText(messages),
-                        null));
-                suite = null;
-                name = null;
-                messages = new ArrayList<>();
-                continue;
-            }
-            Matcher plain = PLAIN_FAILURE.matcher(line);
-            if (plain.matches() && name != null) {
-                messages.add(plain.group("message").strip());
+                        id.suite(), id.name(), outcome, duration,
+                        failureType(messages), failureText(messages), null));
                 continue;
             }
             Matcher summary = SUMMARY.matcher(line);
@@ -247,17 +265,79 @@ public final class SwiftTestReportParser {
         return text.substring(0, end) + TRUNCATION_MARK;
     }
 
-    /** @return the model's outcome. An unknown status is an error: it did not demonstrably pass. */
-    private static TestOutcome outcome(String status) {
-        if (status == null) {
-            return TestOutcome.ERROR;
+    /**
+     * @return the outcome a case's closing line states, or {@code null} when the line is not a result.
+     *
+     * <p>An unknown status is not mapped to an error here: a line that is not a case result at all - a
+     * performance measurement, say - must be left alone rather than recorded as a case that failed. A
+     * case whose outcome cannot be read is still recorded, by the summary reconciliation below, as an
+     * error rather than as a pass.
+     */
+    private static TestOutcome outcomeOf(String rest) {
+        if (rest == null) {
+            return null;
         }
-        return switch (status.strip().toLowerCase(Locale.ROOT)) {
-            case "passed" -> TestOutcome.PASSED;
-            case "failed" -> TestOutcome.FAILED;
-            case "skipped" -> TestOutcome.SKIPPED;
-            default -> TestOutcome.ERROR;
-        };
+        String value = rest.strip().toLowerCase(Locale.ROOT);
+        if (value.startsWith("passed")) {
+            return TestOutcome.PASSED;
+        }
+        if (value.startsWith("failed")) {
+            return TestOutcome.FAILED;
+        }
+        if (value.startsWith("skipped")) {
+            return TestOutcome.SKIPPED;
+        }
+        return null;
+    }
+
+    /**
+     * @param token the case token from a case or failure line
+     * @return the case's suite and name, in either dialect, or {@code null} when the token names nothing
+     *
+     * <p>Apple's XCTest wraps the case in {@code -[Module.Class method]}, so the suite ends at the last
+     * space; corelibs prints {@code Module.Class.method}, so it ends at the last dot. A token with
+     * neither is kept whole as the suite with an unknown method, which is the honest reading of a line
+     * this parser cannot decompose rather than a guessed class name.
+     */
+    static CaseId identify(String token) {
+        if (token == null) {
+            return null;
+        }
+        String text = token.strip();
+        if (text.isEmpty()) {
+            return null;
+        }
+        if (text.startsWith("-[") && text.endsWith("]")) {
+            text = text.substring(2, text.length() - 1).strip();
+            int space = text.lastIndexOf(' ');
+            if (space <= 0 || space == text.length() - 1) {
+                return new CaseId(text, UNKNOWN);
+            }
+            return new CaseId(text.substring(0, space).strip(), text.substring(space + 1).strip());
+        }
+        int dot = text.lastIndexOf('.');
+        if (dot <= 0 || dot == text.length() - 1) {
+            return new CaseId(text, UNKNOWN);
+        }
+        return new CaseId(text.substring(0, dot).strip(), text.substring(dot + 1).strip());
+    }
+
+    /** A case's suite and method name, normalised across XCTest's two console dialects. */
+    record CaseId(String suite, String name) {
+
+        /** @return a key two spellings of the same case share, so a failure line and its case line pair. */
+        String key() {
+            return suite + "|" + name;
+        }
+    }
+
+    /** @return the first capture of a pattern in the text, or {@code null} when it does not match. */
+    private static String firstGroup(Pattern pattern, String text) {
+        if (text == null) {
+            return null;
+        }
+        Matcher matcher = pattern.matcher(text);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     private static Duration seconds(String value) {
