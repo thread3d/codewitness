@@ -26,6 +26,7 @@ not install a `codewitness` command on `PATH`.
 | `verilog-withdrawal-ledger` | Verilog: an accepted withdrawal adds one cent back, and a withdrawal of exactly the balance is rejected | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a hardware description language with no package manager and no manifest: detection from `.v`/`.sv` sources, an Icarus `iverilog -g2012` build, one test case per testbench simulated with `vvp -N`, scenario-generated testbenches that instantiate the design under test as `dut`, counterexamples whose inputs are signal values, and bounded source mutation — with coverage and dependencies both declared not measured, because Icarus exports no coverage and HDL has no advisory ecosystem. |
 | `polyglot-service` | six languages in one directory, plus a `mix.exs` for Elixir that nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
 | `sql-withdrawal-ledger` | SQL: a balance floor the schema never declares is accepted, and the project's own script finds an overdraft | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The first fixture whose language's own specification is the thing under test: schema against test scripts, the declared DDL loaded into SQLite as the language's first failure, a probe built from the requirement's stated bound that fails because the constraint is missing, a probe meeting a check that is enforced and making its requirement `VERIFIED`, the project's own assertion script refuting a third requirement, and a fourth left `UNVERIFIED` — with mutation reporting 2 mutants generated and 2 killed, and no toolchain needed at all, so its end-to-end test never skips. |
+| `pascal-withdrawal-ledger` | Pascal: an accepted withdrawal subtracts one cent too much, and a withdrawal of exactly the balance is accepted but leaves `-1` | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language whose build system and test framework both ship with the toolchain: detection from `.pas` and `.pp` sources, an `fpc` build, the project's fpcunit console runner read from its XML report, scenario-generated `program`s that link the project's own unit, counterexamples whose inputs are call arguments, and bounded source mutation — with coverage and dependencies both declared not measured, because base FPC exports no coverage and has no package manager. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
 | `security-vulnerability` | hardcoded credential, SQL built by concatenation | `FAILED` | 2 `FAILED` | Static security rules produce counterexamples with file, line and rule id, without any test running. |
@@ -704,6 +705,79 @@ The fixture needs no toolchain at all: the schema is loaded into SQLite through 
 the build, so unlike the compiler and runtime fixtures this end-to-end test never skips itself, which is
 what keeps SQL covered in every CI job.
 
+### `pascal-withdrawal-ledger`
+
+The Pascal counterpart of the Verilog fixture: an integer-cents unit whose `Withdraw` returns
+`balance - amount - 1` whenever it accepts, so R-001 sees a one-cent drift on every accepted withdrawal
+and R-003 sees a withdrawal of exactly the balance accepted but leaving `-1` instead of `0`. R-002, the
+over-limit rejection, is implemented correctly. The project's own fpcunit suite is four tests of which
+two fail, which is the point: the requirement verdicts are settled by generated experiments, not by that
+suite.
+
+The fixture is `src/ledger.pas` (the defective unit), `tests/ledgertests.pas` (four fpcunit tests),
+`tests/testrunner.pas` (the `consoletestrunner` entry point that links them), `requirements.md` and its
+own `codewitness.yaml`. Detection reads the Pascal source suffixes — `.pas` and `.pp` units, `.lpr` and
+`.dpr` programs, and `.p` old sources — and Pascal has no package manager and no manifest, so there is
+nothing to declare and nothing to resolve; the whole run is driven by Free Pascal, and the sandbox forbids
+the network because `fpcunit` ships with the compiler and a generated program fetches nothing.
+
+```text
+Requirements
+  ✗ R-001  An accepted withdrawal reduces the balance by exactly the amount  FAILED
+  ✓ R-002  A withdrawal larger than the balance is rejected                  VERIFIED
+  ✗ R-003  A withdrawal of exactly the balance is accepted                   FAILED
+  ? R-004  The balance never goes negative                                   UNVERIFIED
+
+Counterexamples
+  R-001  inputs: {balance=100000, amount=1}       expected: not ledger.Accepted(balance, amount) or (observation = balance - amount)
+  R-003  inputs: {balance=100000, amount=100000}  expected: ledger.Accepted(balance, amount) and (observation = 0)
+
+Tests:            4 executed, 2 passed, 2 failed        (the project's own fpcunit suite)
+Mutation testing: 3 mutants, 3 killed, 0 survived       (pascal-text)
+Static analysis:  no findings
+Dependencies:     not analysed (base FPC has no package manager)
+```
+
+The overall run is `FAILED` and the exit code is `1`.
+
+R-001 fails through the generated program `cw_sc_sc_debit_ob_001`, whose boundary cases drive
+`{balance=100000, amount=1}` and `{balance=100000, amount=99999}` and observe `balance - amount - 1` where
+the requirement asks for `balance - amount`; R-003 fails through `cw_sc_sc_exact_ob_003` with
+`{balance=100000, amount=100000}`, which the unit accepts but leaves at `-1` where the requirement asks for
+`0`. R-002 is discharged by the executed program `cw_sc_sc_reject_ob_002`, which is the only path to
+`VERIFIED`; R-004 declares no scenario and stays `UNVERIFIED`.
+
+The generated-test shape is Pascal-specific in three ways worth knowing. First, a generated test is a
+`program`, not a class in a framework, named `cw_sc_<scenario>_<obligation>` with both ids sanitised to
+lower case — `cw_sc_sc_debit_ob_001` for `SC-DEBIT` and `OB-001` — and written under `generated-tests/` in
+the run workspace. Second, it `uses` the project unit named in the scenario's fragments plus `SysUtils`,
+and the compiler links the project's own units into it, so the scenario's call is a direct call into the
+unit under test. Third, the program declares only the declared inputs and `observation` — there is no
+scratch-variable support, so a scenario that needs an intermediate value must assign it to `observation`
+or call a project function — and a failing case prints the shared `CODEWITNESS_COUNTEREXAMPLE|…` line with
+`WriteLn` while the program calls `Halt(1)` once at the end, so it exits non-zero and the failing case is
+recorded rather than the program running to completion.
+
+Coverage is reported as not measured, because base Free Pascal exports no coverage data and the adapter
+does not drive an instrumenting build. Dependencies are reported as not analysed, because FPC has no
+package manager and a Pascal unit has no manifest to inventory, so the phase has no lock file to read and
+consults no source rather than reporting a clean result it cannot support.
+
+Mutation runs through the shared `TextMutator` with a `PascalLexis` and one command per mutant that
+compiles and runs the fixture's own suite. It generates three mutants, kills all three and reports no
+survivor. Static analysis and the security scan report no finding.
+
+The fixture needs Free Pascal and nothing else: `fpc` 3.2.2 is the version this result was measured with,
+and `fpcunit`, `testregistry` and `consoletestrunner` ship with the compiler, so the build, the tests and
+every generated program compile and run offline with no package manager involved. The adapter resolves
+`fpc` from the project's own tools directory, then the `FPC` environment variable (an absolute path to the
+compiler), then the conventional install locations and `PATH`. A relocated or vendored Free Pascal that
+keeps its `fpc.cfg` outside the prefix it was configured for needs `PPC_CONFIG_PATH` pointing at that
+`etc` directory; the adapter finds it beside the compiler and passes it to every child process, so a
+normal system install needs nothing. The end-to-end test `PascalEndToEndVerificationTest` is tagged `e2e`
+and skips itself when `fpc` is absent, via `assumePascalAvailable()`, and CI asserts the compiler is
+present so the Pascal path is exercised rather than silently skipped.
+
 ### `polyglot-service`
 
 One directory holding six languages' projects and a `mix.exs`: a Maven project, a Python package with a
@@ -848,6 +922,7 @@ with the `./codewitness` launcher:
 ./codewitness verify fixtures/ruby-withdrawal-ledger --requirements fixtures/ruby-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/swift-withdrawal-ledger --requirements fixtures/swift-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/verilog-withdrawal-ledger --requirements fixtures/verilog-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/pascal-withdrawal-ledger --requirements fixtures/pascal-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 

@@ -17,16 +17,17 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ```
 
 The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin,
-C/C++, PHP, Ruby, Swift and Verilog fixtures at the end need Python 3, Cargo, the `go` tool, a Node
+C/C++, PHP, Ruby, Swift, Verilog and Pascal fixtures at the end need Python 3, Cargo, the `go` tool, a Node
 runtime (22.6+ for TypeScript, 18.17+ for JavaScript), the .NET SDK (8+), Maven with network access the
 first time, CMake with CTest, an interpreter with Composer, an interpreter with Bundler, a Swift
-toolchain and Icarus Verilog (`iverilog` and `vvp`) respectively, and nothing
+toolchain, Icarus Verilog (`iverilog` and `vvp`) and Free Pascal (`fpc`) respectively, and nothing
 else: the Kotlin section is a Maven build, so `kotlinc` and the standard library arrive as dependencies,
 the C and C++ section fetches no package at all, the PHP and Ruby sections' PHPUnit and RSpec arrive
 from Packagist and RubyGems as dependencies rather than as part of the toolchain, the Swift section's
-XCTest ships with the toolchain and the package declares no dependencies, so it runs offline, and the
+XCTest ships with the toolchain and the package declares no dependencies, so it runs offline, the
 Verilog section's Icarus compiler and simulator come from the machine and compile and simulate a
-combinational design with the network forbidden.
+combinational design with the network forbidden, and the Pascal section's compiler brings its own
+`fpcunit` test framework, so it needs no package manager and no network either.
 
 ## 1. What is in the project?
 
@@ -786,3 +787,61 @@ pointing this at a real project is that the adapter drives Icarus and nothing el
 are the same language to `iverilog -g2012`, a tree with sources but no testbench is still built and
 analysed with its requirements left `UNVERIFIED`, and a design that does not compile is reported as
 `BLOCKED` rather than as incorrect code.
+
+## 20. The same thing for Pascal
+
+The Pascal fixture is the same ledger once more, this time as an fpcunit project whose defective unit
+returns one cent too few from every accepted withdrawal. It needs only Free Pascal: `fpcunit`,
+`testregistry` and `consoletestrunner` are part of the compiler's distribution, so the sandbox forbids
+the network and the run builds, tests and mutates without fetching anything.
+
+```bash
+./codewitness verify fixtures/pascal-withdrawal-ledger \
+    --requirements fixtures/pascal-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001  An accepted withdrawal reduces the balance by exactly the amount  FAILED
+  ✓ R-002  A withdrawal larger than the balance is rejected                  VERIFIED
+  ✗ R-003  A withdrawal of exactly the balance is accepted                   FAILED
+  ? R-004  The balance never goes negative                                   UNVERIFIED
+
+Counterexamples
+  R-001  inputs: {balance=100000, amount=1}       expected: not ledger.Accepted(balance, amount) or (observation = balance - amount)
+  R-003  inputs: {balance=100000, amount=100000}  expected: ledger.Accepted(balance, amount) and (observation = 0)
+
+Tests
+  4 executed, 2 passed, 2 failed, 0 skipped  (the project's own fpcunit console runner)
+
+Coverage
+  coverage not measured (base Free Pascal exports no coverage data)
+
+Mutation testing
+  3 mutants, 3 killed, 0 survived, score 100.0%
+```
+
+The run exits 1, because two requirements failed. R-001 and R-003 fail through generated Pascal programs
+— `cw_sc_sc_debit_ob_001` and `cw_sc_sc_exact_ob_003` — each a `program` that `uses` the project's own
+unit and is compiled and run with `fpc`; R-002 is discharged by an executed generated program, which is
+the only path to `VERIFIED`; R-004 declares no scenario, so it stays `UNVERIFIED` for the honest reason
+rather than counting a passing build as evidence. Dependencies are not analysed: base FPC has no package
+manager, so the phase has no inventory to read and consults no source.
+
+The scenario fragments are Pascal. `${name}` becomes the declared input `name`, `setup` and each step's
+`call` are Pascal statements run once per case, `observation` is a Pascal expression assigned to a
+variable whose type the generator derives from the declared inputs (default `Integer`), and `invariant`
+is the boolean Pascal expression that must hold — in the fixture,
+`ledger.Accepted(balance, amount) or (observation = balance)`. A generated test is a self-contained
+`program` rather than a class in a framework, named `cw_sc_<scenario>_<obligation>` in lower case
+(`cw_sc_sc_reject_ob_002` for `SC-REJECT` and `OB-002`), written under `generated-tests/` in the run
+workspace, and compiled by `fpc` against the project's own units. It declares only the declared inputs
+and `observation`, so a scenario that needs an intermediate value has to assign it to `observation` or
+call a project function directly; a failing case prints the same `CODEWITNESS_COUNTEREXAMPLE|…` line
+every other adapter uses and the program calls `Halt(1)`, so the process exits non-zero and the engine
+records a failure.
+
+The limit to know before pointing this at a real project is that the adapter drives Free Pascal and
+nothing else: a tree with `.pas` and `.pp` sources is detected, built and tested through `fpc` and its own
+fpcunit console runner, and coverage and dependency analysis are declared not measured because base FPC
+exports no coverage data and has no package manager — a stated limit rather than a guess at either.

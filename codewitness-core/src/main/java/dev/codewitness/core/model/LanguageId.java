@@ -100,6 +100,17 @@ public record LanguageId(String id) {
      */
     public static final LanguageId VERILOG = new LanguageId("verilog");
     /**
+     * Pascal, compiled with Free Pascal and tested with the fpcunit framework that ships with it.
+     *
+     * <p>The language is named for the language and not for the compiler, exactly as {@link #CSHARP}
+     * is not called {@code dotnet}: the build system is reported separately as {@link BuildSystemId#FPC}.
+     * Pascal has a separate compilation step, so a file the compiler rejects is a failed build - which
+     * the engine maps to BLOCKED - rather than a code defect. A Pascal test suite is compiled into the
+     * same executable as the code under test and run in-process, so the adapter compiles and runs each
+     * test program the project declares.
+     */
+    public static final LanguageId PASCAL = new LanguageId("pascal");
+    /**
      * SQL: schema, migrations, views and queries, loaded into an ephemeral database.
      *
      * <p>SQL has no compiler driver of its own, so the language's first failure is defined by the

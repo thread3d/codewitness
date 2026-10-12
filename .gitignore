@@ -73,6 +73,17 @@ fixtures/**/*.vcd
 fixtures/**/*.fst
 fixtures/**/obj_dir/
 
+# Free Pascal's build output. The adapter directs the `.ppu` units, the `.o` objects and the executable
+# into the run's artefact directory, but a developer who runs `fpc` in a fixture by hand writes them
+# beside the source: a unit produces `<name>.ppu` and `<name>.o`, and a program also produces an
+# executable, a `.lps` Lazarus session file and `link.res`. Nothing here is a source file: a Pascal
+# project is units, programs and tests.
+fixtures/**/*.ppu
+fixtures/**/*.o
+fixtures/**/*.lps
+fixtures/**/link.res
+fixtures/**/*.a
+
 # CodeWitness run data produced inside the repository
 .codewitness/
 **/.codewitness/

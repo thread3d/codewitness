@@ -49,6 +49,10 @@ class DetectorAdapterAgreementTest {
                 "the Swift adapter must be on the classpath of the CLI: " + adapters.ids());
         assertTrue(adapters.ids().contains("verilog"),
                 "the Verilog adapter must be on the classpath of the CLI: " + adapters.ids());
+        assertTrue(adapters.ids().contains("sql"),
+                "the SQL adapter must be on the classpath of the CLI: " + adapters.ids());
+        assertTrue(adapters.ids().contains("pascal"),
+                "the Pascal adapter must be on the classpath of the CLI: " + adapters.ids());
 
         for (LanguageDetector detector : detectors.all()) {
             detector.verifiedAsAdapterLanguage().ifPresent(language -> assertTrue(
@@ -208,6 +212,30 @@ class DetectorAdapterAgreementTest {
                 .map(LanguageDetectorRegistry.Detection::displayName).toList();
         assertTrue(uncovered.contains("Verilog"),
                 "a Verilog tree no adapter claimed is still named: " + uncovered);
+    }
+
+    @Test
+    @DisplayName("a Pascal unit is verified, and a Pascal tree with no adapter is still reported as unverifiable")
+    void pascalIsNotReportedTwice(@TempDir Path project) throws IOException {
+        write(project, "src/ledger.pas", """
+                unit ledger;
+                interface
+                implementation
+                end.
+                """);
+        LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
+
+        List<String> covered = detectors.detect(project, Set.of(LanguageId.PASCAL)).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(covered.isEmpty(),
+                "the adapter claimed this tree, so nothing about it is unverifiable: " + covered);
+
+        // With nothing in the covered set the adapter is absent from the classpath, and the detector must
+        // still name the language rather than let the tree go unremarked.
+        List<String> uncovered = detectors.detect(project, Set.of()).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(uncovered.contains("Pascal"),
+                "a Pascal tree no adapter claimed is still named: " + uncovered);
     }
 
     private static void write(Path base, String relative, String content) throws IOException {        Path file = base.resolve(relative);

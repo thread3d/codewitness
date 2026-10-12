@@ -84,6 +84,19 @@ public record BuildSystemId(String id) {
      * language's first failure was checked against.
      */
     public static final BuildSystemId SQL = new BuildSystemId("sql");
+    /**
+     * Free Pascal, driven by {@code fpc} over a {@code .pas}, {@code .pp}, {@code .lpr} or
+     * {@code .dpr} source tree.
+     *
+     * <p>Free Pascal has no separate package manager in the base distribution and no manifest that
+     * every project shares: a project is a set of units plus zero or more programs, and the one build
+     * descriptor the language itself defines is the source file the compiler is pointed at. Free Pascal
+     * is the compiler the fpcunit test framework ships with, so it is the toolchain that makes a Pascal
+     * tree buildable and testable on a machine that has nothing else. The {@code fpc} executable is
+     * recorded in the project attributes rather than encoded here, because a machine may carry several
+     * versions or select one through {@code PATH}.
+     */
+    public static final BuildSystemId FPC = new BuildSystemId("fpc");
     public static final BuildSystemId NONE = new BuildSystemId("none");
     /** More than one build system, because more than one language adapter claimed part of the project. */
     public static final BuildSystemId POLYGLOT = new BuildSystemId("polyglot");

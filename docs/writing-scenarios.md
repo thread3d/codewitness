@@ -11,16 +11,17 @@ Python for a Python project, Rust for a Rust project, Go for a Go module, TypeSc
 project, plain JavaScript for a JavaScript project, C# for a C#/.NET project, Kotlin for a Kotlin
 project, C or C++ for a project whose sources are either — one adapter covers both, so the
 fragment is written in whichever language the code under test is written in — PHP for a PHP
-project, Ruby for a Ruby project, Swift for a Swift package, and Verilog for a Verilog or SystemVerilog
-design (one adapter covers both, the way one adapter covers C and C++). Everything else — modes,
+project, Ruby for a Ruby project, Swift for a Swift package, Verilog for a Verilog or SystemVerilog
+design (one adapter covers both, the way one adapter covers C and C++), and Pascal for a Pascal unit or
+program. Everything else — modes,
 inputs, ranges, seeds, the counterexample protocol — is identical. The examples below are Java; the
-Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++, PHP, Ruby, Swift and Verilog forms are
-shown in [Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
+Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++, PHP, Ruby, Swift, Verilog and Pascal forms
+are shown in [Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
 [TypeScript projects](#typescript-projects), [JavaScript projects](#javascript-projects),
 [C# projects](#c-projects), [Kotlin projects](#kotlin-projects),
 [C and C++ projects](#c-and-c-projects), [PHP projects](#php-projects),
-[Ruby projects](#ruby-projects), [Swift projects](#swift-projects) and
-[Verilog projects](#verilog-projects).
+[Ruby projects](#ruby-projects), [Swift projects](#swift-projects),
+[Verilog projects](#verilog-projects) and [Pascal projects](#pascal-projects).
 
 ```yaml
 scenarios:
@@ -122,7 +123,8 @@ shape is: a standard-library `unittest` case for Python, a Cargo integration tes
 an xUnit class in the tree's own test project for C#, a Kotlin JUnit 5 class in the tree's own test
 sources for Kotlin, a PHPUnit `TestCase` class in the tree's own test root for PHP, an RSpec spec in the
 tree's own test root for Ruby, an XCTest class in the tree's own test target for Swift, a generated
-testbench module for Verilog that instantiates the design under test as `dut`, and, for C and C++,
+testbench module for Verilog that instantiates the design under test as `dut`, a generated `program`
+for Pascal that `uses` the project's own unit and links it, and, for C and C++,
 one self-contained program with a `main` rather than a class
 in a framework — written into the run's artefact store, never into the tree.
 
@@ -1103,6 +1105,88 @@ protocol signals rejection with `$error` or `$fatal`, the step trips it and the 
 itself, and the counterexample carries the line the simulator printed. If the implementation rejects by
 a value on an output, the invariant handles it and no wrapper is needed, exactly as the Ruby, PHP and
 Swift fixtures do for a boolean result.
+
+## Pascal projects
+
+For a Pascal unit or program the fragments are Pascal statements and expressions, and a generated test
+is a self-contained `program` compiled with `fpc` and linked against the project's own unit. `${name}` is
+replaced textually by the declared input `name`, so a fragment writes
+`ledger.Withdraw(${balance}, ${amount})` and the variables the call sees are `balance` and `amount`:
+
+```yaml
+language:
+  adapter: pascal
+
+scenarios:
+  - id: SC-REJECT
+    requirement: R-002
+    description: A withdrawal larger than the balance is rejected and leaves the balance unchanged
+    mode: single
+    setup: ""
+    steps:
+      - call: "observation := ledger.Withdraw(balance, amount);"
+        description: one rejected withdrawal
+        inputs:
+          - name: balance
+            type: integer
+            domain: integer
+            values: ["100000"]
+          - name: amount
+            type: integer
+            domain: integer
+            values: ["100001", "200000"]
+    observation: "observation"
+    invariant: "ledger.Accepted(balance, amount) or (observation = balance)"
+    cases: 1
+    seed: 1
+```
+
+That scenario is the fixture's own, from `fixtures/pascal-withdrawal-ledger/codewitness.yaml`, and it is
+what discharges R-002: the branch that rejects an over-limit withdrawal is correct, so the generated
+program's cases pass and the requirement reaches `VERIFIED`. The fixture's other two scenarios reuse the
+same shape — `observation := ledger.Withdraw(balance, amount);` with
+`not ledger.Accepted(balance, amount) or (observation = balance - amount)` for R-001 and
+`ledger.Accepted(balance, amount) and (observation = 0)` for R-003 — and both fail, because the unit
+subtracts an extra cent from every accepted withdrawal.
+
+Notes specific to Pascal:
+
+- `setup` and each step's `call` are Pascal **statements** run once per case, before the observation is
+  evaluated; a fragment may be several statements. `${name}` is replaced by the declared input `name`,
+  so an input is used directly and never re-declared by the fragment;
+- `observation` is an expression assigned to a variable named `observation`, and `invariant` is a
+  boolean Pascal expression over `observation` and the inputs —
+  `ledger.Accepted(balance, amount) or (observation = balance)` in the example above. It is checked
+  once per case, after the declared steps have run, exactly as it is in every other language.
+  `observation` carries no annotation in the
+  scenario: the generated program declares it from the declared input types, defaulting to `Integer` and
+  using `Int64`, `Double`/`Currency`, `Boolean` or `String` when a declared input calls for one, so the
+  invariant's arithmetic is done in the type the inputs imply;
+- the generated file is a `program` named `cw_sc_<scenario>_<obligation>`, with every character of each
+  id that is not a letter or a digit turned into an underscore and the result lower-cased, so
+  `SC-REJECT` and `OB-002` generate `cw_sc_sc_reject_ob_002.pas` under `generated-tests/` in the run
+  workspace. It `uses` the project unit named in the fragments plus `SysUtils`, and the compiler links
+  the project's own units into it;
+- the generated program declares the declared inputs and `observation`, and nothing else: there is no
+  scratch-variable support, so a scenario that needs an intermediate value either assigns it to
+  `observation` or calls a project function directly. A generated program the compiler rejects is
+  recorded as an error case rather than a passing one, and the engine weighs a failing generated case —
+  an error included — as a refuting counterexample, exactly as it does for every other language's
+  generated tests, so a generator bug has to be fixed rather than be read as a defect in the code;
+- a failing case prints the single `CODEWITNESS_COUNTEREXAMPLE|case=…|seed=…|inputs={…}|…` line with
+  `WriteLn` and sets a failure flag; after every case the program calls `Halt(1)` if any case failed, so
+  the process exits non-zero and the engine records a failing test rather than a pass;
+- a step that raises is a failure by default. A project whose rejection is an exception is written with
+  the exception caught in the step, because a bare `except` throws away the distinction between
+  "rejected as required" and "crashed for another reason"; a project whose rejection is a return value —
+  as the fixture's `Withdraw` is — is expressed through the invariant and needs no wrapper;
+- `mode: concurrent` releases no workers: the generated program is a single-threaded `begin … end` with
+  no barrier to release, so the case runs its declared steps in order and is evidence about the sequence
+  of the steps and nothing about interleaving;
+- the toolchain is deliberately self-contained. `fpcunit`, `testregistry` and `consoletestrunner` ship
+  with Free Pascal, so a Pascal project needs no package manager and the sandbox forbids the network; the
+  adapter resolves `fpc` from the project's own tools directory, then the `FPC` override, then the
+  conventional install locations and `PATH`.
 
 ## Practical advice
 

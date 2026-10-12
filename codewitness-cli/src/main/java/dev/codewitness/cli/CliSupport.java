@@ -15,6 +15,7 @@ import dev.codewitness.go.GoAdapterBundle;
 import dev.codewitness.java.JavaAdapterBundle;
 import dev.codewitness.javascript.JavaScriptAdapterBundle;
 import dev.codewitness.kotlin.KotlinAdapterBundle;
+import dev.codewitness.pascal.PascalAdapterBundle;
 import dev.codewitness.php.PhpAdapterBundle;
 import dev.codewitness.python.PythonAdapterBundle;
 import dev.codewitness.ruby.RubyAdapterBundle;
@@ -71,6 +72,7 @@ final class CliSupport {
         SwiftAdapterBundle.register(languages, providers, true);
         VerilogAdapterBundle.register(languages, providers, true);
         SqlAdapterBundle.register(languages, providers, true);
+        PascalAdapterBundle.register(languages, providers, true);
         // JavaScript and TypeScript are registered as a pair because they own disjoint file sets -
         // js/mjs/cjs against ts/tsx/mts/cts - and can therefore both run over one tree. A TypeScript
         // frontend next to plain-JavaScript tooling is verified in both languages rather than losing one.

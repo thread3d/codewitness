@@ -51,6 +51,7 @@
     <module>codewitness-adapter-swift</module>
     <module>codewitness-adapter-verilog</module>
     <module>codewitness-adapter-sql</module>
+    <module>codewitness-adapter-pascal</module>
     <module>codewitness-cli</module>
   </modules>
 
@@ -193,6 +194,11 @@
       <dependency>
         <groupId>dev.codewitness</groupId>
         <artifactId>codewitness-adapter-sql</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-adapter-pascal</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

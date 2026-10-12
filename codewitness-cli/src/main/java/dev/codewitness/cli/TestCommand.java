@@ -20,11 +20,13 @@ import dev.codewitness.cpp.CppAdapterBundle;
 import dev.codewitness.csharp.CSharpAdapterBundle;
 import dev.codewitness.go.GoAdapterBundle;
 import dev.codewitness.java.JavaAdapterBundle;
-import dev.codewitness.kotlin.KotlinAdapterBundle;
 import dev.codewitness.javascript.JavaScriptAdapterBundle;
+import dev.codewitness.kotlin.KotlinAdapterBundle;
+import dev.codewitness.pascal.PascalAdapterBundle;
 import dev.codewitness.php.PhpAdapterBundle;
 import dev.codewitness.python.PythonAdapterBundle;
 import dev.codewitness.ruby.RubyAdapterBundle;
+import dev.codewitness.sql.SqlAdapterBundle;
 import dev.codewitness.swift.SwiftAdapterBundle;
 import dev.codewitness.verilog.VerilogAdapterBundle;
 import dev.codewitness.rust.RustAdapterBundle;
@@ -79,6 +81,8 @@ public final class TestCommand implements Callable<Integer> {
         RubyAdapterBundle.register(languages, providers, true);
         SwiftAdapterBundle.register(languages, providers, true);
         VerilogAdapterBundle.register(languages, providers, true);
+        SqlAdapterBundle.register(languages, providers, true);
+        PascalAdapterBundle.register(languages, providers, true);
         JavaScriptAdapterBundle.register(languages, providers, true);
         TypeScriptAdapterBundle.register(languages, providers, true);
 

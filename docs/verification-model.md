@@ -125,7 +125,9 @@ the PHP report parser reads, a Ruby generated test raises it as an
 `RSpec::Expectations::ExpectationNotMetError`, which is what puts it into `exception.message` in RSpec's
 JSON report, where the Ruby report parser reads it, a Swift generated test fails an XCTest case with
 `XCTFail`, which is what puts the line into the compiler-style error line XCTest prints to the console
-for that case, where the Swift report parser reads it, a Verilog generated testbench prints the same
+for that case, where the Swift report parser reads it, a Pascal generated program prints the same line
+with `WriteLn` and calls `Halt(1)`, which is what makes it exit non-zero for the report parser to read as
+the failing case, a Verilog generated testbench prints the same
 line to the simulator's output and then calls `$fatal`, which is what makes the simulation exit non-zero
 for the report parser to read as the failing case — the counterexample's inputs are the signal values
 the testbench drove onto the design's ports rather than call arguments — and a C and C++ generated test

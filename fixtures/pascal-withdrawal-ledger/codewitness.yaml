@@ -1,0 +1,130 @@
+# CodeWitness configuration for the Pascal withdrawal-ledger fixture.
+#
+# This file declares how each requirement can be *executed* against the code. CodeWitness supplies
+# boundary enumeration, seeded random search, execution and reproducible counterexamples; the Pascal
+# fragments below are the oracle, and they are attributed to the user, not to CodeWitness.
+#
+# The fragments are Pascal: `${name}` is replaced by the declared input `name`, `setup` and each step's
+# `call` are statements run at the start of a case, `observation` is assigned an expression, and
+# `invariant` is the boolean expression that must hold. `ledger` is the unit under test, which the
+# generator links by name. Money is in integer cents, so the arithmetic the fixture is asked about is
+# exact.
+#
+# The tree has no external dependencies and fpcunit ships with Free Pascal, so the build, the tests and
+# every generated test need no network and the sandbox forbids it.
+
+project:
+  name: pascal-withdrawal-ledger
+
+language:
+  adapter: pascal
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+  max_mutation_time: 5m
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: true
+  tool: pascal-text
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: false
+
+scenarios:
+  # R-001: an accepted withdrawal must reduce the balance by exactly the amount. The design subtracts an
+  # extra cent, so both an ordinary amount and the largest amount below the balance fail.
+  - id: SC-DEBIT
+    requirement: R-001
+    description: An accepted withdrawal reduces the balance by exactly the amount
+    mode: single
+    setup: ""
+    steps:
+      - call: "observation := ledger.Withdraw(balance, amount);"
+        description: one withdrawal
+        inputs:
+          - name: balance
+            type: integer
+            domain: integer
+            values: ["100000"]
+          - name: amount
+            type: integer
+            domain: integer
+            values: ["1", "99999"]
+    observation: "observation"
+    invariant: "not ledger.Accepted(balance, amount) or (observation = balance - amount)"
+    cases: 1
+    seed: 1
+
+  # R-002: a withdrawal larger than the balance is rejected and changes nothing. This branch is correct,
+  # so the requirement should end up verified rather than merely reported.
+  - id: SC-REJECT
+    requirement: R-002
+    description: A withdrawal larger than the balance is rejected and leaves the balance unchanged
+    mode: single
+    setup: ""
+    steps:
+      - call: "observation := ledger.Withdraw(balance, amount);"
+        description: one rejected withdrawal
+        inputs:
+          - name: balance
+            type: integer
+            domain: integer
+            values: ["100000"]
+          - name: amount
+            type: integer
+            domain: integer
+            values: ["100001", "200000"]
+    observation: "observation"
+    invariant: "ledger.Accepted(balance, amount) or (observation = balance)"
+    cases: 1
+    seed: 1
+
+  # R-003: the boundary is inclusive. A withdrawal of exactly the balance must be accepted and empty the
+  # account; the code accepts it but leaves a balance of -1, so the invariant fails on the result.
+  - id: SC-EXACT
+    requirement: R-003
+    description: A withdrawal of exactly the balance is accepted and empties the account
+    mode: single
+    setup: ""
+    steps:
+      - call: "observation := ledger.Withdraw(balance, amount);"
+        description: one exact-boundary withdrawal
+        inputs:
+          - name: balance
+            type: integer
+            domain: integer
+            values: ["100000"]
+          - name: amount
+            type: integer
+            domain: integer
+            values: ["100000"]
+    observation: "observation"
+    invariant: "ledger.Accepted(balance, amount) and (observation = 0)"
+    cases: 1
+    seed: 1

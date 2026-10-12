@@ -276,6 +276,34 @@ abstract class EndToEndSupport {
         return findExecutable(executable);
     }
 
+    /**
+     * Skips the test when no Free Pascal compiler is available, instead of failing spuriously.
+     *
+     * <p>Pascal's test framework, fpcunit, ships with the compiler, so only {@code fpc} is checked. It is
+     * looked for the way the adapter looks for it: the override variable first, then the conventional
+     * install locations, then {@code PATH}.
+     */
+    static void assumePascalAvailable() {
+        Assumptions.assumeTrue(findPascal() != null,
+                "no fpc executable on PATH or in FPC: Pascal end-to-end verification cannot run");
+    }
+
+    /** @return the {@code fpc} executable, or {@code null} when none can be found. */
+    static String findPascal() {
+        String executable = isWindows() ? "fpc.exe" : "fpc";
+        String configured = System.getenv("FPC");
+        if (configured != null && !configured.isBlank() && Files.isExecutable(Path.of(configured))) {
+            return configured;
+        }
+        for (String directory : List.of("/usr/local/bin", "/opt/homebrew/bin", "/usr/bin")) {
+            Path candidate = Path.of(directory, executable);
+            if (Files.isExecutable(candidate)) {
+                return candidate.toString();
+            }
+        }
+        return findExecutable(executable);
+    }
+
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }

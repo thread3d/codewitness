@@ -136,6 +136,12 @@ or a SQL project:
 ./codewitness verify ./my-sql-project --requirements requirements.md
 ```
 
+or a Pascal project:
+
+```bash
+./codewitness verify ./my-pascal-project --requirements requirements.md
+```
+
 The language is detected, and a project may be written in several. `LanguageAdapterRegistry.selectAll`
 runs **every** adapter that claims part of the tree — a Java service with a TypeScript frontend is two
 verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
@@ -155,7 +161,7 @@ that is not there. Recognition comes from `LanguageDetector` implementations dis
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
 `language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp`, `kotlin`,
-`cpp`, `php`, `ruby`, `swift`, `verilog` or `sql`
+`cpp`, `php`, `ruby`, `swift`, `verilog`, `sql` or `pascal`
 *narrows* the run
 to that one adapter instead of being merged with the automatic choice. It is not forced: the named adapter
 is used when it exists and actually claims the project, and otherwise the run falls back to
@@ -220,7 +226,21 @@ to a machine-readable report, so a compile error is read from Icarus's own line 
 failed build. Static analysis reads a Verilog rule table, and generated scenarios become ordinary
 testbench modules that instantiate the design under test as `dut`. Icarus Verilog exports no coverage
 data and Verilog has no package manager or advisory ecosystem for HDL, so coverage and the dependency
-inventory are reported as not measured rather than as zero.
+inventory are reported as not measured rather than as zero. Pascal support needs only Free Pascal: a
+tree holding `.pas`, `.pp`, `.lpr`, `.dpr` or `.p` files is claimed, the programs it declares are
+compiled with `fpc`, and a tree of units with no program is compiled unit by unit as the language's
+first-failure check. Unit and executable output go below the run's artefact directory, so a verification
+leaves no `.ppu`, `.o` or binary in the tree. Tests are the project's own fpcunit suites: a program that
+links them is compiled and run through the console runner, and a tree that keeps test units but no runner
+is given a synthesized one, because fpcunit registers its suites when they are linked. A test program that
+is not an fpcunit runner is judged by its exit status, and the console runner's JUnit-shaped XML report is
+read per test; a test program that does not compile is an error rather than a failing test. Static
+analysis reads a Pascal rule table, generated scenarios become ordinary programs named `cw_sc_…` that link
+the unit under test and print a counterexample line, and mutation testing flips Pascal's own operators
+(`=`, `<>`, `<=`, `>=`, `and`, `or`, `div`, `mod`, `shl`, `shr`) while leaving `{ }` and `(* *)` comments
+and string literals whole. Free Pascal's base distribution exports no coverage data and has no package
+manager or advisory ecosystem, so coverage and the dependency inventory are reported as not measured
+rather than as zero.
 
 ---
 
@@ -574,6 +594,40 @@ A violated invariant prints the shared `CODEWITNESS_COUNTEREXAMPLE|…` line and
 `$fatal` once at the end, so it exits non-zero; because a Verilog test is a compile and then a
 simulation rather than one command, the replay is the two-step `iverilog` then `vvp` recipe.
 
+For a Pascal project the fragments are Pascal statements, `${name}` becomes the declared input `name`,
+and the generated test is an ordinary `program` named `cw_sc_<scenario>_<obligation>` that links the
+project's units by name. The generator declares each input at the Pascal type derived from its declared
+type, declares `observation` at the widest type any input implies, enumerates the declared boundary
+values, and for a `sequence` scenario adds a seeded `Random` search when every input declares an integer
+range. A step's `call` is a statement, so it may assign to `observation` directly, and the invariant is
+the boolean expression checked once per case:
+
+```yaml
+language:
+  adapter: pascal
+
+scenarios:
+  - id: SC-REJECT
+    requirement: R-002
+    mode: single
+    setup: ""
+    steps:
+      - call: "observation := ledger.Withdraw(balance, amount);"
+        inputs:
+          - {name: balance, type: integer, domain: integer, values: ["100000"]}
+          - {name: amount, type: integer, domain: integer, values: ["100001", "200000"]}
+    observation: "observation"
+    invariant: "ledger.Accepted(balance, amount) or (observation = balance)"
+    cases: 1
+    seed: 1
+```
+
+A violated invariant prints the shared `CODEWITNESS_COUNTEREXAMPLE|…` line and calls `Halt(1)`, so the
+program exits non-zero; because a Pascal test is a compile and then a run rather than one command, the
+replay is the two-step `fpc` then executable recipe. The generator declares only the scenario's inputs
+and `observation` — it has no scratch variables — so a scenario assigns to `observation` or calls
+project code directly.
+
 See [`docs/writing-scenarios.md`](docs/writing-scenarios.md) for the full reference.
 
 ---
@@ -587,7 +641,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php | ruby | swift | verilog
+  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php | ruby | swift | verilog | sql | pascal
 
 verification:
   timeout: 15m           # per build or test command
@@ -763,6 +817,10 @@ codewitness/
 │                               whose assertion queries must return no rows, generated constraint probes,
 │                               schema mutation, heuristics and security; no coverage and no dependency
 │                               inventory
+├── codewitness-adapter-pascal/ Pascal projects: fpc compilation with diagnostics and the project's own
+│                               fpcunit suites compiled and run with per-test XML results, heuristics,
+│                               security and bounded source mutation, generated scenario programs;
+│                               no coverage export and no dependency inventory
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -775,10 +833,12 @@ engine. Recognising a language CodeWitness has no adapter for is the same shape:
 `dev.codewitness.core.spi.LanguageDetector`, discovered the same way, and the detectors for the languages
 nothing here implements live in `codewitness-language-detectors`. A few platform defaults do remain in core
 — the `LanguageId` and `BuildSystemId` constants (`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`,
-`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `RUBY`, `SWIFT`, `VERILOG`, `CMAKE`, `COMPOSER`,
-`BUNDLER`, `SWIFTPM`, `ICARUS`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory
+`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `RUBY`, `SWIFT`, `VERILOG`, `SQL`, `PASCAL`, `CMAKE`,
+`COMPOSER`, `BUNDLER`, `SWIFTPM`, `ICARUS`, `FPC`, `POLYGLOT` and the rest), the typed
+`PackageCoordinate` an advisory
 lookup needs (`PACKAGIST` for PHP, `RUBYGEMS` for Ruby and `SWIFT_URL` for Swift among them — Verilog
-adds none, because HDL has no advisory ecosystem), and the excluded-directory and build-wrapper names
+adds none, because HDL has no advisory ecosystem, and so does Pascal, because Free Pascal's base
+distribution has no package manager), and the excluded-directory and build-wrapper names
 in `WorkspaceManager` — but they are
 vocabulary and platform defaults, not language logic, and the engine never switches on a language.
 Nothing in core names a language it cannot already verify.
@@ -796,9 +856,9 @@ mvn -pl codewitness-core test   # one module
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
 plus Python 3, Cargo, Go, Node, the .NET SDK, CMake with CTest, PHP with Composer, Ruby with Bundler,
-a Swift toolchain and Icarus Verilog with `vvp`
-for the Python, Rust, Go, TypeScript, JavaScript, C#, C/C++, PHP, Ruby, Swift and Verilog fixtures, and
-network access the
+a Swift toolchain, Icarus Verilog with `vvp` and Free Pascal
+for the Python, Rust, Go, TypeScript, JavaScript, C#, C/C++, PHP, Ruby, Swift, Verilog and Pascal
+fixtures, and network access the
 first time, because it builds real projects. The Kotlin fixture
 needs no toolchain of its own beyond Maven: it is a Maven build with `kotlin-maven-plugin`, so the
 compiler, the standard library and Surefire are resolved from a repository the way a dependency is. The C# fixture
@@ -815,7 +875,10 @@ opposite case: XCTest ships with the toolchain and the package declares no depen
 config sets `allow_network: false` and the run compiles and tests offline with nothing installed by
 hand. The Verilog fixture is the same case as the Swift one: `iverilog` and `vvp` ship together and the
 tree declares no dependencies, so its sandbox config sets `allow_network: false` and the run compiles,
-simulates, analyses and mutates offline with nothing installed by hand. An end-to-end test is skipped
+simulates, analyses and mutates offline with nothing installed by hand. The Pascal fixture is the same
+case again: Free Pascal is a compiler and fpcunit ships inside the same distribution, so its sandbox
+config sets `allow_network: false` and the run compiles, tests, analyses and mutates offline with
+nothing installed by hand. An end-to-end test is skipped
 rather than failed when its toolchain is absent.
 
 ---
@@ -1770,6 +1833,77 @@ The honest limits of SQL support are:
   because a small set whose every survivor is unambiguous is worth more than a larger one whose survivors
   are not. Mutation is not measured when the project has no test script to kill anything, or when the
   schema declares no `CHECK`.
+
+The Pascal adapter is implemented and exercised end to end (`fixtures/pascal-withdrawal-ledger`). It is
+the same shape as Swift and Verilog: Free Pascal is the only tool, and fpcunit ships inside the same
+distribution, so a tree with no dependencies builds and tests offline.
+
+- detection of Pascal trees by extension (`.pas`, `.pp`, `.lpr`, `.dpr`, `.p`) and the one split that
+  matters: programs and libraries, which the compiler links into an executable, against units, which it
+  does not. A source is a test when it uses the fpcunit framework, its name marks it as one, or it sits
+  under a conventional test directory. There is no manifest: detection reads the `program`, `unit` and
+  `uses` declarations as the source states them, with comments and string literals blanked first, so a
+  keyword inside a comment is never mistaken for code;
+- a build that is the language's first failure: a tree that declares a program is compiled through it,
+  and a tree of units alone is compiled unit by unit, because a unit the compiler rejects is a failed
+  build — which the engine maps to `BLOCKED` — rather than a defect. The compiler's diagnostics are read
+  from its own `file(line,column) Severity: message` shape into normalised diagnostics, and the closing
+  banners and the linker's chatter carry no location and are dropped. Unit output and executables go
+  below the run's artefact directory, so a verification leaves no `.ppu`, `.o` or binary in the tree;
+- existing tests through `PascalTestProvider`: each test program the project declares is compiled and
+  run, and the fpcunit console runner is asked for its JUnit-shaped XML report, so every test is a case
+  with its own outcome and failure message. A project that keeps test units but no runner is given a
+  synthesized one, because fpcunit registers its suites when they are linked. A test program that is not
+  an fpcunit runner is judged by its exit status, and a test program that does not compile is an error
+  rather than a failing test;
+- generated adversarial tests from declared scenarios: the fragments are Pascal, `${name}` becomes the
+  declared input `name`, and the generated test is an ordinary `program` named
+  `cw_sc_<scenario>_<obligation>` that links the project's units by name. The generator declares each
+  input at the Pascal type derived from its declared type and declares `observation` at the widest type
+  any input implies, enumerates up to twelve boundary value combinations, and for a `sequence` scenario
+  with an integer range adds a seeded `Random` search. A step's `call` is a statement, so it may assign
+  to `observation` directly; a violated invariant prints the shared `CODEWITNESS_COUNTEREXAMPLE|…` line
+  and calls `Halt(1)`. Generated sources are written under `generated-tests/`, removed unless
+  `report.keep_generated_tests` is set and always kept in the run's artefact store;
+- mutation testing over the sources (`pascal-text-mutation`, report tool `pascal-text`): Pascal's own
+  operators are flipped — `+`/`-`, `*`/`/`, `<`/`<=`, `>`/`>=`, `=`/`<>`, `and`/`or`, `div`/`mod`,
+  `shl`/`shr` and `True`/`False` — with `{ }`, `(* *)` and `//` comments and string literals left whole,
+  and assignment `:=` never mistaken for equality. A mutant is judged by compiling and running the
+  project's own test programs; a mutant the compiler rejects is non-viable and excluded from the score
+  rather than counted as killed;
+- static analysis over a Pascal rule table (`pascal-heuristics`) read through a literal-aware
+  `PascalSourceScan`: memory allocated with `GetMem`/`New` and never released, a file opened with
+  `Reset`/`Rewrite`/`Append` and never closed, an empty `except` that swallows what it caught, a `with`
+  statement, and a `goto`. A separate security pass covers a SQL statement assembled by concatenation or
+  `Format` and a credential written as a literal. Both are advisory — their ids contain "heuristics" —
+  so a rule match never fails a requirement on its own.
+
+The end-to-end fixture (`fixtures/pascal-withdrawal-ledger`) is a unit whose accepted branch subtracts a
+cent too much and whose fpcunit suite asserts both the arithmetic and the exact-balance boundary. The run
+finds the defect with generated tests — R-001 and R-003 `FAILED` with counterexamples, R-002 `VERIFIED`
+by an executed generated test that meets the correct rejection branch, and R-004 `UNVERIFIED` because it
+declares no scenario, overall `FAILED` and exit 1 — while the project's own suite reports four tests and
+two failures and mutation reports three mutants generated and three killed.
+
+The honest limits of Pascal support are:
+
+- coverage is not measured. Free Pascal's base distribution exports no coverage data, so the adapter
+  claims no coverage capability and the report says coverage was not measured rather than reporting zero;
+- dependencies are not analysed. Free Pascal's base distribution has no package manager and there is no
+  advisory ecosystem for it here, so there is no inventory and no source to consult; the adapter declares
+  no dependency capability;
+- the test convention is fpcunit. The adapter recognises a project's own fpcunit suites and can
+  synthesize a runner over test units that lack one, but a Pascal tree with a bespoke test framework the
+  adapter cannot recognise is reported as having no suite rather than being run speculatively;
+- the generated-test generator declares only the scenario's inputs and `observation`. It has no scratch
+  variables, so a scenario either assigns to `observation` or calls project code directly; a scenario that
+  needs a local of its own cannot be expressed yet;
+- the observation's type is inferred from the declared inputs (the widest numeric type among them, or the
+  boolean or string type when none is numeric), so a scenario whose observation is a type none of its
+  inputs implies must declare an input of that type for the generated program to compile;
+- a project whose test program is not an fpcunit console runner is reported as a single case judged by
+  its exit status, because there is no per-test protocol to read;
+- the heuristic rule table is intentionally small and has a known false-positive profile.
 
 Implemented but limited, and reported as such:
 

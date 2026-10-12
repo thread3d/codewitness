@@ -43,8 +43,12 @@ change has to respect.
   fixture (`iverilog` compiles and `vvp` simulates; the fixture is a combinational design with no
   manifest and no dependencies, so nothing has to be resolved and the fixture's sandbox forbids the
   network)
+- Free Pascal 3.2 or newer on `PATH` for the Pascal adapter and its end-to-end fixture (`fpc` is the
+  compiler, and fpcunit — the test framework the adapter compiles and runs — ships inside the same
+  distribution, so nothing has to be resolved and the fixture's sandbox forbids the network)
 - Network access for the first build (dependencies) and for the end-to-end tests, except the C#
-  fixture, the C/C++ fixture, the Swift fixture and the Verilog fixture, which need none, and the PHP
+  fixture, the C/C++ fixture, the Swift fixture, the Verilog fixture and the Pascal fixture, which need
+  none, and the PHP
   and Ruby fixtures, which need it until their `vendor/` directory or bundle exists, because PHPUnit and
   RSpec are package-manager dependencies rather than part of the toolchain
 
@@ -111,7 +115,9 @@ To add one:
    `fixtures/php-withdrawal-ledger` (PHP, `composer.json`, `phpunit.xml`, PHPUnit),
    `fixtures/ruby-withdrawal-ledger` (Ruby, `Gemfile`, RSpec),
    `fixtures/swift-withdrawal-ledger` (Swift, `Package.swift`, XCTest) or
-   `fixtures/verilog-withdrawal-ledger` (Verilog, no manifest, Icarus Verilog `iverilog`/`vvp`). Keep
+   `fixtures/verilog-withdrawal-ledger` (Verilog, no manifest, Icarus Verilog `iverilog`/`vvp`), or
+   `fixtures/sql-withdrawal-ledger` (SQL, a declared schema and assertion scripts run through SQLite) or
+   `fixtures/pascal-withdrawal-ledger` (Pascal, no manifest, Free Pascal `fpc` with fpcunit). Keep
    at least one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
    adapter's "Java 17+" claim stays exercised against real bytecode.
 2. Introduce **one** defect, and state it in a comment at the top of the class — the comment is part
@@ -135,8 +141,8 @@ To add one:
    wires everything (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`,
    `GoAdapterBundle`, `TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle`,
    `KotlinAdapterBundle`, `CppAdapterBundle`, `PhpAdapterBundle`, `RubyAdapterBundle`,
-   `SwiftAdapterBundle` and
-   `VerilogAdapterBundle` are the worked
+   `SwiftAdapterBundle`, `VerilogAdapterBundle`, `SqlAdapterBundle` and
+   `PascalAdapterBundle` are the worked
    examples). Two languages can share a
    build tool — Kotlin and Java both use Gradle and Maven — so a provider has to select on the
    project's *language* as well as on its build system, or both adapters answer for one tree. The
@@ -150,7 +156,10 @@ To add one:
    the opposite case: XCTest ships with the toolchain, so its `TestRunner` resolves nothing beyond the
    `swift` driver the build already drove. Verilog is the case where a test is two processes rather than
    one: `iverilog` compiles and `vvp` simulates, so the adapter reports one case per testbench instead
-   of a case-level protocol and its replay recipe is the compile-then-simulate pair. If your
+   of a case-level protocol and its replay recipe is the compile-then-simulate pair. Pascal has that
+   same two-process shape plus a framework: `fpc` compiles each test program and the program runs the
+   fpcunit suites, so a project that keeps test units but no runner is given a synthesized one, and a
+   program that is not an fpcunit runner is judged by its exit status. If your
    tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
    counterexample carries a command that actually runs.
 4. Answer the advisory hook on the `DependencyAnalyzer` your adapter registers. Declare
@@ -234,7 +243,9 @@ registered, so a bare embedder still gets verification rather than an empty repo
       `fixtures/kotlin-withdrawal-ledger`, `fixtures/cpp-withdrawal-ledger`,
       `fixtures/php-withdrawal-ledger`, `fixtures/ruby-withdrawal-ledger`,
       `fixtures/swift-withdrawal-ledger` and `fixtures/verilog-withdrawal-ledger` still report R-001 and
-      R-003 as `FAILED`, R-002 as `VERIFIED` and R-004 as `UNVERIFIED`.
+      R-003 as `FAILED`, R-002 as `VERIFIED` and R-004 as `UNVERIFIED`, and
+      `./codewitness verify fixtures/pascal-withdrawal-ledger` reports R-001 and R-003 as `FAILED`,
+      R-002 as `VERIFIED` and R-004 as `UNVERIFIED`.
 - [ ] No `.codewitness` run data, build output or generated test sources are committed.
 - [ ] The README's "honest status" section still describes what the tool actually does.
 - [ ] Any new limitation is stated in the README and, where it affects a run, in the report's

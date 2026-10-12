@@ -7,6 +7,7 @@ dev.codewitness.languages.ErlangLanguageDetector
 dev.codewitness.languages.HaskellLanguageDetector
 dev.codewitness.languages.KotlinLanguageDetector
 dev.codewitness.languages.LuaLanguageDetector
+dev.codewitness.languages.PascalLanguageDetector
 dev.codewitness.languages.PerlLanguageDetector
 dev.codewitness.languages.PhpLanguageDetector
 dev.codewitness.languages.RubyLanguageDetector

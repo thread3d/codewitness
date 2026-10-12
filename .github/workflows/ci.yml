@@ -63,6 +63,10 @@ jobs:
       # package, and the fixture has no dependencies to resolve, so nothing is warmed for it. Unlike
       # Swift it is not on the runner image - Ubuntu 24.04 ships neither iverilog nor verilator - so
       # the package is installed in its own step below and asserted with the rest.
+      # Pascal is the same shape as Swift and Verilog together: Free Pascal is a compiler, and the
+      # fpcunit framework it is tested with ships inside the same distribution, so nothing is warmed and
+      # the fixture forbids the network. Ubuntu 24.04 does carry `fpc`, so its own step installs it and
+      # the assertion below checks the version rather than trusting the image.
       # Each end-to-end test skips itself (a JUnit assumption) when its toolchain is absent, so a missing
       # tool produces a green build with those languages never having run. Installing each one here, then
       # asserting it below, is what keeps that from happening silently.
@@ -143,6 +147,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y iverilog
 
+      # Free Pascal is what the Pascal fixture drives, and fpcunit - the test framework the adapter runs -
+      # ships inside the same package, so no second dependency is installed. Ubuntu 24.04 carries 3.2.2,
+      # whose diagnostics, `-o`/`-FU` switches and fpcunit XML output the adapter relies on; the version
+      # floor is asserted below rather than trusted, like every other toolchain in this job.
+      - name: Set up Free Pascal
+        run: |
+          sudo apt-get install -y fpc
+
       # CMake and the CTest that ships with it are what the C and C++ fixture drives, and they come from
       # the runner image rather than from an action. The version is therefore asserted in the step below
       # instead of trusted: the test phase reads the JUnit report `ctest --output-junit` writes, and that
@@ -218,6 +230,11 @@ jobs:
           # simulator would otherwise make the Verilog end-to-end test skip itself silently. grep reads
           # the whole output rather than piping through head, which would risk a SIGPIPE under pipefail.
           iverilog -V | grep -qE 'Icarus Verilog version (1[2-9]|[2-9][0-9])\.'
+          fpc -iV
+          # 3.2 is the distribution's Free Pascal release and the floor the adapter's diagnostics parsing
+          # and fpcunit XML output were written against. A missing compiler would otherwise make the
+          # Pascal end-to-end test skip itself silently.
+          fpc -iV | grep -qE '^(3\.[2-9]|[4-9]\.)'
 
       # Unit and integration tests. Surefire excludes the `e2e` group by default (pom.xml:
       # excluded.groups), so this is the fast suite.
@@ -226,6 +243,6 @@ jobs:
 
       # The end-to-end suite, opt-in through the `e2e` profile, which clears excluded.groups. It
       # builds the fixture projects with real Maven, Python, Cargo, Go, Node, .NET, CMake, Composer,
-      # Bundler, Swift and Icarus Verilog runs.
+      # Bundler, Swift, Icarus Verilog and Free Pascal runs.
       - name: End-to-end tests (fixture projects)
         run: ./mvnw -B -Pe2e test
