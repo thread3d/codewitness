@@ -20,8 +20,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -124,8 +126,17 @@ public final class SwiftGeneratedTestRunner implements VerificationTools.Generat
         }
 
         String captured = readLog(log);
-        TestResult parsed = SwiftTestReportParser.parse(captured, context.projectRoot(),
-                "generated test run (" + result.describeOutcome() + ")");
+        // The suite is normalised before anything reads it. Apple's XCTest names a case
+        // `Module.Class`, while swift-corelibs-xctest on Linux names it `Class` alone (its console uses
+        // `String(describing:)`, which drops the module, even though its filter matching uses
+        // `String(reflecting:)`, which keeps it). The engine attributes a result by exact match on a
+        // generated test's recorded name, so a Linux run would report every generated class under a name
+        // nothing matches and leave every scenario UNVERIFIED. Rewriting the suite to the name the batch
+        // recorded is the adapter's job, because only the adapter knows both spellings are one class.
+        TestResult parsed = normalizeSuites(
+                SwiftTestReportParser.parse(captured, context.projectRoot(),
+                        "generated test run (" + result.describeOutcome() + ")"),
+                tests);
         if (!parsed.executed() || parsed.cases().isEmpty()) {
             // A report that carries no case for the generated classes is not a pass: the classes either
             // never ran or were not compiled.
@@ -140,6 +151,46 @@ public final class SwiftGeneratedTestRunner implements VerificationTools.Generat
             return new GeneratedTestExecution(tests, TestResult.notExecuted(note), artifacts, note);
         }
         return new GeneratedTestExecution(tests, parsed, artifacts, parsed.describe());
+    }
+
+    /**
+     * @param parsed the result read from the runner's console
+     * @param tests  the batch whose recorded names are the canonical ones
+     * @return the same result with every case's suite rewritten to the generated class it belongs to
+     *
+     * <p>A case is matched to a generated class by the class's simple name, because that is the one part
+     * both of XCTest's console dialects spell identically. A case that belongs to none of the batch's
+     * classes - the project's own suite, if the filter ever let one through - is left exactly as the
+     * runner reported it.
+     */
+    static TestResult normalizeSuites(TestResult parsed, List<GeneratedTest> tests) {
+        Map<String, String> canonicalBySimpleName = new LinkedHashMap<>();
+        for (GeneratedTest test : tests) {
+            canonicalBySimpleName.put(test.simpleName(), test.className());
+        }
+        List<TestCaseResult> cases = new ArrayList<>();
+        for (TestCaseResult testCase : parsed.cases()) {
+            String simple = simpleName(testCase.suite());
+            String canonical = canonicalBySimpleName.get(simple);
+            if (canonical == null || canonical.equals(testCase.suite())) {
+                cases.add(testCase);
+                continue;
+            }
+            cases.add(new TestCaseResult(canonical, testCase.name(), testCase.outcome(),
+                    testCase.duration(), testCase.failureType(), testCase.failureMessage(),
+                    testCase.stackTrace()));
+        }
+        return TestResult.from(cases, parsed.duration(), parsed.reports(), parsed.note());
+    }
+
+    /** @return the class name without its module prefix, in either dialect's spelling. */
+    static String simpleName(String suite) {
+        if (suite == null) {
+            return "";
+        }
+        String text = suite.strip();
+        int dot = text.lastIndexOf('.');
+        return dot < 0 ? text : text.substring(dot + 1);
     }
 
     /**
@@ -181,9 +232,13 @@ public final class SwiftGeneratedTestRunner implements VerificationTools.Generat
         command.addAll(SwiftToolchain.command(swift, context, List.of("test")));
         for (GeneratedTest test : tests) {
             command.add("--filter");
+            // The simple class name, not the module-qualified one: on Linux the listed specifier is built
+            // from the class's reflected name, which does not carry the module, and SwiftPM matches this
+            // filter against that specifier as a regular expression. The simple name is a substring of
+            // either spelling, so one command replays the case on both platforms.
             command.add(test.testMethod() == null
-                    ? test.className()
-                    : test.className() + "/" + test.testMethod());
+                    ? test.simpleName()
+                    : test.simpleName() + "/" + test.testMethod());
         }
         return List.copyOf(command);
     }
@@ -255,9 +310,12 @@ public final class SwiftGeneratedTestRunner implements VerificationTools.Generat
         Set<String> names = new LinkedHashSet<>();
         for (GeneratedTest test : tests) {
             names.add(test.className());
+            names.add(test.simpleName());
         }
         for (TestCaseResult testCase : parsed.cases()) {
-            if (names.contains(testCase.suite())) {
+            // Either the canonical module-qualified name or the simple one counts: a suite that has
+            // already been normalised matches exactly, and a raw Linux report matches by simple name.
+            if (names.contains(testCase.suite()) || names.contains(simpleName(testCase.suite()))) {
                 return true;
             }
         }
