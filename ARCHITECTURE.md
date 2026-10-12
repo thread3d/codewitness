@@ -126,7 +126,7 @@ them.
    `PythonProjectDetector`, `RustProjectDetector`, `GoProjectDetector`, `TypeScriptProjectDetector`,
    `JavaScriptProjectDetector`, `CSharpProjectDetector`, `KotlinProjectDetector`,
    `CppProjectDetector`, `PhpProjectDetector`, `RubyProjectDetector`, `SwiftProjectDetector`,
-   `VerilogProjectDetector`).
+   `VerilogProjectDetector`, `SqlProjectDetector`).
 2. **workspace** — the project is copied into the run directory, excluding build output, VCS metadata
    and previous run data, with executable bits restored on `mvnw`/`gradlew`. `bin` and `obj` are
    excluded too, because `obj/project.assets.json` holds absolute package paths belonging to the

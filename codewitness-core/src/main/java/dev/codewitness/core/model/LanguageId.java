@@ -100,6 +100,17 @@ public record LanguageId(String id) {
      */
     public static final LanguageId VERILOG = new LanguageId("verilog");
     /**
+     * SQL: schema, migrations, views and queries, loaded into an ephemeral database.
+     *
+     * <p>SQL has no compiler driver of its own, so the language's first failure is defined by the
+     * adapter rather than by a tool: the declared schema and migrations are applied to a fresh database,
+     * and a script the database rejects is a failed build - which the engine maps to BLOCKED - rather
+     * than a defect. The language is named for the language and not for the engine that runs it, exactly
+     * as {@link #CSHARP} is not called {@code dotnet}: the database engine is reported separately, by the
+     * database fixture that prepared it.
+     */
+    public static final LanguageId SQL = new LanguageId("sql");
+    /**
      * More than one language, verified together because more than one adapter claimed part of the
      * project. Reported instead of silently naming whichever language happened to be inspected first.
      */

@@ -130,6 +130,12 @@ or a Verilog project:
 ./codewitness verify ./my-verilog-project --requirements requirements.md
 ```
 
+or a SQL project:
+
+```bash
+./codewitness verify ./my-sql-project --requirements requirements.md
+```
+
 The language is detected, and a project may be written in several. `LanguageAdapterRegistry.selectAll`
 runs **every** adapter that claims part of the tree — a Java service with a TypeScript frontend is two
 verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
@@ -149,7 +155,7 @@ that is not there. Recognition comes from `LanguageDetector` implementations dis
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
 `language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp`, `kotlin`,
-`cpp`, `php`, `ruby`, `swift` or `verilog`
+`cpp`, `php`, `ruby`, `swift`, `verilog` or `sql`
 *narrows* the run
 to that one adapter instead of being merged with the automatic choice. It is not forced: the named adapter
 is used when it exists and actually claims the project, and otherwise the run falls back to
@@ -739,6 +745,10 @@ codewitness/
 ├── codewitness-adapter-verilog/ Verilog and SystemVerilog projects: iverilog -g2012 build and vvp -N
 │                               testbench simulation, heuristics, security, bounded source mutation;
 │                               no coverage export and no dependency inventory
+├── codewitness-adapter-sql/    SQL projects: schema and migration loading into an ephemeral SQLite
+│                               database as the language's first failure, declared SQL test scripts
+│                               whose assertion queries must return no rows, heuristics and security;
+│                               no coverage and no dependency inventory
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -1649,7 +1659,57 @@ The honest limits of Verilog support are:
   evidence therefore carries no command, and reproducing a failure means running the two steps;
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
-Implemented but limited, and reported as such:
+The SQL adapter is implemented and exercised by its own tests, which load a real SQLite database
+rather than a mock:
+
+- detection of SQL trees by extension (`.sql`, `.ddl`) and the one split that matters: schema and
+  migration scripts against test scripts. A file is a test when it sits under a `test`, `tests` or
+  `spec` directory or its name marks it as one; everything else is schema. Migration directories
+  (`migrations`, `db/migrate`, `changesets`, …) are recognised for the report only, because the files
+  are applied in file-name order and no tool has to be known for that to be correct;
+- a build that is the language's first failure: every schema and migration script is applied, in order,
+  to a fresh SQLite database inside the run's artefact directory. A script the database rejects is a
+  failed build — which the engine maps to `BLOCKED` — reported as a diagnostic naming the file and
+  statement, never a defect;
+- existing tests through `SqlTestProvider`: each test script runs against its **own** fresh database
+  loaded with the project's schema, so one test's rows cannot decide another's result. The assertions
+  are visible in the file: a statement preceded by `-- expect: error` must be rejected by the database
+  (a constraint, a rejection rule, a privilege), and a final `SELECT` must return no rows (the
+  invariant, whose rows are the counterexample). A script with neither is recorded as `SKIPPED`, because
+  running without error is not evidence that anything held. A failing script is an ordinary failing test
+  case, so it maps to the requirement whose id its file mentions and carries a `sqlite3` replay recipe
+  when that tool is installed;
+- static analysis over a SQL rule table (`sql-heuristics`) read through a literal-aware `SqlSourceScan`
+  that blanks comments and quoted regions, so a rule sees what the database would execute: `SELECT *`,
+  an `UPDATE` or `DELETE` with no `WHERE`, a comparison with `NULL` using `=` or `<>`, `NOT IN` over a
+  subquery, an unguarded `DROP`, and a table declared without a primary key. A separate security table
+  (`sql-security-heuristics`) covers `EXECUTE IMMEDIATE`, `xp_cmdshell`, `GRANT … TO PUBLIC`,
+  `load_extension`, `ATTACH` and `PRAGMA writable_schema`. Both are advisory — their ids contain
+  "heuristics" — so a rule match never fails a requirement on its own.
+
+The honest limits of SQL support are:
+
+- coverage is not measured. Statement coverage over a schema is not a meaningful measurement, so the
+  adapter claims no coverage capability and the report says coverage was not measured rather than
+  reporting a number;
+- dependencies are not analysed. SQL has no package manager and no advisory ecosystem, so there is no
+  inventory and no source to consult; the adapter declares no dependency capability;
+- the test convention is CodeWitness's, not a standard. SQL has no test runner, so a project's scripts
+  have to be written in the two shapes above to be executed as evidence;
+- a test script should mention exactly one requirement id. The core attributes a test file to the
+  requirement whose id it names, and its case-level attribution is single-valued, so a script that names
+  two requirements has its executed cases counted for only one of them. One script per requirement is
+  the convention the adapter documents and the one it is tested against;
+- a schema that is not SQLite is out of reach for now: the adapter loads into SQLite because the driver
+  is already in the build and needs no server. A `database:` declaration in `codewitness.yaml` prepares
+  a database for a project's **own** tests in any language and is independent of this adapter, which
+  always loads the tree's schema for itself;
+- the schema loader splits scripts itself, because JDBC runs only the first statement of a
+  multi-statement string and reports success for the whole thing. String literals, comments and trigger
+  bodies containing semicolons are handled; a procedural body written for a database that has stored
+  procedures is not, and is documented rather than silently misread.
+
+
 
 - **Dependency advisories** are checked only when you turn the scan on. It covers every ecosystem the
   adapters can inventory at a resolved version: Maven (from `dependency:list`), npm and PyPI and

@@ -1,15 +1,15 @@
 package dev.codewitness.languages;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
- * Recognises {@code SQL} projects, which CodeWitness has no adapter for.
+ * Recognises {@code SQL} projects.
  *
- * <p>Reported as present and not verified. Nothing here builds, tests or analyses anything; it exists so
- * that a tree containing SQL does not have every verdict computed as though that code were absent. That
- * matters more for SQL than for most languages on this path: schema, migrations and views are code with
- * constraints and queries in them, they are frequently written by the same process that wrote the
- * application, and a report that is silent about them reads as though the database layer had been checked.
+ * <p>Reported as present and not verified when nothing claims them. It declares {@code sql} as the
+ * adapter language that covers it, so a tree the SQL adapter verified is not described a second time as
+ * present and unverifiable - and a tree with SQL files that the adapter does not claim, or a classpath
+ * without the adapter, is still recognised and reported rather than passed over.
  *
  * <p>It scans deeper than the other descriptors - six levels instead of three - because SQL has no
  * conventional file at the project root to announce it. The files are normally under a tool's own tree,
@@ -34,4 +34,10 @@ public final class SqlLanguageDetector extends DescriptorLanguageDetector {
                 List.of(".sql", ".ddl"),
                 MAX_DEPTH);
     }
+
+    @Override
+    public Optional<String> verifiedAsAdapterLanguage() {
+        return Optional.of("sql");
+    }
 }
+

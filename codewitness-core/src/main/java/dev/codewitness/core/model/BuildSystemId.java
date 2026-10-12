@@ -78,6 +78,12 @@ public record BuildSystemId(String id) {
      * carry several builds or select one through {@code PATH}.
      */
     public static final BuildSystemId ICARUS = new BuildSystemId("icarus");
+    /**
+     * SQL. There is no build tool, so the "build" is the adapter applying the declared schema to a fresh
+     * database. Recorded as its own id rather than as {@link #NONE} so a report can say what the
+     * language's first failure was checked against.
+     */
+    public static final BuildSystemId SQL = new BuildSystemId("sql");
     public static final BuildSystemId NONE = new BuildSystemId("none");
     /** More than one build system, because more than one language adapter claimed part of the project. */
     public static final BuildSystemId POLYGLOT = new BuildSystemId("polyglot");
