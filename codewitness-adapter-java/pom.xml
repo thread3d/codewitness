@@ -19,6 +19,13 @@
       <artifactId>codewitness-core</artifactId>
     </dependency>
 
+    <!-- The dependency-path hint for a Maven advisory, shared with the Kotlin adapter, which resolves
+         the same ecosystem. Keeping one copy is what stops the two Maven adapters from drifting. -->
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-adapter-support</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

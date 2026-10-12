@@ -17,13 +17,16 @@ import dev.codewitness.core.requirements.VerificationObligation;
 import dev.codewitness.core.result.Counterexample;
 import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
+import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.core.spi.VerificationStrategy;
+import dev.codewitness.core.spi.VerificationTools;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Fails a requirement whose code ships with a dependency that has a high severity advisory.
@@ -39,13 +42,24 @@ import java.util.Map;
  * ({@link Severity#UNKNOWN}) refutes nothing, and an advisory on a requirement whose code could not be
  * attributed to a module is reported but not charged to it. Both are stated in the report rather than
  * silently resolved.
+ *
+ * <p>The reproduction recipe is the one place an advisory touches a language's toolchain, and this class
+ * does not know any of them. It asks the registered {@link VerificationTools.DependencyAnalyzer} that
+ * claims the advisory's ecosystem, so a new language supplies its own dependency-path explanation by
+ * implementing two methods on its analyzer rather than by editing the core.
  */
 public final class DependencyAdvisoryStrategy implements VerificationStrategy {
 
     private final RequirementCodeMapper mapper;
+    private final VerificationProviderRegistry providers;
 
     public DependencyAdvisoryStrategy(RequirementCodeMapper mapper) {
+        this(mapper, VerificationProviderRegistry.empty());
+    }
+
+    public DependencyAdvisoryStrategy(RequirementCodeMapper mapper, VerificationProviderRegistry providers) {
         this.mapper = mapper;
+        this.providers = providers == null ? VerificationProviderRegistry.empty() : providers;
     }
 
     @Override
@@ -254,7 +268,7 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
         return fileName == null ? "" : fileName.toString();
     }
 
-    private static Counterexample counterexample(
+    private Counterexample counterexample(
             VerificationContext context,
             Requirement requirement,
             DependencyVulnerability vulnerability,
@@ -291,7 +305,7 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
                         "Show the dependency path that pulls the advisory into module " + module
                                 + ", then read the advisory"
                                 + dependencyPathHint(vulnerability),
-                        dependencyTreeCommand(context, vulnerability),
+                        dependencyPathCommand(context, vulnerability),
                         null,
                         null,
                         Map.of("dependency", vulnerability.dependency(),
@@ -302,41 +316,48 @@ public final class DependencyAdvisoryStrategy implements VerificationStrategy {
     }
 
     /**
-     * @return a command that shows why the vulnerable artifact is on the module's classpath.
+     * @return the analyzer that claims the advisory's ecosystem, or empty when none is registered.
      *
-     * <p>Only Maven can be given one. Advisories now arrive from every ecosystem CodeWitness
-     * inventories, and hanging a hard-coded {@code dependency:tree} goal on an npm advisory would hand
-     * the reader a command that cannot show what it claims to show. For Maven the project's own recorded
-     * build executable is the one that was observed to work on this project, so the goal is hung on
-     * that; when no build command was recorded - or the dependency is not a Maven one - the recipe
-     * carries no command rather than inventing one, and {@link #dependencyPathHint} names the tool a
-     * human should reach for instead.
+     * <p>An advisory's ecosystem is the only thing that identifies which language's toolchain can explain
+     * it, so the lookup is by ecosystem rather than by the project the strategy is running over. The core
+     * therefore knows no ecosystem and no tool: a new adapter answers for its own.
      */
-    private static List<String> dependencyTreeCommand(
-            VerificationContext context, DependencyVulnerability vulnerability) {
-        if (!PackageCoordinate.MAVEN.equals(vulnerability.ecosystem())) {
-            return List.of();
-        }
-        List<String> build = context.state().build() == null ? List.of() : context.state().build().command();
-        if (build.isEmpty()) {
-            return List.of();
-        }
-        return List.of(build.getFirst(), "-B", "dependency:tree", "-Dincludes=" + vulnerability.dependency());
+    private Optional<VerificationTools.DependencyAnalyzer> pathAdvisor(
+            DependencyVulnerability vulnerability) {
+        return providers.dependencyAnalyzerFor(vulnerability.ecosystem());
+    }
+
+    /** @return the vulnerable dependency as the typed coordinate the hook takes. */
+    private static PackageCoordinate coordinateOf(DependencyVulnerability vulnerability) {
+        return PackageCoordinate.of(vulnerability.ecosystem(), vulnerability.dependency(),
+                vulnerability.version());
     }
 
     /**
-     * @return prose naming the ecosystem's own tool for showing a dependency path, or the empty string
-     *     for Maven, whose command is recorded as an executable recipe instead.
+     * @return a command that shows why the vulnerable artifact is on the module's graph, as the analyzer
+     *     that owns the advisory's ecosystem built it.
+     *
+     * <p>The analyzer decides, because only it knows whether a command can be built for the project's own
+     * toolchain - and whether the project is even the one the command would work in. When no analyzer
+     * claims the ecosystem, or the analyzer declines to build a command, the recipe carries none rather
+     * than inventing one, and {@link #dependencyPathHint} still names the tool a human should reach for.
      */
-    private static String dependencyPathHint(DependencyVulnerability vulnerability) {
-        String command = switch (vulnerability.ecosystem()) {
-            case PackageCoordinate.NPM -> " (npm: `npm ls " + vulnerability.dependency() + "`)";
-            case PackageCoordinate.PYPI -> " (pip: `pip show " + vulnerability.dependency() + "`)";
-            case PackageCoordinate.CRATES_IO -> " (cargo: `cargo tree -i " + vulnerability.dependency() + "`)";
-            case PackageCoordinate.GO -> " (go: `go mod why -m " + vulnerability.dependency() + "`)";
-            default -> "";
-        };
-        return command;
+    private List<String> dependencyPathCommand(
+            VerificationContext context, DependencyVulnerability vulnerability) {
+        return pathAdvisor(vulnerability)
+                .map(analyzer -> analyzer.dependencyPathCommand(context, coordinateOf(vulnerability)))
+                .orElse(List.of());
+    }
+
+    /**
+     * @return prose naming the ecosystem's own tool for showing a dependency path, as the analyzer that
+     *     owns the ecosystem phrased it, or the empty string when none is registered or the ecosystem has
+     *     no such tool.
+     */
+    private String dependencyPathHint(DependencyVulnerability vulnerability) {
+        return pathAdvisor(vulnerability)
+                .map(analyzer -> analyzer.dependencyPathHint(coordinateOf(vulnerability)))
+                .orElse("");
     }
 
     private static String render(List<DependencyVulnerability> vulnerabilities, List<String> modules) {

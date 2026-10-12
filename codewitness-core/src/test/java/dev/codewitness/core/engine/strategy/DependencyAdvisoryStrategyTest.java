@@ -22,6 +22,8 @@ import dev.codewitness.core.result.BudgetUsage;
 import dev.codewitness.core.result.Counterexample;
 import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
+import dev.codewitness.core.spi.VerificationProviderRegistry;
+import dev.codewitness.core.spi.VerificationTools;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,8 +34,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -153,6 +157,70 @@ class DependencyAdvisoryStrategyTest {
         assertNull(DependencyAdvisoryStrategy.moduleOf("Somewhere.java", project()));
     }
 
+    @Test
+    @DisplayName("the analyzer that claims the advisory's ecosystem supplies the reproduction recipe")
+    void theOwningAnalyzerSuppliesTheReproductionRecipe() {
+        DependencyVulnerability advisory = advisory("@acme/thing", PackageCoordinate.NPM);
+        Fixture fixture = ecosystemFixture(advisory, PackageCoordinate.npm("@acme/thing", "1.2.3"));
+        VerificationProviderRegistry providers = VerificationProviderRegistry.empty()
+                .register(new RecordingAnalyzer(PackageCoordinate.NPM,
+                        " (npm: `npm ls @acme/thing`)", List.of("npm", "ls", "@acme/thing")));
+
+        Counterexample counterexample = verify(fixture, providers).counterexamples().getFirst();
+
+        assertTrue(counterexample.reproduction().description().contains(" (npm: `npm ls @acme/thing`)"),
+                "the hint is the owning analyzer's, not the core's: " + counterexample.reproduction());
+        assertEquals(List.of("npm", "ls", "@acme/thing"), counterexample.reproduction().command());
+    }
+
+    @Test
+    @DisplayName("a language the core has never heard of plugs in through its own analyzer")
+    void anUnbundledLanguageSuppliesItsOwnRecipe() {
+        // The point of the hook: nothing in the core names this ecosystem, and the recipe still works.
+        DependencyVulnerability advisory = advisory("acme-widget", "NovelEcosystem");
+        Fixture fixture = ecosystemFixture(advisory,
+                PackageCoordinate.of("NovelEcosystem", "acme-widget", "1.2.3"));
+        VerificationProviderRegistry providers = VerificationProviderRegistry.empty()
+                .register(new RecordingAnalyzer("NovelEcosystem",
+                        " (novel: `novel why acme-widget`)", List.of("novel", "why", "acme-widget")));
+
+        Counterexample counterexample = verify(fixture, providers).counterexamples().getFirst();
+
+        assertTrue(counterexample.reproduction().description().contains("novel why acme-widget"),
+                counterexample.reproduction().description());
+        assertEquals(List.of("novel", "why", "acme-widget"), counterexample.reproduction().command());
+    }
+
+    @Test
+    @DisplayName("an analyzer that does not claim the ecosystem is not consulted")
+    void anAnalyzerThatDoesNotClaimTheEcosystemIsNotConsulted() {
+        DependencyVulnerability advisory = advisory("@acme/thing", PackageCoordinate.NPM);
+        Fixture fixture = ecosystemFixture(advisory, PackageCoordinate.npm("@acme/thing", "1.2.3"));
+        VerificationProviderRegistry providers = VerificationProviderRegistry.empty()
+                .register(new RecordingAnalyzer(PackageCoordinate.NPM,
+                        " (wrong tool)", List.of("wrong"), Set.of(PackageCoordinate.PYPI)));
+
+        Counterexample counterexample = verify(fixture, providers).counterexamples().getFirst();
+
+        assertFalse(counterexample.reproduction().description().contains("wrong tool"),
+                "the lookup is by the ecosystem the advisory names: " + counterexample.reproduction());
+        assertTrue(counterexample.reproduction().command().isEmpty());
+    }
+
+    @Test
+    @DisplayName("no registered analyzer means no invented recipe")
+    void noAnalyzerMeansNoHintAndNoCommand() {
+        Fixture fixture = ecosystemFixture(advisory("@acme/thing", PackageCoordinate.NPM),
+                PackageCoordinate.npm("@acme/thing", "1.2.3"));
+
+        Counterexample counterexample = verify(fixture, VerificationProviderRegistry.empty())
+                .counterexamples().getFirst();
+
+        assertFalse(counterexample.reproduction().description().contains("npm ls"),
+                "an ecosystem nothing answers for gets no guessed command: " + counterexample.reproduction());
+        assertTrue(counterexample.reproduction().command().isEmpty());
+    }
+
     // ------------------------------------------------------------------ fixture
 
     private record Fixture(VerificationContext context, Requirement requirement) {
@@ -226,10 +294,106 @@ class DependencyAdvisoryStrategyTest {
         return new Fixture(context, requirement);
     }
 
+    /** @return a HIGH advisory for a dependency in the given ecosystem. */
+    private static DependencyVulnerability advisory(String dependency, String ecosystem) {
+        return new DependencyVulnerability(dependency, "1.2.3", "CVE-2026-0002", Severity.HIGH,
+                "A test advisory.", "OSV", ecosystem);
+    }
+
+    /**
+     * A single-module context whose inventory carries exactly one coordinate in the given ecosystem, so a
+     * test can show which registered analyzer supplies the reproduction recipe for that ecosystem. The
+     * single module is what lets an advisory be attributed to the requirement's code at all; without it
+     * the strategy would correctly decline to charge the advisory to anyone.
+     */
+    private Fixture ecosystemFixture(DependencyVulnerability vulnerability, PackageCoordinate coordinate) {
+        ProjectInfo single = ProjectInfo.builder(ProjectRef.of(tmp))
+                .language(LanguageId.TYPESCRIPT)
+                .addModule(new ModuleInfo("frontend", tmp.resolve("workspace"), "module", List.of(), List.of(), null))
+                .build();
+        Map<String, List<String>> byModule = Map.of(
+                DependencyReport.moduleKey(LanguageId.TYPESCRIPT, "frontend"), List.of(coordinate.display()));
+        DependencyReport dependencies = new DependencyReport(true, "test-inventory", "", 1,
+                List.of(coordinate.display()), byModule, List.of(coordinate), List.of(vulnerability),
+                AdvisoryScan.performed("osv", "https://api.osv.dev", Instant.now(), "queried 1"));
+
+        VerificationConfig defaults = VerificationConfig.defaults();
+        VerificationConfig config = new VerificationConfig(
+                defaults.project(), defaults.language(), defaults.limits(), defaults.tests(),
+                defaults.mutation(), defaults.propertyTesting(), defaults.staticAnalysis(),
+                new VerificationConfig.Security(true, new VerificationConfig.VulnerabilityScan(
+                        true, "osv", "https://api.osv.dev", Duration.ofSeconds(5), 100, Severity.HIGH)),
+                defaults.llm(), defaults.report(), defaults.sandbox(), List.of());
+
+        VerificationContext context = VerificationContext.builder()
+                .runId("CW-2026-01-01-TEST0")
+                .projectRef(ProjectRef.of(tmp))
+                .projectInfo(single)
+                .config(config)
+                .workspace(new WorkspaceManager.Workspace(tmp, WorkspaceManager.Mode.IN_PLACE, "test"))
+                .artifacts(new ArtifactStore(tmp.resolve("artifacts")))
+                .budget(new BudgetUsage.Tracker(Budget.defaults()))
+                .sandbox(new LocalProcessSandbox(List.of(tmp)))
+                .evidenceLedger(new EvidenceLedger("CW-2026-01-01-TEST0"))
+                .build();
+        context.state().dependencies(dependencies);
+        Requirement requirement = Requirement.builder("REQ-TS", "The frontend must behave.").title("TS")
+                .attribute("paths", "ledger.test.ts").build();
+        return new Fixture(context, requirement);
+    }
+
     private StrategyOutcome verify(Fixture fixture) {
+        return verify(fixture, VerificationProviderRegistry.empty());
+    }
+
+    private StrategyOutcome verify(Fixture fixture, VerificationProviderRegistry providers) {
         RequirementCodeMapper mapper = RequirementCodeMapper.build(
                 fixture.context().projectInfo(), new RequirementSet(List.of(fixture.requirement())));
-        return new DependencyAdvisoryStrategy(mapper)
+        return new DependencyAdvisoryStrategy(mapper, providers)
                 .verify(fixture.context(), fixture.requirement(), List.of());
+    }
+
+    /**
+     * A dependency analyzer that inventories nothing and answers only the path hook.
+     *
+     * <p>It is the shape a future language adapter takes: it declares the ecosystem it speaks for and
+     * supplies the recipe, and the core needs no change to use it.
+     */
+    private record RecordingAnalyzer(String ecosystem, String hint, List<String> command, Set<String> claims)
+            implements VerificationTools.DependencyAnalyzer {
+
+        RecordingAnalyzer(String ecosystem, String hint, List<String> command) {
+            this(ecosystem, hint, command, Set.of(ecosystem));
+        }
+
+        @Override
+        public String id() {
+            return "recording-analyzer";
+        }
+
+        @Override
+        public boolean supports(ProjectInfo project) {
+            return false;
+        }
+
+        @Override
+        public DependencyReport analyseDependencies(VerificationContext context) {
+            return DependencyReport.notAnalysed(id(), "a test double inventories nothing");
+        }
+
+        @Override
+        public Set<String> ecosystems() {
+            return claims;
+        }
+
+        @Override
+        public String dependencyPathHint(PackageCoordinate coordinate) {
+            return hint;
+        }
+
+        @Override
+        public List<String> dependencyPathCommand(VerificationContext context, PackageCoordinate coordinate) {
+            return command;
+        }
     }
 }

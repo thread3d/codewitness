@@ -145,9 +145,19 @@ To add one:
    `swift` driver the build already drove. If your
    tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
    counterexample carries a command that actually runs.
-4. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the
+4. Answer the advisory hook on the `DependencyAnalyzer` your adapter registers. Declare
+   `ecosystems()` — the advisory ecosystems your coordinates are filed under, spelled as the advisory
+   service spells them — and, for each, `dependencyPathHint(coordinate)` and, where a reliable command
+   exists, `dependencyPathCommand(context, coordinate)`. This is how an advisory against your language
+   arrives with a reproduction recipe: the engine knows no ecosystem and no tool, and asks the analyzer
+   that claims the advisory's ecosystem. `dev.codewitness.support.dependency.DependencyPathHints` holds
+   the shipped hints and the one executable Maven recipe; reuse one or phrase your own. If your provider
+   is a runner-aware wrapper that delegates the inventory to another class, forward these three methods
+   explicitly — the registry holds the wrapper, so an inherited default would answer "no ecosystem" and
+   the recipe would silently lose its hint.
+5. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the
    adapter class name.
-5. Do not add anything language specific to `codewitness-core`. If you believe the core must change,
+6. Do not add anything language specific to `codewitness-core`. If you believe the core must change,
    say so in the pull request instead of changing it — an engine that grows a language branch is an
    engine that can no longer claim to be language independent. Declaring the file extensions your
    language uses as source (`ProjectInfo.sourceExtensions`) is the intended mechanism for the few

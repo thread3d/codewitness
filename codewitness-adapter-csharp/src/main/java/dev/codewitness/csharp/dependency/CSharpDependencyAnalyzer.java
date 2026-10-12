@@ -9,6 +9,7 @@ import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.csharp.CSharpProjectDetector;
+import dev.codewitness.support.dependency.DependencyPathHints;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -69,6 +71,23 @@ public final class CSharpDependencyAnalyzer implements VerificationTools.Depende
     @Override
     public boolean supports(ProjectInfo project) {
         return project.language().equals(LanguageId.CSHARP);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>NuGet package ids are what an advisory's NuGet record names, and the ecosystem is spelled with
+     * the casing the advisory service uses.
+     */
+    @Override
+    public Set<String> ecosystems() {
+        return Set.of(PackageCoordinate.NUGET);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String dependencyPathHint(PackageCoordinate coordinate) {
+        return DependencyPathHints.nuget(coordinate);
     }
 
     @Override

@@ -4,6 +4,7 @@ import dev.codewitness.core.model.ProjectInfo;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Registry of verification providers.
@@ -105,6 +106,29 @@ public final class VerificationProviderRegistry {
 
     public List<VerificationTools.DependencyAnalyzer> dependencyAnalyzers(ProjectInfo project) {
         return dependencyAnalyzers.stream().filter(c -> c.supports(project)).toList();
+    }
+
+    /**
+     * @return every registered dependency analyzer, unfiltered by project.
+     *
+     * <p>The advisory strategy cannot select by project the way a verification phase does. An advisory is
+     * attributed on the merged dependency report, whose project may be polyglot, while each analyzer's
+     * {@link VerificationTools.DependencyAnalyzer#supports(ProjectInfo)} answers for a single language.
+     * The ecosystem the advisory names is what identifies the analyzer that knows how to explain it, so
+     * the lookup is by ecosystem rather than by project.
+     */
+    public List<VerificationTools.DependencyAnalyzer> dependencyAnalyzers() {
+        return List.copyOf(dependencyAnalyzers);
+    }
+
+    /**
+     * @param ecosystem an advisory ecosystem id, exactly as the advisory service spells it
+     * @return the first registered analyzer that claims that ecosystem, or empty when none does
+     */
+    public Optional<VerificationTools.DependencyAnalyzer> dependencyAnalyzerFor(String ecosystem) {
+        return dependencyAnalyzers.stream()
+                .filter(analyzer -> analyzer.ecosystems().contains(ecosystem))
+                .findFirst();
     }
 
     public List<VerificationTools.TestGenerator> testGenerators(ProjectInfo project) {

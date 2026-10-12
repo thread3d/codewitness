@@ -2,12 +2,14 @@ package dev.codewitness.typescript.dependency;
 
 import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.LanguageId;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.support.dependency.PackageJsonDependencyAnalyzer;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Inventories a TypeScript project's declared dependencies from {@code package.json}.
@@ -34,6 +36,16 @@ public final class TypeScriptDependencyAnalyzer implements VerificationTools.Dep
     @Override
     public DependencyReport analyseDependencies(VerificationContext context) {
         return delegate.analyseDependencies(context);
+    }
+
+    @Override
+    public Set<String> ecosystems() {
+        return delegate.ecosystems();
+    }
+
+    @Override
+    public String dependencyPathHint(PackageCoordinate coordinate) {
+        return delegate.dependencyPathHint(coordinate);
     }
 
     /** @see PackageJsonDependencyAnalyzer#parse(String) */

@@ -37,6 +37,22 @@ final class CliSupport {
      * <p>This is the composition root: everything else in the codebase depends on interfaces.
      */
     static VerificationEngine engine() {
+        Wiring wiring = wiring();
+        // Recognition for the languages no adapter below can verify. Without this a repository is reported
+        // as though the code in those languages were not there.
+        LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
+        return new VerificationEngine(wiring.languages(), wiring.providers(), detectors,
+                new dev.codewitness.core.exec.LocalProcessSandbox(List.of(Path.of("."))).runner());
+    }
+
+    /**
+     * The registries the CLI wires: every bundled adapter and every provider it registers.
+     *
+     * <p>Exposed to the module's own tests so that what ships can be asserted directly - in particular
+     * that every ecosystem an adapter inventories is one the advisory reproduction lookup can answer
+     * for, which is the hook a new language plugs into.
+     */
+    static Wiring wiring() {
         LanguageAdapterRegistry languages = new LanguageAdapterRegistry();
         VerificationProviderRegistry providers = VerificationProviderRegistry.empty();
         JavaAdapterBundle.register(languages, providers, true);
@@ -55,11 +71,11 @@ final class CliSupport {
         JavaScriptAdapterBundle.register(languages, providers, true);
         TypeScriptAdapterBundle.register(languages, providers, true);
         languages.discover();
-        // Recognition for the languages no adapter above can verify. Without this a repository is reported
-        // as though the code in those languages were not there.
-        LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
-        return new VerificationEngine(languages, providers, detectors,
-                new dev.codewitness.core.exec.LocalProcessSandbox(List.of(Path.of("."))).runner());
+        return new Wiring(languages, providers);
+    }
+
+    /** The two registries the composition root fills, kept together so a test can assert what ships. */
+    record Wiring(LanguageAdapterRegistry languages, VerificationProviderRegistry providers) {
     }
 
     /** Resolves the configuration file: explicit flag, then {@code <project>/codewitness.yaml}, then defaults. */

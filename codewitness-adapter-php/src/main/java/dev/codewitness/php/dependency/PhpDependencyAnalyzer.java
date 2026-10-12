@@ -9,6 +9,7 @@ import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
+import dev.codewitness.support.dependency.DependencyPathHints;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -19,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -67,6 +69,18 @@ public final class PhpDependencyAnalyzer implements VerificationTools.Dependency
     @Override
     public boolean supports(ProjectInfo project) {
         return project.language().equals(LanguageId.PHP);
+    }
+
+    /** {@inheritDoc} A Composer {@code vendor/package} name is an advisory's Packagist package name. */
+    @Override
+    public Set<String> ecosystems() {
+        return Set.of(PackageCoordinate.PACKAGIST);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String dependencyPathHint(PackageCoordinate coordinate) {
+        return DependencyPathHints.packagist(coordinate);
     }
 
     /**

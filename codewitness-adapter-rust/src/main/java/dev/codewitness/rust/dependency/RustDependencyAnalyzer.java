@@ -6,6 +6,7 @@ import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
+import dev.codewitness.support.dependency.DependencyPathHints;
 import dev.codewitness.support.dependency.TomlPackageTable;
 
 import java.io.IOException;
@@ -48,6 +49,18 @@ public final class RustDependencyAnalyzer implements VerificationTools.Dependenc
     @Override
     public boolean supports(ProjectInfo project) {
         return project.language().equals(LanguageId.RUST);
+    }
+
+    /** {@inheritDoc} A Cargo crate is an advisory's crates.io package. */
+    @Override
+    public Set<String> ecosystems() {
+        return Set.of(PackageCoordinate.CRATES_IO);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String dependencyPathHint(PackageCoordinate coordinate) {
+        return DependencyPathHints.crate(coordinate);
     }
 
     @Override

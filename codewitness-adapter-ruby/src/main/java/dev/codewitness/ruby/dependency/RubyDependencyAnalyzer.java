@@ -7,6 +7,7 @@ import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.ruby.RubyProjectDetector;
+import dev.codewitness.support.dependency.DependencyPathHints;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Inventories a Bundler project's dependencies, resolved from {@code Gemfile.lock}.
@@ -80,6 +82,18 @@ public final class RubyDependencyAnalyzer implements VerificationTools.Dependenc
             return false;
         }
         return projectRoots(project).stream().anyMatch(RubyDependencyAnalyzer::holdsManifest);
+    }
+
+    /** {@inheritDoc} A Bundler-resolved gem is an advisory's RubyGems package. */
+    @Override
+    public Set<String> ecosystems() {
+        return Set.of(PackageCoordinate.RUBYGEMS);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String dependencyPathHint(PackageCoordinate coordinate) {
+        return DependencyPathHints.rubygem(coordinate);
     }
 
     /**

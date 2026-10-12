@@ -1215,7 +1215,7 @@ public final class VerificationEngine {
         return List.of(
                 new ExistingTestsStrategy(mapper, providers),
                 new StaticAnalysisStrategy(mapper),
-                new DependencyAdvisoryStrategy(mapper),
+                new DependencyAdvisoryStrategy(mapper, providers),
                 new GeneratedTestsStrategy(providers),
                 new MutationStrategy(mapper),
                 new LlmAdvisoryStrategy());

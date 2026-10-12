@@ -1505,9 +1505,10 @@ Implemented but limited, and reported as such:
   `==`), Go (from the versions `go.mod` selects), NuGet (from `packages.lock.json`, or from
   `PackageReference` versions and central `PackageVersion` entries when there is no lock file),
   ConanCenter (from `conan.lock`), Packagist (from `composer.lock`, or from the declared `require`
-  and `require-dev` ranges when there is no lock file, where a range is left unresolved) and RubyGems
-  (from `Gemfile.lock`), and SwiftURL (from `Package.resolved`, where a package is identified by its
-  location rather than by a registry name). A
+  and `require-dev` ranges when there is no lock file, where a range is left unresolved), RubyGems
+  (from `Gemfile.lock`) and SwiftURL (from `Package.resolved`, whose location is reduced to the
+  `host/path` form the ecosystem names a package by: the raw `https://….git` URL a pin records never
+  matches an advisory). A
   dependency an inventory reports without a resolved version cannot be asked about, so the report says
   the scan could not query it rather than implying it is clean. When the scan is on, CodeWitness asks
   OSV which of the resolved dependencies are
@@ -1518,6 +1519,14 @@ Implemented but limited, and reported as such:
   only `module-b` pulls in, and each module's dependencies are keyed by their language so a same-named
   module in another language cannot be charged with them. An advisory whose severity the source did not
   state refutes nothing, and an empty result is not a claim that a dependency is unaffected.
+  **One ecosystem the scan asks about is one the source does not answer for:** OSV accepts `ConanCenter`
+  as an ecosystem but publishes no records under it, so a C or C++ advisory cannot currently be found and
+  a scan of a `conan.lock` comes back with no match. The coverage note says exactly what was asked and
+  that an empty result is not evidence of safety; it is not a statement that the packages are clean.
+  Where a dependency path can be shown, the reproduction recipe says how: an executable
+  `dependency:tree` recipe for Maven, and a named tool for each other ecosystem. That mapping is supplied
+  by the adapter that owns the ecosystem, not by the core, so a new language adds its own without an
+  engine change.
 - **Gradle** support (detection, commands, report parsing) is implemented and unit tested, but the
   end-to-end demonstration in this repository was exercised with Maven only; no Gradle
   distribution was available in the environment it was built in.

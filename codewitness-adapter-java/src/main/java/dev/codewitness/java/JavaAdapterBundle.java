@@ -185,6 +185,22 @@ public final class JavaAdapterBundle {
             return new MavenDependencyAnalyzer(new BuildToolLauncher(context.runner())).analyseDependencies(context);
         }
 
+        // The advisory hook has to be forwarded, not inherited: this wrapper is what the provider registry
+        // actually holds, so a default here would answer "no ecosystem" for every Maven advisory and the
+        // reproduction recipe would lose the recipe the analyzer knows how to build.
+        @Override
+        public java.util.Set<String> ecosystems() {
+            return MavenDependencyAnalyzer.ECOSYSTEMS;
+        }
+
+        @Override
+        public java.util.List<String> dependencyPathCommand(
+                dev.codewitness.core.spi.VerificationContext context,
+                dev.codewitness.core.model.PackageCoordinate coordinate) {
+            return new MavenDependencyAnalyzer(new BuildToolLauncher(context.runner()))
+                    .dependencyPathCommand(context, coordinate);
+        }
+
         @Override
         public dev.codewitness.core.model.CoverageReport measure(
                 dev.codewitness.core.spi.VerificationContext context) {

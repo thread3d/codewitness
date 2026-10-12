@@ -6,6 +6,7 @@ import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
+import dev.codewitness.support.dependency.DependencyPathHints;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,6 +18,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Inventories a Swift package's dependencies from its {@code Package.resolved}.
@@ -27,10 +29,13 @@ import java.util.Map;
  * "nothing was found" and "nothing could be read" must not look the same in a report.
  *
  * <p>SwiftPM identifies a package by where it is fetched from, not by a registry-assigned name, so a
- * pin's URL is the name {@link PackageCoordinate#swiftPackage(String, String)} records and the one an
- * advisory service matches on. A bare identity such as {@code Alamofire} is not queryable in the
- * {@code SwiftURL} ecosystem - the same objection the Ruby and PHP analyzers make about a bare gem or
- * package name - which is why the URL is preferred even when the pin also carries an identity.
+ * pin's URL is the identity {@link PackageCoordinate#swiftPackage(String, String)} records. That factory
+ * reduces the URL to the host-and-path form the advisory service matches on
+ * ({@code https://github.com/apple/swift-nio.git} to {@code github.com/apple/swift-nio}), because the
+ * raw URL never matches a {@code SwiftURL} record and the scan would come back empty for every package.
+ * A bare identity such as {@code Alamofire} is not queryable in that ecosystem - the same objection the
+ * Ruby and PHP analyzers make about a bare gem or package name - which is why the URL is preferred even
+ * when the pin also carries an identity.
  *
  * <p>Two shapes are in the wild and both are read: the version 1 layout nests the pins under
  * {@code object}, and the version 2 and 3 layouts put them at the top level. The pin's URL is
@@ -78,6 +83,18 @@ public final class SwiftDependencyAnalyzer implements VerificationTools.Dependen
     @Override
     public boolean supports(ProjectInfo project) {
         return project != null && LanguageId.SWIFT.equals(project.language());
+    }
+
+    /** {@inheritDoc} A pin in {@code Package.resolved} is an advisory's SwiftURL package. */
+    @Override
+    public Set<String> ecosystems() {
+        return Set.of(PackageCoordinate.SWIFT_URL);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String dependencyPathHint(PackageCoordinate coordinate) {
+        return DependencyPathHints.swift(coordinate);
     }
 
     /**
@@ -217,9 +234,11 @@ public final class SwiftDependencyAnalyzer implements VerificationTools.Dependen
         long unresolved = coordinates.stream().filter(coordinate -> !coordinate.resolved()).count();
         StringBuilder note = new StringBuilder("inventory only: every pin in Package.resolved, with the "
                 + "version SwiftPM resolved or the revision when the pin declares no version. SwiftPM "
-                + "identifies a package by its location, so each coordinate carries the URL an advisory "
-                + "service matches on; whether any of them has a known advisory is recorded by the advisory "
-                + "scan, a separate question from which packages the code uses");
+                + "identifies a package by its location, so each coordinate is queryable under the "
+                + "location reduced to the host and path the advisory service names a Swift package by, "
+                + "while the display keeps the URL the pin recorded; whether any of them has a known "
+                + "advisory is recorded by the advisory scan, a separate question from which packages the "
+                + "code uses");
         if (unresolved > 0) {
             note.append("; ").append(unresolved).append(" of the ").append(coordinates.size())
                     .append(" pin(s) name neither a version nor a revision, so they are recorded unresolved "

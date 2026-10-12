@@ -5,6 +5,7 @@ import dev.codewitness.core.model.CoverageReport;
 import dev.codewitness.core.model.DependencyReport;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.MutationReport;
+import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.TestCaseResult;
 import dev.codewitness.core.model.TestResult;
@@ -12,6 +13,7 @@ import dev.codewitness.core.requirements.Requirement;
 import dev.codewitness.core.requirements.VerificationObligation;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * The tool level extension points of CodeWitness.
@@ -137,6 +139,58 @@ public final class VerificationTools {
          * @return argv style command, or an empty list when no command is run
          */
         default List<String> dependencyCommand(VerificationContext context) {
+            return List.of();
+        }
+
+        /**
+         * The advisory ecosystems this analyzer's coordinates belong to, spelled exactly as the advisory
+         * service spells them (for example {@code npm}, {@code NuGet}, {@code RubyGems}).
+         *
+         * <p>This is the hook a new language answers so that an advisory can be explained in that
+         * language's own toolchain without the core learning the language. When an advisory is attributed
+         * to a requirement, the core asks the analyzer that claims the advisory's ecosystem to describe the
+         * dependency path; the core itself names no ecosystem and no tool. The default is empty, which
+         * correctly means "this analyzer reports no queryable coordinates" - a Maven-only fallback is
+         * deliberately not assumed, because guessing would attribute one language's tool to another's
+         * dependency.
+         *
+         * @return the ecosystem ids this analyzer produces coordinates in
+         */
+        default Set<String> ecosystems() {
+            return Set.of();
+        }
+
+        /**
+         * How a human shows why a resolved dependency is on the project's graph, in this ecosystem's own
+         * tool. The text is appended to a counterexample's reproduction recipe.
+         *
+         * <p>Only the analyzer that owns the ecosystem can answer this: {@code npm ls} is the npm answer,
+         * {@code cargo tree -i} the Cargo one, and a core that hard-coded either would be a core that
+         * knows a language. An empty string is the honest answer for an ecosystem whose toolchain has no
+         * such command, or for one whose executable recipe is supplied by
+         * {@link #dependencyPathCommand(VerificationContext, PackageCoordinate)} instead.
+         *
+         * @param coordinate the vulnerable dependency, as the inventory reported it
+         * @return prose naming the ecosystem's tool, or the empty string when there is none
+         */
+        default String dependencyPathHint(PackageCoordinate coordinate) {
+            return "";
+        }
+
+        /**
+         * An executable command that shows why a resolved dependency is on the project's graph, for a
+         * counterexample's reproduction recipe.
+         *
+         * <p>Returning a command is a claim that it can be run in this project as it was verified. An
+         * empty list is the honest answer when the analyzer cannot build one - for example because it does
+         * not control which package manager the project uses - and the recipe then carries only
+         * {@link #dependencyPathHint(PackageCoordinate)}.
+         *
+         * @param context    the run context
+         * @param coordinate the vulnerable dependency, as the inventory reported it
+         * @return argv style command, or an empty list when none can be built
+         */
+        default List<String> dependencyPathCommand(VerificationContext context, PackageCoordinate coordinate) {
             return List.of();
         }
     }

@@ -9,6 +9,7 @@ import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.cpp.CppProjectDetector;
+import dev.codewitness.support.dependency.DependencyPathHints;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -96,6 +98,26 @@ public final class CppDependencyAnalyzer implements VerificationTools.Dependency
     @Override
     public boolean supports(ProjectInfo project) {
         return project.language().equals(LanguageId.CPP);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Every coordinate this inventory produces, resolved or not, is spelled as a Conan Center package:
+     * {@code conan.lock} is the only source here that resolves a version, while vcpkg floors,
+     * {@code FetchContent} tags and {@code find_package} names are recorded under the same ecosystem so
+     * that the report has one place to say whether each was queryable. Whether the advisory source
+     * publishes records for that ecosystem is a separate question, and the scan's own note answers it.
+     */
+    @Override
+    public Set<String> ecosystems() {
+        return Set.of(PackageCoordinate.CONAN_CENTER);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String dependencyPathHint(PackageCoordinate coordinate) {
+        return DependencyPathHints.conan(coordinate);
     }
 
     @Override

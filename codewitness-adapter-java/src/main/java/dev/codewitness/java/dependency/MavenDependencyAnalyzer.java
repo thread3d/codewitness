@@ -9,6 +9,7 @@ import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.java.BuildToolLauncher;
+import dev.codewitness.support.dependency.DependencyPathHints;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -191,6 +192,37 @@ public final class MavenDependencyAnalyzer implements VerificationTools.Dependen
         goals.add("-DincludeScope=runtime");
         goals.add("-DoutputAbsoluteArtifactFilename=false");
         return List.copyOf(goals);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>A Gradle project's coordinates are Maven Central coordinates too, so both build tools this
+     * adapter inventories answer under the one ecosystem an advisory about them is filed in.
+     */
+    @Override
+    public Set<String> ecosystems() {
+        return ECOSYSTEMS;
+    }
+
+    /**
+     * The one advisory ecosystem this analyzer's coordinates belong to.
+     *
+     * <p>Published so the runner-aware provider the bundle registers reports the same ecosystem without
+     * restating it: that wrapper delegates the inventory to this class, and a second copy of the id is a
+     * second place for the two to drift apart.
+     */
+    public static final Set<String> ECOSYSTEMS = Set.of(PackageCoordinate.MAVEN);
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Maven is the one ecosystem whose dependency path can be printed by an executable recipe built
+     * on the build command the run observed, so it returns that command and adds no prose hint.
+     */
+    @Override
+    public List<String> dependencyPathCommand(VerificationContext context, PackageCoordinate coordinate) {
+        return DependencyPathHints.mavenCommand(context, coordinate);
     }
 
     /** @return the last {@code count} lines of a tool's output, joined for a one-line note. */

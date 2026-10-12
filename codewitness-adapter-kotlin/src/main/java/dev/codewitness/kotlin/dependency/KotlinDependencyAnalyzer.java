@@ -10,6 +10,7 @@ import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
 import dev.codewitness.kotlin.KotlinBuildTools;
+import dev.codewitness.support.dependency.DependencyPathHints;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -210,6 +211,42 @@ public final class KotlinDependencyAnalyzer implements VerificationTools.Depende
         goals.add("-DincludeScope=runtime");
         goals.add("-DoutputAbsoluteArtifactFilename=false");
         return List.copyOf(goals);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Kotlin resolves the same Maven Central artifacts a Java project does, whether through Maven or
+     * Gradle, so an advisory about one of them is filed under the Maven ecosystem and this analyzer
+     * answers for it.
+     */
+    @Override
+    public Set<String> ecosystems() {
+        return ECOSYSTEMS;
+    }
+
+    /**
+     * The one advisory ecosystem this analyzer's coordinates belong to.
+     *
+     * <p>Published so the runner-aware providers the bundle registers report the same ecosystem without
+     * restating it: those wrappers delegate the inventory to this class, and a second copy of the id is a
+     * second place for the two to drift apart.
+     */
+    public static final Set<String> ECOSYSTEMS = Set.of(PackageCoordinate.MAVEN);
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The recipe hangs {@code dependency:tree} on the build command the run observed, so it is only
+     * built for a Maven project: on a Gradle project the recorded command would be a Gradle invocation
+     * that cannot run a Maven goal, and an empty list is the honest answer there.
+     */
+    @Override
+    public List<String> dependencyPathCommand(VerificationContext context, PackageCoordinate coordinate) {
+        if (!context.projectInfo().buildSystem().id().equals("maven")) {
+            return List.of();
+        }
+        return DependencyPathHints.mavenCommand(context, coordinate);
     }
 
     // ------------------------------------------------------------------ Maven output

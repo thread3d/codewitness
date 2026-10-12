@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -88,6 +89,18 @@ public final class PackageJsonDependencyAnalyzer implements VerificationTools.De
                     "no package.json was found, so no dependency manifest could be read");
         }
         return resolved(context);
+    }
+
+    /** {@inheritDoc} A package-lock.json resolves npm packages and nothing else. */
+    @Override
+    public Set<String> ecosystems() {
+        return Set.of(PackageCoordinate.NPM);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String dependencyPathHint(PackageCoordinate coordinate) {
+        return DependencyPathHints.npm(coordinate);
     }
 
     /**

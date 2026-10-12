@@ -55,4 +55,34 @@ class PackageCoordinateTest {
         assertEquals("2.2", parsed.getFirst().version());
         assertTrue(parsed.getFirst().display().startsWith("org.yaml"));
     }
+
+    @Test
+    void aSwiftLocationIsReducedToTheIdentityTheEcosystemMatchesOn() {
+        // Package.resolved records the URL a human clones; the SwiftURL ecosystem names host/path.
+        for (String location : List.of(
+                "https://github.com/apple/swift-nio.git",
+                "https://github.com/apple/swift-nio/",
+                "git@github.com:apple/swift-nio.git",
+                "ssh://git@github.com/apple/swift-nio.git")) {
+            assertEquals("github.com/apple/swift-nio", PackageCoordinate.swiftIdentity(location), location);
+        }
+        assertEquals("github.com/sparkle-project/Sparkle",
+                PackageCoordinate.swiftIdentity("https://github.com/sparkle-project/Sparkle.git"),
+                "the ecosystem preserves the case a package is registered under, so it is not lowercased");
+        assertEquals("Alamofire", PackageCoordinate.swiftIdentity("Alamofire"),
+                "a bare identity is not a URL and is left alone rather than mangled");
+    }
+
+    @Test
+    void aSwiftCoordinateQueriesTheNormalisedNameAndDisplaysTheRecordedLocation() {
+        PackageCoordinate coordinate =
+                PackageCoordinate.swiftPackage("https://github.com/apple/swift-nio.git", "2.50.0");
+
+        assertEquals(PackageCoordinate.SWIFT_URL, coordinate.ecosystem());
+        assertEquals("github.com/apple/swift-nio", coordinate.name(),
+                "the raw URL never matches a SwiftURL advisory, so the queryable name is normalised");
+        assertEquals("https://github.com/apple/swift-nio.git@2.50.0", coordinate.display(),
+                "the report still shows the location the pin recorded");
+        assertTrue(coordinate.resolved());
+    }
 }

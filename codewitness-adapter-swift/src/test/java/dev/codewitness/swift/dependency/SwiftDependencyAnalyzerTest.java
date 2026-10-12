@@ -121,7 +121,7 @@ class SwiftDependencyAnalyzerTest {
                 "a branch is not a version, and a pin with no state at all resolved nothing: "
                         + report.coordinates());
         assertTrue(report.coordinates().stream()
-                        .filter(coordinate -> "https://example.com/none.git".equals(coordinate.name()))
+                        .filter(coordinate -> "example.com/none".equals(coordinate.name()))
                         .allMatch(coordinate -> coordinate.version().isEmpty()),
                 "a branch name must never be promoted to a version: " + report.coordinates());
         assertTrue(report.note().contains("2 of the 4 pin(s) name neither a version nor a revision"),
@@ -154,15 +154,18 @@ class SwiftDependencyAnalyzerTest {
                 {"identity":"identity-name","location":"https://x.git",
                  "state":{"version":"1.0.0"}}""");
         PackageCoordinate preferred = SwiftDependencyAnalyzer.coordinate(location);
-        assertEquals("https://x.git", preferred.name(),
-                "the URL is the identity the SwiftURL ecosystem matches on, so it beats the bare name");
+        assertEquals("x", preferred.name(),
+                "the URL is reduced to the host-and-path identity the SwiftURL ecosystem matches on, so it "
+                        + "beats the bare name");
+        assertEquals("https://x.git@1.0.0", preferred.display(),
+                "the display keeps the location the pin recorded");
         assertEquals(PackageCoordinate.SWIFT_URL, preferred.ecosystem());
         assertEquals("1.0.0", preferred.version());
 
         JsonNode repository = MAPPER.readTree("""
                 {"package":"Legacy","repositoryURL":"https://legacy.git","state":{"revision":"r1"}}""");
         PackageCoordinate v1 = SwiftDependencyAnalyzer.coordinate(repository);
-        assertEquals("https://legacy.git", v1.name());
+        assertEquals("legacy", v1.name());
         assertEquals("r1", v1.version());
 
         JsonNode identity = MAPPER.readTree("{\"identity\":\"Bare\",\"state\":{\"version\":\"2.0.0\"}}");

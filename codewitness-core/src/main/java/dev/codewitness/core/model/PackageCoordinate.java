@@ -161,12 +161,63 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
     /**
      * @return a SwiftURL coordinate for a Swift package, at the version a lock file resolved.
      *
-     * <p>The name is the package's location - the git URL the {@code Package.resolved} pin records -
-     * because that is the identity a Swift package has in the ecosystem: SwiftPM identifies a package
-     * by where it is fetched from, not by a registry-assigned name.
+     * <p>A Swift package is identified in the ecosystem by its location, because SwiftPM identifies a
+     * package by where it is fetched from rather than by a registry-assigned name. The two spellings of
+     * that location are not the same string: {@code Package.resolved} records the URL a human clones
+     * ({@code https://github.com/apple/swift-nio.git}), while the advisory service names the package
+     * {@code github.com/apple/swift-nio}. {@link #swiftIdentity(String)} reduces the first to the second,
+     * because a coordinate whose name does not match is a coordinate no advisory can ever be found for -
+     * every Swift package would come back from the scan as clean.
+     *
+     * <p>{@code display} keeps the location exactly as the pin recorded it, so the report still shows the
+     * URL the project fetches from even though the queryable name is normalised.
      */
     public static PackageCoordinate swiftPackage(String location, String version) {
-        return new PackageCoordinate(SWIFT_URL, location, version, null);
+        String resolved = version == null ? "" : version.strip();
+        String trimmed = location == null ? "" : location.strip();
+        String display = resolved.isEmpty() ? trimmed : trimmed + "@" + resolved;
+        return new PackageCoordinate(SWIFT_URL, swiftIdentity(trimmed), resolved, display);
+    }
+
+    /**
+     * Reduces a Swift package location to the identity the {@code SwiftURL} ecosystem matches on:
+     * a host and a path, with no scheme, no credentials and no {@code .git} suffix.
+     *
+     * <p>Both spellings SwiftPM writes are handled - the URL form
+     * ({@code https://github.com/apple/swift-nio.git}, {@code ssh://git@github.com/apple/swift-nio.git})
+     * and the scp-like form ({@code git@github.com:apple/swift-nio.git}). Anything that is not a URL at
+     * all, such as an {@code identity} fallback, is returned unchanged rather than mangled into
+     * something that looks queryable but is not.
+     *
+     * @param location a package location from {@code Package.resolved}, or any other identity string
+     * @return the location as the advisory service names it
+     */
+    public static String swiftIdentity(String location) {
+        String value = location == null ? "" : location.strip();
+        int scheme = value.indexOf("://");
+        if (scheme < 0) {
+            // The scp-like form has no scheme: git@host:path. The colon is the path separator, not a port.
+            int at = value.indexOf('@');
+            int colon = value.indexOf(':');
+            if (at >= 0 && colon > at && !value.substring(0, at).contains("/")) {
+                value = value.substring(at + 1, colon) + "/" + value.substring(colon + 1);
+            }
+        } else {
+            value = value.substring(scheme + 3);
+        }
+        // Strip credentials from a URL form, leaving host and path.
+        int at = value.indexOf('@');
+        int slash = value.indexOf('/');
+        if (at >= 0 && (slash < 0 || at < slash)) {
+            value = value.substring(at + 1);
+        }
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        if (value.endsWith(".git")) {
+            value = value.substring(0, value.length() - 4);
+        }
+        return value;
     }
 
     /** @return a coordinate in an arbitrary ecosystem, for sources this class has no shortcut for. */

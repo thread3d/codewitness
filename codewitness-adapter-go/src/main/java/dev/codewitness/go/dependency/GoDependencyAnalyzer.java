@@ -6,6 +6,7 @@ import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
+import dev.codewitness.support.dependency.DependencyPathHints;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -14,6 +15,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Inventories a Go module's declared dependencies from its {@code go.mod}.
@@ -43,6 +45,18 @@ public final class GoDependencyAnalyzer implements VerificationTools.DependencyA
     @Override
     public boolean supports(ProjectInfo project) {
         return project.language().equals(LanguageId.GO);
+    }
+
+    /** {@inheritDoc} A Go module path is an advisory's Go package name. */
+    @Override
+    public Set<String> ecosystems() {
+        return Set.of(PackageCoordinate.GO);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String dependencyPathHint(PackageCoordinate coordinate) {
+        return DependencyPathHints.go(coordinate);
     }
 
     @Override

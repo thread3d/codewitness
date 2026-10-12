@@ -5,6 +5,7 @@ import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
+import dev.codewitness.support.dependency.DependencyPathHints;
 import dev.codewitness.support.dependency.TomlPackageTable;
 
 import java.io.IOException;
@@ -61,6 +62,18 @@ public final class PythonDependencyAnalyzer implements VerificationTools.Depende
     @Override
     public boolean supports(ProjectInfo project) {
         return project.language().equals(dev.codewitness.core.model.LanguageId.PYTHON);
+    }
+
+    /** {@inheritDoc} A Python distribution is an advisory's PyPI package. */
+    @Override
+    public Set<String> ecosystems() {
+        return Set.of(PackageCoordinate.PYPI);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String dependencyPathHint(PackageCoordinate coordinate) {
+        return DependencyPathHints.pypi(coordinate);
     }
 
     @Override

@@ -141,6 +141,21 @@ public final class KotlinAdapterBundle {
             return new KotlinDependencyAnalyzer(tools(context)).dependencyCommand(context);
         }
 
+        // The advisory hook has to be forwarded, not inherited: this wrapper is what the provider registry
+        // actually holds, so a default here would answer "no ecosystem" for every Maven advisory and the
+        // reproduction recipe would lose the recipe the analyzer knows how to build. Both build systems
+        // report the ecosystem; only the Maven one has a command to build for it, which the analyzer checks.
+        @Override
+        public java.util.Set<String> ecosystems() {
+            return KotlinDependencyAnalyzer.ECOSYSTEMS;
+        }
+
+        @Override
+        public List<String> dependencyPathCommand(
+                VerificationContext context, dev.codewitness.core.model.PackageCoordinate coordinate) {
+            return new KotlinDependencyAnalyzer(tools(context)).dependencyPathCommand(context, coordinate);
+        }
+
         @Override
         public CoverageReport measure(VerificationContext context) {
             return new KotlinCoverageProvider(tools(context)).measure(context);
