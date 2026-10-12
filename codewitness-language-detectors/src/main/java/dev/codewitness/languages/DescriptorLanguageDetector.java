@@ -23,7 +23,9 @@ import java.util.stream.Stream;
  * <p>The scan is deliberately shallow and skips dependency, build-output and test-input directories. A
  * detector is a reporting aid: a language it fails to notice is no worse off than before, so the cost of
  * being conservative is low, while a false positive puts a sentence in every report about a repository that
- * does not contain the language at all.
+ * does not contain the language at all. A language whose files conventionally live deeper than that - SQL
+ * under a {@code src/main/resources} migration tree, for instance - can ask for a deeper scan through the
+ * constructor that takes a depth, because the conservative default would miss the only place its files live.
  */
 public abstract class DescriptorLanguageDetector implements LanguageDetector {
 
@@ -45,6 +47,7 @@ public abstract class DescriptorLanguageDetector implements LanguageDetector {
     private final String language;
     private final Set<String> descriptors;
     private final Set<String> suffixes;
+    private final int maxDepth;
 
     /**
      * @param id          the language's identifier, used as its {@code LanguageId}
@@ -54,10 +57,21 @@ public abstract class DescriptorLanguageDetector implements LanguageDetector {
      */
     protected DescriptorLanguageDetector(
             String id, String language, List<String> descriptors, List<String> suffixes) {
+        this(id, language, descriptors, suffixes, MAX_DEPTH);
+    }
+
+    /**
+     * @param maxDepth how deep below the root to look for a file recognised only by its suffix. Ignored
+     *     directories are still skipped at every level, so a deeper scan stays bounded by the project's own
+     *     tree rather than by whatever happens to be vendored inside it.
+     */
+    protected DescriptorLanguageDetector(
+            String id, String language, List<String> descriptors, List<String> suffixes, int maxDepth) {
         this.id = id;
         this.language = language;
         this.descriptors = new LinkedHashSet<>(descriptors);
         this.suffixes = new LinkedHashSet<>(suffixes);
+        this.maxDepth = maxDepth;
     }
 
     @Override
@@ -83,7 +97,7 @@ public abstract class DescriptorLanguageDetector implements LanguageDetector {
         if (suffixes.isEmpty()) {
             return Optional.empty();
         }
-        try (Stream<Path> walk = Files.walk(root, MAX_DEPTH)) {
+        try (Stream<Path> walk = Files.walk(root, maxDepth)) {
             return walk.filter(Files::isRegularFile)
                     .filter(path -> !ignored(root, path))
                     .filter(this::hasSuffix)

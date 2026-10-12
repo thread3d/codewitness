@@ -379,6 +379,13 @@ for `verilog`, so a tree the adapter claimed is not described a second time as p
 unverifiable; it still speaks for a classpath without the adapter, which is where recognition is the
 only thing CodeWitness can say about the tree.
 
+The scan depth is the detector's own to choose. Most languages announce themselves near the root, so the
+shared default stops three levels down; `SqlLanguageDetector` asks for six, because SQL has no
+conventional root file and its migration trees sit under a build's resource directory -
+`src/main/resources/db/migration` for Flyway, for instance - which is one level past the default. The
+ignored-directory list is applied at every level either way, so a deeper scan is bounded by the project's
+own tree rather than by whatever is vendored inside it.
+
 ## 4. The verdict rules, and why
 
 `VerdictCalculator` is deliberately the least clever class in the codebase. Its rules:
