@@ -55,10 +55,11 @@ flowchart TD
     RUBY["Ruby<br/>bundler · rspec · simplecov"]
     SWIFT["Swift<br/>SwiftPM · swift build · swift test · XCTest · llvm-cov"]
     VERILOG["Verilog / SystemVerilog<br/>iverilog -g2012 · vvp -N · heuristics"]
+    VHDL["VHDL<br/>ghdl -a · ghdl -e · ghdl -r · heuristics"]
     SQL["SQL<br/>SQLite schema load · assertion scripts · constraint probes · heuristics"]
     PASCAL["Pascal<br/>fpc · fpcunit · heuristics"]
 
-    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet · kotlinc<br/>cmake · ctest · gcov · clang · gcc · php · composer · phpunit<br/>ruby · bundler · rspec · simplecov · swift · SwiftPM · XCTest · llvm-cov<br/>iverilog · vvp · fpc · fpcunit"]
+    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet · kotlinc<br/>cmake · ctest · gcov · clang · gcc · php · composer · phpunit<br/>ruby · bundler · rspec · simplecov · swift · SwiftPM · XCTest · llvm-cov<br/>iverilog · vvp · ghdl · fpc · fpcunit"]
 
     CLI ==> ENGINE ==> MODEL ==> STRATEGIES ==> SPI
     SPI ==> JAVA
@@ -74,6 +75,7 @@ flowchart TD
     SPI ==> RUBY
     SPI ==> SWIFT
     SPI ==> VERILOG
+    SPI ==> VHDL
     SPI ==> SQL
     SPI ==> PASCAL
     JAVA --> TOOLS
@@ -89,6 +91,7 @@ flowchart TD
     RUBY --> TOOLS
     SWIFT --> TOOLS
     VERILOG --> TOOLS
+    VHDL --> TOOLS
     SQL --> TOOLS
     PASCAL --> TOOLS
 ```
@@ -111,6 +114,7 @@ Enforced by module boundaries, not by convention:
 | `codewitness-adapter-ruby` | core, adapter-support | Ruby, the interpreter's own parse, Bundler, RSpec, SimpleCov coverage, source mutation, RubyGems inventory |
 | `codewitness-adapter-swift` | core, adapter-support | Swift, Swift Package Manager, `swift build`/`swift test`, XCTest results read from the runner's console, LLVM coverage, source mutation, `Package.resolved` inventory |
 | `codewitness-adapter-verilog` | core, adapter-support | Verilog and SystemVerilog, Icarus Verilog, `iverilog -g2012` build, `vvp -N` testbench simulation, heuristic rule table, source mutation; no coverage and no dependency inventory |
+| `codewitness-adapter-vhdl` | core, adapter-support | VHDL, GHDL, `ghdl -a` analysis into a work library, `ghdl -e` elaboration, `ghdl -r` testbench simulation, heuristic rule table, source mutation; no coverage and no dependency inventory |
 | `codewitness-adapter-sql` | core, adapter-support | SQL, SQLite schema and migration loading, declared assertion scripts, generated constraint probes, schema mutation, heuristic and security rule tables; no coverage and no dependency inventory |
 | `codewitness-adapter-pascal` | core, adapter-support | Pascal, Free Pascal, `fpc` compilation and diagnostics, fpcunit suites compiled and run with per-test XML results, heuristic and security rule tables, source mutation, generated scenario programs; no coverage and no dependency inventory |
 | `codewitness-storage` | core | SQLite persistence |
@@ -134,7 +138,7 @@ them.
    `PythonProjectDetector`, `RustProjectDetector`, `GoProjectDetector`, `TypeScriptProjectDetector`,
    `JavaScriptProjectDetector`, `CSharpProjectDetector`, `KotlinProjectDetector`,
    `CppProjectDetector`, `PhpProjectDetector`, `RubyProjectDetector`, `SwiftProjectDetector`,
-   `VerilogProjectDetector`, `SqlProjectDetector`, `PascalProjectDetector`).
+   `VerilogProjectDetector`, `VhdlProjectDetector`, `SqlProjectDetector`, `PascalProjectDetector`).
 2. **workspace** — the project is copied into the run directory, excluding build output, VCS metadata
    and previous run data, with executable bits restored on `mvnw`/`gradlew`. `bin` and `obj` are
    excluded too, because `obj/project.assets.json` holds absolute package paths belonging to the
@@ -154,7 +158,10 @@ them.
    is the same kind of leftover — the generated C++ a Verilator build compiles the design into — so it is
    excluded too, even though this adapter drives Icarus Verilog. Icarus writes its compiled simulation
    and any waveform dump as plain files and the adapter deletes each one it creates, so no other
-   exclusion is needed for the toolchain it drives. Free Pascal writes `.ppu` unit files, `.o` objects
+   exclusion is needed for the toolchain it drives. GHDL writes its work library (`work-obj08.cf`) beside
+   the design unit unless it is told otherwise, and a `work` directory is also a conventional VHDL build
+   output, so the adapter passes `--workdir` into the run's artefact directory and the source scan skips
+   `work` and `ghdl` directory names, leaving the project as it found it. Free Pascal writes `.ppu` unit files, `.o` objects
    and a linked executable beside the source it compiles, but the adapter directs all of them below the
    run's artefact directory, and a `.ppu` or `.o` file is not a source extension so it is never read as
    source even when a developer built in the tree by hand.
@@ -195,7 +202,15 @@ them.
    writing the compiled simulation into the run's artefact directory. Icarus prints diagnostics rather
    than a report, so its parser reads the toolchain's own line shapes — `file.v:LINE: error:` and
    `warning:`, the bare `file.v:LINE: syntax error`, the location-less `Elaboration failed` and the
-   preprocessor's missing-include line — and a compile error is `BLOCKED` here too. Pascal is compiled
+   preprocessor's missing-include line — and a compile error is `BLOCKED` here too. VHDL's build is its
+   own two-stage first failure: `ghdl -a --std=08 --workdir=<lib>` analyses each design unit into a work
+   library in the run's artefact directory and `ghdl -e --std=08 --workdir=<lib> <top>` elaborates the
+   design entity, because analysis can accept a design whose components cannot be bound and only
+   elaboration catches that. Analysis is order-sensitive, so the sources are analysed one at a time and
+   retried until no pass makes progress, which discovers the dependency order. GHDL prints diagnostics
+   rather than a report, so its parser reads `file.vhd:LINE:COLUMN:error: message` and `warning:`, with
+   the column optional, and the location-less `ghdl:error: message` an elaboration failure carries, and
+   an analysis or elaboration error is `BLOCKED` here too. Pascal is compiled
    by `fpc` over the program the tree declares, or unit by unit when it declares none, because a unit is
    a real first failure even though it is not an executable. The compiler's
    `file(line,column) Severity: message` diagnostics are read and its unlocated closing banners and the
@@ -240,7 +255,17 @@ them.
    under the testbench file's own name. A simulation is a failure when it exits non-zero, prints a
    generated test's counterexample line, or prints a line opening with `FAIL`, `FAILED`, `ERROR` or
    `ASSERTION FAILED`; one that runs to completion is a pass, and one that does not compile is an error
-   rather than a failing test. Pascal has a test framework but no single test command: the adapter compiles
+   rather than a failing test. VHDL has no test framework either, and like Verilog it is read from the
+   toolchain's own output: the whole tree is analysed once into a work library and each testbench is
+   simulated with `ghdl -r --std=08 --workdir=<lib> <testbench> --assert-level=error`. `--assert-level=error`
+   is essential rather than tidy, because without it GHDL prints an assertion error and still exits zero,
+   so a failing design would be reported as passing. The unit is the testbench rather than a case inside
+   it, because the language gives a caller no way to ask for one case of several, so one test case per
+   testbench is reported under the testbench file's own name. A simulation is a failure when it exits
+   non-zero, stops on a GHDL assertion or a report at failure severity, prints a generated test's
+   counterexample line, or prints a line opening with `FAIL`, `FAILED`, `ERROR` or `ASSERTION FAILED`;
+   one that runs to completion is a pass, and a tree that does not analyse is an error rather than a
+   failing test. Pascal has a test framework but no single test command: the adapter compiles
    each test program the project declares and runs it, asking the fpcunit console runner for its
    JUnit-shaped XML report so each test is a case with its own outcome. A tree that keeps test units but
    no runner is given a synthesized one, because fpcunit registers its suites when they are linked, and a
@@ -262,7 +287,13 @@ them.
    Verilog it is a rule table read through one literal-aware `VerilogSourceScan` that knows `//` and
    `/* */` comments, string literals and the based-literal apostrophe (`4'b1010`, `8'hFF`), and offers
    the same offset-aligned code and literal views. A testbench file is not analysed as design logic,
-   because a testbench is not the design. For Pascal it is a rule table read through one literal-aware
+   because a testbench is not the design. For VHDL it is a rule table read through one `VhdlSourceScan`
+   that knows `--` and `/* */` comments, string literals with doubled-quote escapes and character
+   literals such as `'1'`, and offers the same offset-aligned code and literal views; the rules cover a
+   `case` with no `when others`, a clocked `if` with no `else`, a process with both a sensitivity list and
+   a `wait`, an unbounded loop with no `wait` or `exit`, `std.env.finish` in a design, a division by a
+   signal, a foreign subprogram binding and file I/O through `std.textio`. A testbench file is not
+   analysed as design logic there either. For Pascal it is a rule table read through one literal-aware
    `PascalSourceScan` that knows `{ }`, `(* *)` and `//` comments and apostrophe string literals with
    doubled-apostrophe escapes, and offers the same offset-aligned code and literal views, so a rule about
    a credential reads the literal while a rule about `goto` reads only code.
@@ -286,9 +317,10 @@ them.
    rather than reporting an empty one. For Swift the source is `Package.resolved`, in either of the two
    schemas SwiftPM writes, whose pins are queried as the `SwiftURL` ecosystem under the package's own
    location rather than a registry name; a package with only `Package.swift` resolves nothing, which is an
-   inventory of zero, and a pin with neither a version nor a revision is reported unresolved. Verilog is
-   the one language here with no inventory at all: there is no package manager and no advisory ecosystem
-   for HDL, none for SQL, and none in Free Pascal's base distribution. Verilog, SQL and Pascal all declare
+   inventory of zero, and a pin with neither a version nor a revision is reported unresolved. Verilog and
+   VHDL are the languages here with no inventory at all: there is no package manager and no advisory
+   ecosystem for HDL, none for SQL, and none in Free Pascal's base distribution. Verilog, VHDL, SQL and
+   Pascal all declare
    no dependency capability, and the phase reports that dependencies were not analysed rather than an
    empty inventory. Which dependencies exist is a separate question from
    whether any of them has an advisory, and the report answers the two separately.
@@ -315,11 +347,12 @@ them.
    instruments for itself, or XCTest itself is not counted. Verilog is the exception: Icarus Verilog
    exports no coverage data, so the adapter claims no coverage capability and the phase reports coverage
    as not measured rather than as zero. Verilator can export coverage, but this adapter does not drive
-   Verilator. Pascal is the same case: Free Pascal's base distribution exports no coverage data, so the
+   Verilator. VHDL is the same case: GHDL's coverage export is not a form this adapter reads, so the
+   adapter claims no coverage capability either. Pascal is the same case: Free Pascal's base distribution exports no coverage data, so the
    adapter claims no coverage capability either.
 9. **mutation** — the adapter's mutation tester (PIT for Java, a bounded AST mutator for Python, a
    bounded source-operator mutator for Rust, Go, TypeScript, JavaScript, C#, Kotlin, C and C++, PHP,
-   Ruby and Verilog, and Pascal), with stale reports deleted first. C# re-runs each mutant with `dotnet test --no-restore`;
+   Ruby, Verilog and VHDL, and Pascal), with stale reports deleted first. C# re-runs each mutant with `dotnet test --no-restore`;
    Kotlin re-runs the project's own test goal, because PIT's bytecode mutants do not map back to Kotlin
    source lines; C and C++ re-run each mutant through the platform shell, because CMake has no single
    invocation that builds and tests in one command, and decide viability by whether CTest reached its
@@ -335,6 +368,10 @@ them.
    through a shell pipeline that compiles every testbench and simulates it with `vvp -N`, stopping at
    the first failure, and decides viability from whether Icarus printed an `error:`, a `syntax error` or
    an `Elaboration failed`, so a mutant that does not compile is excluded rather than counted as a kill.
+   VHDL re-runs each mutant through a shell pipeline that analyses the tree in dependency order and
+   simulates every testbench with `ghdl -r`, stopping at the first failure, and decides viability from
+   whether GHDL printed an `error:` or a `ghdl:error:` line, so a mutant GHDL cannot analyse is excluded
+   rather than counted as a kill.
 10. **obligation planning** — scenarios declared by the user, properties derived from requirement
     text, or an explicit "nothing can be attempted here" obligation.
 11. **strategies** — per requirement: existing tests, static analysis, generated tests, mutation,
@@ -402,7 +439,10 @@ described twice, and a tree with `.swift` files but no `Package.swift` — a Coc
 still recognised and reported as present and not verified. `VerilogLanguageDetector` declares the same
 for `verilog`, so a tree the adapter claimed is not described a second time as present and
 unverifiable; it still speaks for a classpath without the adapter, which is where recognition is the
-only thing CodeWitness can say about the tree. `PascalLanguageDetector` declares the same for `pascal`,
+only thing CodeWitness can say about the tree. `VhdlLanguageDetector` declares the same for `vhdl`, so a
+tree the adapter claimed is not described a second time as present and unverifiable, and it still speaks
+for a classpath without the adapter - naming a tree that merely looks like VHDL by its suffix, since the
+detector cannot analyse or elaborate anything. `PascalLanguageDetector` declares the same for `pascal`,
 so a Pascal tree the adapter claimed is not described twice, and it still names Pascal - by any of the
 suffixes Free Pascal accepts, `.pas`, `.pp`, `.p`, `.lpr` and `.dpr` - on a classpath without the
 adapter.
@@ -492,15 +532,16 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
   requirement declares `paths:`/`tests:` explicitly. The extensions that count as source come from the
   adapter (`sourceExtensions`), so the same rule works for `.java` files, Python modules, Rust files,
   Go files, TypeScript files, JavaScript files, C# files, Kotlin files, C and C++ files, PHP files,
-  Ruby files, Swift files, Verilog files (`.v`, `.sv`, `.vh` and `.svh`), SQL scripts (`.sql`, `.ddl`)
+  Ruby files, Swift files, Verilog files (`.v`, `.sv`, `.vh` and `.svh`), VHDL files (`.vhd`, `.vhdl`),
+  SQL scripts (`.sql`, `.ddl`)
   and Pascal files (`.pas`, `.pp`, `.lpr`, `.dpr` and `.p`);
   Go adds one refinement, because its tests
   live beside the code rather than in a separate tree, so only `*_test.go` files in a Go test tree are
   treated as tests;
 - a mutation location is mapped to its source file path, whether the tool reports a Java class name,
   a Python file, a Rust file, a Go file, a TypeScript file, a JavaScript file, a C# file, a Kotlin
-  file, a C or C++ file, a PHP file, a Ruby file, a Swift file, a Verilog file, a SQL script or a Pascal
-  file;
+  file, a C or C++ file, a PHP file, a Ruby file, a Swift file, a Verilog file, a VHDL file, a SQL script
+  or a Pascal file;
 - a test declared in a requirement is matched by the identifier the language's own report uses, which
   is why `RequirementCodeMapper` derives a .NET test class identifier as `<namespace>.<file stem>` —
   the shape of the TRX `className` — the same way it already special-cases Go and Node. PHP is the same
@@ -519,7 +560,9 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
   which is also what lets a generated class whose module is recorded at run time be attributed;
   Verilog is the simplest case of the same idea: the adapter reports a testbench under its file's own
   name, so the mapper returns the testbench file's stem directly rather than relativising it against
-  the test root, which would produce an identifier the report never carries. Pascal is close to it:
+  the test root, which would produce an identifier the report never carries. VHDL is the same: the
+  adapter reports a testbench under its file's own name, so the mapper returns that stem directly for a
+  `.vhd` or `.vhdl` file. Pascal is close to it:
   fpcunit names a case under its test class, which no file name implies, so it is matched through the
   simple-name fallback, while a generated program is named after the scenario and obligation the mapper
   already knows;
@@ -535,7 +578,8 @@ the project, and never switches on a language string. `codewitness-adapter-pytho
 `codewitness-adapter-rust`, `codewitness-adapter-go`, `codewitness-adapter-typescript`,
 `codewitness-adapter-javascript`, `codewitness-adapter-csharp`, `codewitness-adapter-kotlin`,
 `codewitness-adapter-cpp`, `codewitness-adapter-php`, `codewitness-adapter-ruby`,
-`codewitness-adapter-swift`, `codewitness-adapter-verilog`, `codewitness-adapter-sql` and
+`codewitness-adapter-swift`, `codewitness-adapter-verilog`, `codewitness-adapter-vhdl`,
+`codewitness-adapter-sql` and
 `codewitness-adapter-pascal` are the worked
 examples: each reuses the whole pipeline and adds only
 detection, tool providers and a generator. A language that shares a build tool with another one — Kotlin with Java, over Gradle and
@@ -552,7 +596,7 @@ A header names neither, because a header belongs to whichever language includes 
 (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`, `GoAdapterBundle`,
 `TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle`, `KotlinAdapterBundle`,
 `CppAdapterBundle`, `PhpAdapterBundle`, `RubyAdapterBundle`, `SwiftAdapterBundle`,
-`VerilogAdapterBundle`, `SqlAdapterBundle` and `PascalAdapterBundle` are the examples).
+`VerilogAdapterBundle`, `VhdlAdapterBundle`, `SqlAdapterBundle` and `PascalAdapterBundle` are the examples).
 Registration is data, not code paths. A `TestRunner` or `GeneratedTestExecutor` may also implement the
 optional replay-command methods, which is how a language supplies a reproducible command without the
 core knowing how tests are invoked. PHP is also where a test runner turns out to be a project
@@ -567,7 +611,11 @@ command-line caller no structured report. Verilog is the case where a test is tw
 runner compiles a testbench with `iverilog` and then simulates it with `vvp`, so it carries the
 two-step replay recipe itself, because the core has no single command to ask for. Its generated-test
 executor does the same for a generated testbench, and its mutation tester wraps the pair in one shell
-command per mutant, which is the shape the shared mutator's one-command-per-mutant loop accepts.
+command per mutant, which is the shape the shared mutator's one-command-per-mutant loop accepts. VHDL is
+the same case with an extra step: a test is analysis, elaboration and then simulation in one executable,
+`ghdl`, so its test runner reports one case per testbench, carries the analyse-then-simulate replay
+recipe itself, and its generated-test executor and mutation tester wrap the same steps in one command per
+mutant.
 
 **Another verification strategy.** Implement `VerificationStrategy` and register it on the
 `VerificationProviderRegistry`, exactly like a tool. It receives the context, the requirement and its
@@ -588,7 +636,8 @@ security boundary.
 A run records everything needed to reproduce it: project identifier, source revision, CodeWitness
 version, runtime version (Java, Python, Rust, Go, Node for TypeScript and JavaScript, the .NET SDK for
 C#, the Kotlin release for Kotlin, the CMake release for C and C++, the PHP release for PHP, the Ruby
-release for Ruby, the Swift release for Swift, or the Icarus Verilog release for Verilog), build tool
+release for Ruby, the Swift release for Swift, the Icarus Verilog release for Verilog, or the GHDL release
+for VHDL), build tool
 and version, configuration fingerprint,
 tool versions, language model
 identifier,
@@ -614,7 +663,9 @@ reports live in the artifact store on disk, not in the database.
   into a self-contained program with its compile and link commands, a PHP scenario into a PHPUnit
   `TestCase` class, a Ruby scenario into an RSpec spec file, a Swift scenario into an XCTest class
   whose generated methods carry the `test` prefix XCTest discovers by, a Verilog scenario into a
-  testbench module that instantiates the design under test, and a Pascal scenario into a program that
+  testbench module that instantiates the design under test, a VHDL scenario into a testbench entity that
+  declares a signal after each of the design's ports and connects it to an instance of the design, and a
+  Pascal scenario into a program that
   links the unit under test and prints a counterexample line when the invariant is violated). The Kotlin generator's
   output is proved by the end-to-end test instead, which compiles and runs it with the real compiler
   rather than putting a second Kotlin compiler on a unit test classpath; the C++ generator's output is
@@ -627,7 +678,7 @@ reports live in the artifact store on disk, not in the database.
   report whose failing example carries the counterexample line in its `exception.message`.
 - **End-to-end tests** (`-Pe2e`) run `./codewitness verify` against the fixture projects and assert the
   verdicts, the counterexample contents and the exit codes. The Java, Python, Rust, Go, TypeScript,
-  JavaScript, C#, Kotlin, C/C++, PHP, Ruby, Swift, Verilog and Pascal fixtures are all covered, and the
+  JavaScript, C#, Kotlin, C/C++, PHP, Ruby, Swift, Verilog, VHDL and Pascal fixtures are all covered, and the
   SQL fixture is covered too and needs no toolchain at all, because the schema is loaded into SQLite
   through the driver already in the build; the Python one uses only the
   standard library, the Rust
@@ -652,7 +703,11 @@ reports live in the artifact store on disk, not in the database.
   mutation all run offline against the toolchain the machine already has. The Verilog fixture is the
   same case on the toolchain side: `iverilog` and `vvp` ship together as one simulator and the tree
   declares no dependencies, so the build, testbenches and mutation run offline against the toolchain
-  the machine already has, with no coverage figure to collect because Icarus exports none. The Pascal
+  the machine already has, with no coverage figure to collect because Icarus exports none. The VHDL
+  fixture is the same case on the toolchain side too: `ghdl` analyses, elaborates and simulates as one
+  executable and the tree declares no dependencies, so the build, the testbenches, the generated
+  testbenches and the mutation all run offline against the toolchain the machine already has, with no
+  coverage figure to collect because GHDL's coverage export is not a form the adapter reads. The Pascal
   fixture is the same case again: `fpc` and fpcunit ship together as one distribution and the tree
   declares no dependencies, so the build, the fpcunit suite, the generated programs and the mutation all
   run offline against the compiler the machine already has, with no coverage figure to collect because

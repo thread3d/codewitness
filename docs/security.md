@@ -77,7 +77,8 @@ module, an image with a Node runtime for a TypeScript project (22.6+) or a JavaS
 (18.17+), an image with the .NET SDK (8+) for a C# project, an image with CMake, a C or C++ compiler and
 `gcov` for a C or C++ project, an image with PHP 8, Composer and a coverage driver (Xdebug or PCOV) for
 a PHP project, an image with Ruby and Bundler for a Ruby project, an image with a Swift toolchain for a
-Swift package, an image with Icarus Verilog for a Verilog or SystemVerilog design, an image with Free
+Swift package, an image with Icarus Verilog for a Verilog or SystemVerilog design, an image with GHDL for
+a VHDL design, an image with Free
 Pascal (`fpc`) for a Pascal unit or program — a stock `ubuntu` image with the `fpc` package installed is
 enough, because `fpcunit` ships with the compiler and the project needs no package manager — or an image
 with a JVM and the
@@ -165,7 +166,18 @@ dependency to resolve and the simulator reaches no network. There is also nothin
 has no package manager and there is no advisory ecosystem for HDL — so the dependency phase reads no lock
 file and consults no advisory source, rather than reporting a clean result it cannot support.
 
-Pascal is the second case where the toolchain needs no state of its own, apart from its configuration
+VHDL is the other case where the toolchain needs no state of its own. GHDL keeps no user-level cache and
+reads no configuration from the environment, so a run redirects nothing and there is no toolchain state
+outside the run to protect or to share. `ghdl -a` analyses the design into a work library and `ghdl -r`
+simulates a testbench, and the adapter always passes `--workdir` into the run's artefact directory rather
+than letting GHDL default to `work-obj08.cf` in the project tree, so the library is written inside the
+run and the project is left as it was found. The fixture's `sandbox.allow_network: false` is honest
+because nothing in the run fetches: a combinational design with no manifest has no dependency to resolve
+and the simulator reaches no network. There is also nothing to inventory — VHDL has no package manager and
+there is no advisory ecosystem for HDL — so the dependency phase reads no lock file and consults no
+advisory source, rather than reporting a clean result it cannot support.
+
+Pascal is the third case where the toolchain needs no state of its own, apart from its configuration
 file. Free Pascal keeps no user-level cache and reads no configuration from the environment, but a
 distribution unpacked somewhere other than the prefix it was configured for needs its `fpc.cfg` pointed at
 explicitly; the adapter records that directory beside the compiler and passes it to every Pascal child

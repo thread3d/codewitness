@@ -73,6 +73,13 @@ fixtures/**/*.vcd
 fixtures/**/*.fst
 fixtures/**/obj_dir/
 
+# GHDL's analysis output. The adapter directs the work library into the run's artefact directory, but a
+# developer who runs `ghdl -a` in a fixture by hand writes the work library file, `work-obj08.cf` (or the
+# `work-obj93.cf` of an older revision), into the tree, and an elaborated simulation binary beside it.
+# Nothing here is a source file: a VHDL project is source files and at most the design unit the tool is
+# pointed at.
+fixtures/**/work-obj*.cf
+
 # Free Pascal's build output. The adapter directs the `.ppu` units, the `.o` objects and the executable
 # into the run's artefact directory, but a developer who runs `fpc` in a fixture by hand writes them
 # beside the source: a unit produces `<name>.ppu` and `<name>.o`, and a program also produces an

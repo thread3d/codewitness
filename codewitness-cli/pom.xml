@@ -86,6 +86,10 @@
     </dependency>
     <dependency>
       <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-adapter-vhdl</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.codewitness</groupId>
       <artifactId>codewitness-adapter-sql</artifactId>
     </dependency>
     <dependency>

@@ -210,6 +210,13 @@ public final class RequirementCodeMapper implements RequirementCodeMap {
             // have to stand in for a fact the mapper can read directly.
             return stripExtension(fileName);
         }
+        if (extension.equals("vhd") || extension.equals("vhdl")) {
+            // The VHDL adapter reports a testbench under its file's own name for the same reason: a
+            // testbench is one entity simulated as a whole, and every VHDL project names the entity after
+            // the file that declares it. The report carries that file stem, so the mapping derives the
+            // same value here rather than relying on the simple-name fallback.
+            return stripExtension(fileName);
+        }
         if (extension.equals("swift")) {
             // XCTest reports a case under `Module.ClassName`: the test target's module name, a dot, and
             // the class that declares the case. The class is the file's own name by the convention every

@@ -50,6 +50,7 @@
     <module>codewitness-adapter-ruby</module>
     <module>codewitness-adapter-swift</module>
     <module>codewitness-adapter-verilog</module>
+    <module>codewitness-adapter-vhdl</module>
     <module>codewitness-adapter-sql</module>
     <module>codewitness-adapter-pascal</module>
     <module>codewitness-cli</module>
@@ -189,6 +190,11 @@
       <dependency>
         <groupId>dev.codewitness</groupId>
         <artifactId>codewitness-adapter-verilog</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-adapter-vhdl</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

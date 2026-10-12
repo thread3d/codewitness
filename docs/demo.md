@@ -17,16 +17,17 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ```
 
 The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin,
-C/C++, PHP, Ruby, Swift, Verilog and Pascal fixtures at the end need Python 3, Cargo, the `go` tool, a Node
+C/C++, PHP, Ruby, Swift, Verilog, VHDL and Pascal fixtures at the end need Python 3, Cargo, the `go` tool, a Node
 runtime (22.6+ for TypeScript, 18.17+ for JavaScript), the .NET SDK (8+), Maven with network access the
 first time, CMake with CTest, an interpreter with Composer, an interpreter with Bundler, a Swift
-toolchain, Icarus Verilog (`iverilog` and `vvp`) and Free Pascal (`fpc`) respectively, and nothing
+toolchain, Icarus Verilog (`iverilog` and `vvp`), GHDL (`ghdl`) and Free Pascal (`fpc`) respectively, and nothing
 else: the Kotlin section is a Maven build, so `kotlinc` and the standard library arrive as dependencies,
 the C and C++ section fetches no package at all, the PHP and Ruby sections' PHPUnit and RSpec arrive
 from Packagist and RubyGems as dependencies rather than as part of the toolchain, the Swift section's
 XCTest ships with the toolchain and the package declares no dependencies, so it runs offline, the
 Verilog section's Icarus compiler and simulator come from the machine and compile and simulate a
-combinational design with the network forbidden, and the Pascal section's compiler brings its own
+combinational design with the network forbidden, the VHDL section's GHDL analyser, elaborator and
+simulator come from the machine and run against the same kind of design offline, and the Pascal section's compiler brings its own
 `fpcunit` test framework, so it needs no package manager and no network either.
 
 ## 1. What is in the project?
@@ -788,7 +789,80 @@ are the same language to `iverilog -g2012`, a tree with sources but no testbench
 analysed with its requirements left `UNVERIFIED`, and a design that does not compile is reported as
 `BLOCKED` rather than as incorrect code.
 
-## 20. The same thing for Pascal
+## 20. The same thing for VHDL
+
+The VHDL fixture is the same ledger once more, this time as a combinational entity with a testbench. It
+needs only GHDL: `ghdl` analyses, elaborates and simulates as one executable, the design has no manifest
+and no dependencies, and the sandbox forbids the network, so the run analyses, elaborates, simulates and
+mutates without fetching anything.
+
+```bash
+./codewitness verify fixtures/vhdl-withdrawal-ledger \
+    --requirements fixtures/vhdl-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001  An accepted withdrawal reduces the balance by exactly the amount  FAILED
+  ✓ R-002  An over-limit withdrawal is rejected                              VERIFIED
+  ✗ R-003  A withdrawal of exactly the balance is accepted                   FAILED
+  ? R-004  The balance never goes negative                                   UNVERIFIED
+
+Counterexamples
+  cw_sc_sc_debit_ob_001  R-001  inputs: {balance=100000, amount=1}
+                                expected: accepted = '1' and observation = to_integer(balance) - to_integer(amount)
+                                actual: 100000
+  cw_sc_sc_exact_ob_003  R-003  inputs: {balance=100000, amount=100000}
+                                expected: accepted = '1' and observation = 0
+                                actual: 100000
+
+Tests
+  1 executed, 1 passed, 0 failed, 0 skipped  (ledger_tb, the project's own testbench)
+
+Coverage
+  coverage not measured (no coverage provider was registered for any language)
+
+Mutation testing
+  3 mutants, 1 killed, 2 survived, 0 no coverage, score 33.3%
+```
+
+The run exits 1, because a requirement failed. R-002 is discharged by an executed generated testbench,
+which is the only path to `VERIFIED`; R-004 declares no scenario, so it stays `UNVERIFIED` for the honest
+reason rather than counting a passing build as evidence. Coverage is not measured either: GHDL's coverage
+export is not a form this adapter reads, so the adapter claims no coverage capability rather than
+reporting a zero it cannot support. Dependencies are not analysed: VHDL has no package manager and there
+is no advisory ecosystem for HDL, so the phase has no inventory to read and consults no source.
+
+The scenario fragments are VHDL. `${name}` becomes the bare signal `name`, `setup` is VHDL statements run
+once per case, and each step's `call` is a VHDL statement — the fixture's ledger is combinational, so the
+call is the null statement `null;` and the declared inputs are the whole invocation. The generator
+declares a signal named after each of the design's ports and connects it to an instance of the design,
+because a component instance's ports cannot be selected by name: a fragment writes `balance`, `accepted`
+and `new_balance`, never `dut.balance`, and the language is strongly typed, so each integer boundary
+value is converted into the port's own subtype with `to_unsigned`, `to_signed` or a std_logic
+conditional. It assigns `observation` to an `integer` variable after a `1 ns` wait so the combinational
+logic has settled, and checks `invariant` as a plain VHDL boolean expression — in the fixture,
+`accepted = '1' and observation = to_integer(balance) - to_integer(amount)`. Boundary values come from
+`values` and `range.min`/`range.max`, and `sequence` and `concurrent` modes add a seeded search when the
+scenario declares a non-negative range. A failing case prints the same `CODEWITNESS_COUNTEREXAMPLE|…`
+line every other adapter uses and sets a flag; a single assertion at failure severity runs at the end, so
+every case runs and the simulation still exits non-zero, and the engine records a failure.
+
+Existing tests are testbenches. VHDL has no case-level test protocol, so each testbench is reported as a
+single test case under the file's own name, which is why the fixture's own `ledger_tb` is one executed
+test — it passes because it checks only the rejected branch, which is the point of the fixture. A VHDL
+test is several processes in one executable, `ghdl -a` to analyse and `ghdl -r` to simulate, with
+`--assert-level=error` so a failing assertion actually exits non-zero rather than being printed and
+ignored. There is no single test command, so a counterexample's reproduction is the analyse-then-simulate
+recipe. The console above reports three mutants, one killed and two survivors: the fixture's own testbench
+detects the comparison swap because it checks the rejected branch, and the two arithmetic mutants survive
+because it never exercises the accepted branch where they live. The limit to know before
+pointing this at a real project is that the adapter drives GHDL and nothing else: `.vhd` and `.vhdl` are
+the same language to `ghdl --std=08`, a tree with sources but no testbench is still analysed and elaborated
+with its requirements left `UNVERIFIED`, and a design that does not analyse is reported as `BLOCKED`
+rather than as incorrect code.
+
+## 21. The same thing for Pascal
 
 The Pascal fixture is the same ledger once more, this time as an fpcunit project whose defective unit
 returns one cent too few from every accepted withdrawal. It needs only Free Pascal: `fpcunit`,

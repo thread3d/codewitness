@@ -49,6 +49,8 @@ class DetectorAdapterAgreementTest {
                 "the Swift adapter must be on the classpath of the CLI: " + adapters.ids());
         assertTrue(adapters.ids().contains("verilog"),
                 "the Verilog adapter must be on the classpath of the CLI: " + adapters.ids());
+        assertTrue(adapters.ids().contains("vhdl"),
+                "the VHDL adapter must be on the classpath of the CLI: " + adapters.ids());
         assertTrue(adapters.ids().contains("sql"),
                 "the SQL adapter must be on the classpath of the CLI: " + adapters.ids());
         assertTrue(adapters.ids().contains("pascal"),
@@ -212,6 +214,38 @@ class DetectorAdapterAgreementTest {
                 .map(LanguageDetectorRegistry.Detection::displayName).toList();
         assertTrue(uncovered.contains("Verilog"),
                 "a Verilog tree no adapter claimed is still named: " + uncovered);
+    }
+
+    @Test
+    @DisplayName("a VHDL design is verified, and a VHDL tree with no adapter is still reported as unverifiable")
+    void vhdlIsNotReportedTwice(@TempDir Path project) throws IOException {
+        write(project, "rtl/ledger.vhd", """
+                library ieee;
+                use ieee.std_logic_1164.all;
+
+                entity ledger is
+                  port (a : in std_logic; y : out std_logic);
+                end entity ledger;
+
+                architecture rtl of ledger is
+                begin
+                  y <= a;
+                end architecture rtl;
+                """);
+        LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
+
+        List<String> covered = detectors.detect(project, Set.of(LanguageId.VHDL)).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(covered.isEmpty(),
+                "the adapter claimed this tree, so nothing about it is unverifiable: " + covered);
+
+        // The adapter claims any tree that holds a VHDL source, so a VHDL tree the adapter does not claim
+        // is one where the adapter is absent from the classpath. With nothing in the covered set, the
+        // detector must still name the language, which is what keeping it registered is for.
+        List<String> uncovered = detectors.detect(project, Set.of()).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(uncovered.contains("VHDL"),
+                "a VHDL tree no adapter claimed is still named: " + uncovered);
     }
 
     @Test

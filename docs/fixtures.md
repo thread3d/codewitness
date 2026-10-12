@@ -24,6 +24,7 @@ not install a `codewitness` command on `PATH`.
 | `ruby-withdrawal-ledger` | Ruby: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language whose test tool is a Bundler dependency rather than part of the toolchain: detection from the `Gemfile` and the RSpec conventions, a build that is the interpreter's own parse followed by `bundle install`, RSpec with JSON parsing, scenario-generated RSpec specs written into the tree's own `spec/` root, counterexamples with a real `bundle exec rspec` replay command, coverage reported as not measured because the fixture does not load SimpleCov, and bounded source mutation — with nothing installed beyond the interpreter and Bundler. |
 | `swift-withdrawal-ledger` | Swift: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language whose build system and test runner both ship with the toolchain: detection from `Package.swift`, `swift build --build-tests` with swiftc diagnostics parsed from the compiler's own lines, `swift test` with XCTest results read from the runner's console, scenario-generated XCTest classes written into the tree's own test target, counterexamples with a real `swift test --filter` replay command, LLVM coverage from SwiftPM's own export, and bounded source mutation — with no package resolved and no network needed. |
 | `verilog-withdrawal-ledger` | Verilog: an accepted withdrawal adds one cent back, and a withdrawal of exactly the balance is rejected | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a hardware description language with no package manager and no manifest: detection from `.v`/`.sv` sources, an Icarus `iverilog -g2012` build, one test case per testbench simulated with `vvp -N`, scenario-generated testbenches that instantiate the design under test as `dut`, counterexamples whose inputs are signal values, and bounded source mutation — with coverage and dependencies both declared not measured, because Icarus exports no coverage and HDL has no advisory ecosystem. |
+| `vhdl-withdrawal-ledger` | VHDL: an accepted withdrawal adds one cent back, and a withdrawal of exactly the balance is rejected | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for the other hardware description language, with no package manager and no manifest: detection from `.vhd`/`.vhdl` sources, a GHDL `ghdl -a` analysis into a work library and `ghdl -e` elaboration of the design entity, one test case per testbench simulated with `ghdl -r --assert-level=error`, scenario-generated testbench entities that declare a signal after each design port and connect it, counterexamples whose inputs are port signal values, and bounded source mutation — with coverage and dependencies both declared not measured, because GHDL's coverage export is not a form this adapter reads and HDL has no advisory ecosystem. |
 | `polyglot-service` | six languages in one directory, plus a `mix.exs` for Elixir that nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
 | `sql-withdrawal-ledger` | SQL: a balance floor the schema never declares is accepted, and the project's own script finds an overdraft | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The first fixture whose language's own specification is the thing under test: schema against test scripts, the declared DDL loaded into SQLite as the language's first failure, a probe built from the requirement's stated bound that fails because the constraint is missing, a probe meeting a check that is enforced and making its requirement `VERIFIED`, the project's own assertion script refuting a third requirement, and a fourth left `UNVERIFIED` — with mutation reporting 2 mutants generated and 2 killed, and no toolchain needed at all, so its end-to-end test never skips. |
 | `pascal-withdrawal-ledger` | Pascal: an accepted withdrawal subtracts one cent too much, and a withdrawal of exactly the balance is accepted but leaves `-1` | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language whose build system and test framework both ship with the toolchain: detection from `.pas` and `.pp` sources, an `fpc` build, the project's fpcunit console runner read from its XML report, scenario-generated `program`s that link the project's own unit, counterexamples whose inputs are call arguments, and bounded source mutation — with coverage and dependencies both declared not measured, because base FPC exports no coverage and has no package manager. |
@@ -655,6 +656,75 @@ relies on are present in 12.0. The end-to-end test skips itself when either exec
 installs `iverilog` (which brings `vvp`) and asserts both, so the Verilog path is exercised rather than
 silently skipped.
 
+### `vhdl-withdrawal-ledger`
+
+The VHDL counterpart of the same fixture: a combinational `ledger` entity whose `balance` and `amount`
+inputs are `unsigned(31 downto 0)` integer cents and whose `accepted` and `new_balance` outputs carry the
+result. It holds the same two kinds of defect. R-001 is a one-cent drift — an accepted withdrawal computes
+`new_balance <= balance - amount + 1`, so it returns one cent too much — and R-003 is a boundary defect:
+the comparison is `amount < balance` rather than `amount <= balance`, so a withdrawal of exactly the
+balance is rejected instead of emptying the account. R-002, the rejected branch, is implemented
+correctly. The project's own testbench `tb/ledger_tb.vhd` passes, which is the point: it checks only R-002
+and never the boundary where the defects live.
+
+The fixture is `rtl/ledger.vhd`, `tb/ledger_tb.vhd`, `requirements.md` and its own `codewitness.yaml`.
+VHDL has no package manager and no manifest, so there is nothing to declare and nothing to resolve; the
+whole run is driven by GHDL, and the sandbox forbids the network because a combinational design fetches
+nothing.
+
+```text
+Requirements
+  ✗ R-001  An accepted withdrawal reduces the balance by exactly the amount  FAILED
+  ✓ R-002  An over-limit withdrawal is rejected                              VERIFIED
+  ✗ R-003  A withdrawal of exactly the balance is accepted                   FAILED
+  ? R-004  The balance never goes negative                                   UNVERIFIED
+
+Counterexamples
+  R-001  inputs: {balance=100000, amount=1}       expected: accepted = '1' and observation = to_integer(balance) - to_integer(amount)
+  R-003  inputs: {balance=100000, amount=100000}  expected: accepted = '1' and observation = 0
+
+Coverage:         not measured (GHDL's coverage export is not a form this adapter reads)
+Mutation testing: 3 mutants, 1 killed, 2 survived  (vhdl-text)
+```
+
+R-001 and R-003 fail through generated testbench entities written under `generated-tests/`, one per
+scenario, each declaring a signal after the design's ports and instantiating the design; R-002 is
+discharged by an executed generated test, which is the only path to `VERIFIED`; R-004 declares no
+scenario and stays `UNVERIFIED`.
+
+The generated-test shape is VHDL-specific in three ways worth knowing. First, VHDL has no case-level test
+protocol, so the run reports **one test case per testbench**, under the testbench file's own name, rather
+than one case per generated input combination. Second, a component instance's ports cannot be selected by
+name — VHDL has no `dut.balance` — so the generated testbench declares a signal named after each port and
+connects it, and a scenario fragment references the port signals directly; because VHDL is strongly typed,
+each integer boundary value is converted into the port's own subtype with `to_unsigned`, `to_signed` or a
+std_logic conditional, and `observation` is assigned to an `integer` variable after a `1 ns` wait so a
+combinational design has settled. Third, a failing case prints the shared `CODEWITNESS_COUNTEREXAMPLE|…`
+line and sets a flag, and a single `assert … severity failure` runs at the end, so every case runs and the
+simulation still exits non-zero rather than stopping at the first failure.
+
+A VHDL test is analysis then simulation in one executable, so there is no single command to replay: the
+counterexample's reproduction command analyses the kept generated testbench together with the project in
+dependency order and runs it with `ghdl -r … --assert-level=error`. `--assert-level=error` is essential
+rather than tidy, because without it GHDL prints an assertion error and still exits zero. Mutation runs
+through the shared `TextMutator` with a `VhdlLexis` and one shell pipeline per mutant that analyses every
+source and simulates every testbench, stopping at the first failure. It generates three mutants, kills one
+and reports two survivors: the killed mutant is the comparison swap `< -> >`, which the fixture's own
+testbench detects because it checks the rejected branch, and the two arithmetic flips `- -> +` and
+`+ -> -` survive because the testbench never exercises the accepted branch where they live. The defects the
+scenarios find are exactly the ones no test the project ships distinguishes from correct code.
+
+Coverage is reported as not measured, because GHDL's coverage export is not a form this adapter reads and
+the adapter claims no coverage capability. Dependencies are reported as not analysed, because VHDL has no
+package manager and there is no advisory ecosystem for HDL, so the phase has no inventory to read and
+consults no source rather than reporting a clean result it cannot support.
+
+The fixture needs GHDL and nothing else: `ghdl` analyses, elaborates and simulates as one executable, the
+`--std=08` revision and the `--assert-level=error` exit-code behaviour the adapter relies on are the
+toolchain's own documented options, and the tree declares no dependencies. The end-to-end test skips
+itself when `ghdl` is absent, and CI installs GHDL and asserts it, so the VHDL path is exercised rather
+than silently skipped.
+
 ### `sql-withdrawal-ledger`
 
 A SQL schema with one deliberate omission: the `ledger` table declares `amount NUMERIC NOT NULL CHECK
@@ -922,6 +992,7 @@ with the `./codewitness` launcher:
 ./codewitness verify fixtures/ruby-withdrawal-ledger --requirements fixtures/ruby-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/swift-withdrawal-ledger --requirements fixtures/swift-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/verilog-withdrawal-ledger --requirements fixtures/verilog-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/vhdl-withdrawal-ledger --requirements fixtures/vhdl-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/pascal-withdrawal-ledger --requirements fixtures/pascal-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```

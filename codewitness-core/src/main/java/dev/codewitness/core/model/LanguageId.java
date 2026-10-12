@@ -100,6 +100,20 @@ public record LanguageId(String id) {
      */
     public static final LanguageId VERILOG = new LanguageId("verilog");
     /**
+     * VHDL, analysed and simulated with GHDL.
+     *
+     * <p>The language is named for the language and not for the tool, exactly as {@link #VERILOG} is
+     * not called {@code icarus}: the build system is reported separately as {@link BuildSystemId#GHDL}.
+     * VHDL has a real separation between analysis and elaboration - a design unit is compiled into a
+     * library, and only an elaborated entity can be simulated - so a design unit the analyzer rejects is
+     * a failed build, which the engine maps to BLOCKED, rather than a code defect.
+     *
+     * <p>As with Verilog, VHDL is not a software language with a runtime: its unit of execution is a
+     * testbench, an entity with no ports that instantiates the design and drives it. The adapter reports
+     * one test case per testbench, because VHDL gives a command-line caller no case-level protocol.
+     */
+    public static final LanguageId VHDL = new LanguageId("vhdl");
+    /**
      * Pascal, compiled with Free Pascal and tested with the fpcunit framework that ships with it.
      *
      * <p>The language is named for the language and not for the compiler, exactly as {@link #CSHARP}

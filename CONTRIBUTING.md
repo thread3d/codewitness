@@ -43,11 +43,15 @@ change has to respect.
   fixture (`iverilog` compiles and `vvp` simulates; the fixture is a combinational design with no
   manifest and no dependencies, so nothing has to be resolved and the fixture's sandbox forbids the
   network)
+- GHDL on `PATH` for the VHDL adapter and its end-to-end fixture (`ghdl` analyses, elaborates and
+  simulates as one executable; the fixture is a combinational design with no manifest and no
+  dependencies, so nothing has to be resolved and the fixture's sandbox forbids the network)
 - Free Pascal 3.2 or newer on `PATH` for the Pascal adapter and its end-to-end fixture (`fpc` is the
   compiler, and fpcunit — the test framework the adapter compiles and runs — ships inside the same
   distribution, so nothing has to be resolved and the fixture's sandbox forbids the network)
 - Network access for the first build (dependencies) and for the end-to-end tests, except the C#
-  fixture, the C/C++ fixture, the Swift fixture, the Verilog fixture and the Pascal fixture, which need
+  fixture, the C/C++ fixture, the Swift fixture, the Verilog fixture, the VHDL fixture and the Pascal
+  fixture, which need
   none, and the PHP
   and Ruby fixtures, which need it until their `vendor/` directory or bundle exists, because PHPUnit and
   RSpec are package-manager dependencies rather than part of the toolchain
@@ -115,7 +119,8 @@ To add one:
    `fixtures/php-withdrawal-ledger` (PHP, `composer.json`, `phpunit.xml`, PHPUnit),
    `fixtures/ruby-withdrawal-ledger` (Ruby, `Gemfile`, RSpec),
    `fixtures/swift-withdrawal-ledger` (Swift, `Package.swift`, XCTest) or
-   `fixtures/verilog-withdrawal-ledger` (Verilog, no manifest, Icarus Verilog `iverilog`/`vvp`), or
+   `fixtures/verilog-withdrawal-ledger` (Verilog, no manifest, Icarus Verilog `iverilog`/`vvp`),
+   `fixtures/vhdl-withdrawal-ledger` (VHDL, no manifest, GHDL `ghdl`), or
    `fixtures/sql-withdrawal-ledger` (SQL, a declared schema and assertion scripts run through SQLite) or
    `fixtures/pascal-withdrawal-ledger` (Pascal, no manifest, Free Pascal `fpc` with fpcunit). Keep
    at least one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
@@ -141,7 +146,7 @@ To add one:
    wires everything (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`,
    `GoAdapterBundle`, `TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle`,
    `KotlinAdapterBundle`, `CppAdapterBundle`, `PhpAdapterBundle`, `RubyAdapterBundle`,
-   `SwiftAdapterBundle`, `VerilogAdapterBundle`, `SqlAdapterBundle` and
+   `SwiftAdapterBundle`, `VerilogAdapterBundle`, `VhdlAdapterBundle`, `SqlAdapterBundle` and
    `PascalAdapterBundle` are the worked
    examples). Two languages can share a
    build tool — Kotlin and Java both use Gradle and Maven — so a provider has to select on the
@@ -156,7 +161,10 @@ To add one:
    the opposite case: XCTest ships with the toolchain, so its `TestRunner` resolves nothing beyond the
    `swift` driver the build already drove. Verilog is the case where a test is two processes rather than
    one: `iverilog` compiles and `vvp` simulates, so the adapter reports one case per testbench instead
-   of a case-level protocol and its replay recipe is the compile-then-simulate pair. Pascal has that
+   of a case-level protocol and its replay recipe is the compile-then-simulate pair. VHDL is the same
+   two-process shape in one executable: `ghdl -a` analyses and `ghdl -r` simulates, so it reports one
+   case per testbench — under the testbench file's own name — and its replay recipe is the
+   analyse-then-simulate shell command. Pascal has that
    same two-process shape plus a framework: `fpc` compiles each test program and the program runs the
    fpcunit suites, so a project that keeps test units but no runner is given a synthesized one, and a
    program that is not an fpcunit runner is judged by its exit status. If your
@@ -173,7 +181,7 @@ To add one:
    explicitly — the registry holds the wrapper, so an inherited default would answer "no ecosystem" and
    the recipe would silently lose its hint.
 5. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the
-   adapter class name. Every shipped adapter carries one, Verilog's included: it is the entry the
+   adapter class name. Every shipped adapter carries one, Verilog's and VHDL's included: it is the entry the
    service loader reads and the file the shade plugin merges into the CLI jar, so without it the
    adapter's classes are on the classpath and still never run.
 6. Do not add anything language specific to `codewitness-core`. If you believe the core must change,
@@ -242,7 +250,8 @@ registered, so a bare embedder still gets verification rather than an empty repo
       `fixtures/javascript-withdrawal-ledger`, `fixtures/csharp-withdrawal-ledger`,
       `fixtures/kotlin-withdrawal-ledger`, `fixtures/cpp-withdrawal-ledger`,
       `fixtures/php-withdrawal-ledger`, `fixtures/ruby-withdrawal-ledger`,
-      `fixtures/swift-withdrawal-ledger` and `fixtures/verilog-withdrawal-ledger` still report R-001 and
+      `fixtures/swift-withdrawal-ledger`, `fixtures/verilog-withdrawal-ledger` and
+      `fixtures/vhdl-withdrawal-ledger` still report R-001 and
       R-003 as `FAILED`, R-002 as `VERIFIED` and R-004 as `UNVERIFIED`, and
       `./codewitness verify fixtures/pascal-withdrawal-ledger` reports R-001 and R-003 as `FAILED`,
       R-002 as `VERIFIED` and R-004 as `UNVERIFIED`.

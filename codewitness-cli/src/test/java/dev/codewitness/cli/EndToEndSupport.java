@@ -304,6 +304,34 @@ abstract class EndToEndSupport {
         return findExecutable(executable);
     }
 
+    /**
+     * Skips the test when no GHDL toolchain is available, instead of failing spuriously.
+     *
+     * <p>VHDL's one tool is GHDL: it analyses the design units, elaborates the top entity and simulates
+     * each testbench. It is looked for the way the adapter looks for it: the override variable first,
+     * then the conventional install locations, then {@code PATH}.
+     */
+    static void assumeVhdlAvailable() {
+        Assumptions.assumeTrue(findGhdl() != null,
+                "no ghdl executable on PATH or in GHDL: VHDL end-to-end verification cannot run");
+    }
+
+    /** @return the {@code ghdl} executable, or {@code null} when none can be found. */
+    static String findGhdl() {
+        String executable = isWindows() ? "ghdl.exe" : "ghdl";
+        String configured = System.getenv("GHDL");
+        if (configured != null && !configured.isBlank() && Files.isExecutable(Path.of(configured))) {
+            return configured;
+        }
+        for (String directory : List.of("/usr/local/bin", "/opt/homebrew/bin", "/usr/bin")) {
+            Path candidate = Path.of(directory, executable);
+            if (Files.isExecutable(candidate)) {
+                return candidate.toString();
+            }
+        }
+        return findExecutable(executable);
+    }
+
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }

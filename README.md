@@ -130,6 +130,12 @@ or a Verilog project:
 ./codewitness verify ./my-verilog-project --requirements requirements.md
 ```
 
+or a VHDL design:
+
+```bash
+./codewitness verify ./my-vhdl-design --requirements requirements.md
+```
+
 or a SQL project:
 
 ```bash
@@ -161,7 +167,7 @@ that is not there. Recognition comes from `LanguageDetector` implementations dis
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
 `language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp`, `kotlin`,
-`cpp`, `php`, `ruby`, `swift`, `verilog`, `sql` or `pascal`
+`cpp`, `php`, `ruby`, `swift`, `verilog`, `vhdl`, `sql` or `pascal`
 *narrows* the run
 to that one adapter instead of being merged with the automatic choice. It is not forced: the named adapter
 is used when it exists and actually claims the project, and otherwise the run falls back to
@@ -226,7 +232,25 @@ to a machine-readable report, so a compile error is read from Icarus's own line 
 failed build. Static analysis reads a Verilog rule table, and generated scenarios become ordinary
 testbench modules that instantiate the design under test as `dut`. Icarus Verilog exports no coverage
 data and Verilog has no package manager or advisory ecosystem for HDL, so coverage and the dependency
-inventory are reported as not measured rather than as zero. Pascal support needs only Free Pascal: a
+inventory are reported as not measured rather than as zero. VHDL support needs only GHDL: a tree holding
+`.vhd` or `.vhdl` files is claimed, each design unit is analysed with
+`ghdl -a --std=08 --workdir=<lib>` into a work library inside the run's artefact directory, the first
+entity with a port clause that is not a testbench is elaborated with `ghdl -e --std=08 --workdir=<lib>`,
+and each testbench is simulated with `ghdl -r --std=08 --workdir=<lib> <testbench> --assert-level=error`.
+GHDL is one executable with three roles, so the whole toolchain is the `ghdl` the machine already has.
+Analysis is order-sensitive, so the sources are analysed one at a time and retried until no pass makes
+progress, which discovers the dependency order rather than requiring it; `--assert-level=error` is
+essential rather than tidy, because without it GHDL prints an assertion error and still exits zero, so a
+failing design would be reported as passing. The revision is VHDL-2008, whose `std.env.finish` the adapter
+uses. There is no case-level test protocol and no test framework, so one test case per testbench is
+reported under the testbench file's own name, and a tree that does not analyse is a failed build rather
+than a failing test. GHDL writes its diagnostics to the console rather than to a machine-readable report,
+so a build error is read from GHDL's own line shapes. Static analysis reads a VHDL rule table, and
+generated scenarios become ordinary testbench entities that declare a signal named after each of the
+design's ports and connect it, because a component instance's ports cannot be selected by name. GHDL's
+coverage export is not a form this adapter reads and VHDL has no package manager or advisory ecosystem,
+so coverage and the dependency inventory are reported as not measured rather than as zero.
+Pascal support needs only Free Pascal: a
 tree holding `.pas`, `.pp`, `.lpr`, `.dpr` or `.p` files is claimed, the programs it declares are
 compiled with `fpc`, and a tree of units with no program is compiled unit by unit as the language's
 first-failure check. Unit and executable output go below the run's artefact directory, so a verification
@@ -594,6 +618,43 @@ A violated invariant prints the shared `CODEWITNESS_COUNTEREXAMPLE|…` line and
 `$fatal` once at the end, so it exits non-zero; because a Verilog test is a compile and then a
 simulation rather than one command, the replay is the two-step `iverilog` then `vvp` recipe.
 
+For a VHDL design the fragments are VHDL statements, `${name}` becomes the signal `name`, and the
+generated test is an ordinary testbench entity named `cw_sc_<scenario>_<obligation>` that declares a
+signal named after each of the design's ports and connects it to an instance of the design. Two VHDL
+facts shape the file. A component instance's ports cannot be selected by name — there is no `dut.balance`
+— so a fragment references the port signals directly (`balance`, `accepted`, `new_balance`). And the
+language is strongly typed, so an integer boundary value is converted into the port's own subtype with
+`to_unsigned`, `to_signed` or a std_logic conditional before it is assigned, and the observation is
+assigned to an `integer` variable named `observation`. The generator enumerates the declared boundary
+values and adds a seeded search when a scenario declares a non-negative range, waits `1 ns` before
+sampling the observation — a combinational design settles in a delta cycle — and checks the invariant
+once per case:
+
+```yaml
+language:
+  adapter: vhdl
+
+scenarios:
+  - id: SC-DEBIT
+    requirement: R-001
+    mode: single
+    setup: ""
+    steps:
+      - call: "null;"
+        inputs:
+          - {name: balance, type: integer, domain: integer, values: ["100000"]}
+          - {name: amount, type: integer, domain: integer, values: ["1", "99999"], range: {min: 1, max: 99999}}
+    observation: "to_integer(new_balance)"
+    invariant: "accepted = '1' and observation = to_integer(balance) - to_integer(amount)"
+    cases: 1
+    seed: 1
+```
+
+A violated invariant prints the shared `CODEWITNESS_COUNTEREXAMPLE|…` line and sets a flag; a single
+`assert … severity failure` runs at the end, so every case runs and the simulation still exits non-zero;
+because a VHDL test is an analyse and then a simulation rather than one command, the replay is the
+analyse-then-simulate recipe.
+
 For a Pascal project the fragments are Pascal statements, `${name}` becomes the declared input `name`,
 and the generated test is an ordinary `program` named `cw_sc_<scenario>_<obligation>` that links the
 project's units by name. The generator declares each input at the Pascal type derived from its declared
@@ -641,7 +702,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php | ruby | swift | verilog | sql | pascal
+  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php | ruby | swift | verilog | vhdl | sql | pascal
 
 verification:
   timeout: 15m           # per build or test command
@@ -720,7 +781,7 @@ A report is only useful if it can be reproduced, so every run records: the proje
 source revision, the CodeWitness version, the runtime version (the Java version for a Java project,
 the .NET SDK version for a C# one, the Kotlin release for a Kotlin one, the CMake version for a C and
 C++ one, the PHP version for a PHP one, the Ruby version for a Ruby one, the Swift version for a Swift
-one, the Icarus Verilog version for a Verilog one), the build tool and its version,
+one, the Icarus Verilog version for a Verilog one, the GHDL release for a VHDL one), the build tool and its version,
 the verification configuration fingerprint, every tool version, the language model identifier if any,
 the requirements hash, the isolation level, timestamps and every command that was executed. Evidence
 records carry their command and inputs, and counterexamples carry a replayable command.
@@ -753,8 +814,8 @@ rule, `sql-dynamic-sql-concatenation`, for a statement assembled inside the data
 reads a literal-aware view of the source, so it sees the concatenation or interpolation in a string and
 not the same words in a comment. Every one of them is advisory: a regular expression recognises the
 shape of a query built from a value, not an exploitable one, so a match is recorded as a hint and a
-requirement is never failed on the rule's word alone. Verilog has no such rule because an HDL design
-does not build queries.
+requirement is never failed on the rule's word alone. Neither Verilog nor VHDL has such a rule because an
+HDL design does not build queries.
 
 See [`docs/security.md`](docs/security.md).
 
@@ -812,6 +873,9 @@ codewitness/
 ├── codewitness-adapter-verilog/ Verilog and SystemVerilog projects: iverilog -g2012 build and vvp -N
 │                               testbench simulation, heuristics, security, bounded source mutation;
 │                               no coverage export and no dependency inventory
+├── codewitness-adapter-vhdl/    VHDL designs: ghdl -a analysis into a work library, ghdl -e elaboration
+│                               and ghdl -r testbench simulation, heuristics, security, bounded source
+│                               mutation; no coverage export and no dependency inventory
 ├── codewitness-adapter-sql/    SQL projects: schema and migration loading into an ephemeral SQLite
 │                               database as the language's first failure, declared SQL test scripts
 │                               whose assertion queries must return no rows, generated constraint probes,
@@ -833,11 +897,11 @@ engine. Recognising a language CodeWitness has no adapter for is the same shape:
 `dev.codewitness.core.spi.LanguageDetector`, discovered the same way, and the detectors for the languages
 nothing here implements live in `codewitness-language-detectors`. A few platform defaults do remain in core
 — the `LanguageId` and `BuildSystemId` constants (`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`,
-`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `RUBY`, `SWIFT`, `VERILOG`, `SQL`, `PASCAL`, `CMAKE`,
-`COMPOSER`, `BUNDLER`, `SWIFTPM`, `ICARUS`, `FPC`, `POLYGLOT` and the rest), the typed
+`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `RUBY`, `SWIFT`, `VERILOG`, `VHDL`, `SQL`, `PASCAL`, `CMAKE`,
+`COMPOSER`, `BUNDLER`, `SWIFTPM`, `ICARUS`, `GHDL`, `FPC`, `POLYGLOT` and the rest), the typed
 `PackageCoordinate` an advisory
-lookup needs (`PACKAGIST` for PHP, `RUBYGEMS` for Ruby and `SWIFT_URL` for Swift among them — Verilog
-adds none, because HDL has no advisory ecosystem, and so does Pascal, because Free Pascal's base
+lookup needs (`PACKAGIST` for PHP, `RUBYGEMS` for Ruby and `SWIFT_URL` for Swift among them — Verilog and
+VHDL add none, because HDL has no advisory ecosystem, and so does Pascal, because Free Pascal's base
 distribution has no package manager), and the excluded-directory and build-wrapper names
 in `WorkspaceManager` — but they are
 vocabulary and platform defaults, not language logic, and the engine never switches on a language.
@@ -856,8 +920,8 @@ mvn -pl codewitness-core test   # one module
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
 plus Python 3, Cargo, Go, Node, the .NET SDK, CMake with CTest, PHP with Composer, Ruby with Bundler,
-a Swift toolchain, Icarus Verilog with `vvp` and Free Pascal
-for the Python, Rust, Go, TypeScript, JavaScript, C#, C/C++, PHP, Ruby, Swift, Verilog and Pascal
+a Swift toolchain, Icarus Verilog with `vvp`, GHDL and Free Pascal
+for the Python, Rust, Go, TypeScript, JavaScript, C#, C/C++, PHP, Ruby, Swift, Verilog, VHDL and Pascal
 fixtures, and network access the
 first time, because it builds real projects. The Kotlin fixture
 needs no toolchain of its own beyond Maven: it is a Maven build with `kotlin-maven-plugin`, so the
@@ -875,7 +939,10 @@ opposite case: XCTest ships with the toolchain and the package declares no depen
 config sets `allow_network: false` and the run compiles and tests offline with nothing installed by
 hand. The Verilog fixture is the same case as the Swift one: `iverilog` and `vvp` ship together and the
 tree declares no dependencies, so its sandbox config sets `allow_network: false` and the run compiles,
-simulates, analyses and mutates offline with nothing installed by hand. The Pascal fixture is the same
+simulates, analyses and mutates offline with nothing installed by hand. The VHDL fixture is the same case
+again on the toolchain side: GHDL is one executable that analyses, elaborates and simulates, and the tree
+declares no dependencies, so its sandbox config sets `allow_network: false` and the run analyses,
+elaborates, simulates, analyses and mutates offline with nothing installed by hand. The Pascal fixture is the same
 case again: Free Pascal is a compiler and fpcunit ships inside the same distribution, so its sandbox
 config sets `allow_network: false` and the run compiles, tests, analyses and mutates offline with
 nothing installed by hand. An end-to-end test is skipped
@@ -1736,6 +1803,112 @@ The honest limits of Verilog support are:
   evidence therefore carries no command, and reproducing a failure means running the two steps;
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
+The VHDL adapter is implemented and exercised end to end as well (`fixtures/vhdl-withdrawal-ledger`):
+
+- detection of VHDL trees by extension — `.vhd` and `.vhdl` are one language to GHDL, so one adapter
+  claims them and the extensions it found are reported. There is no manifest and no file list: a tree
+  holding a VHDL source is claimed, the design under test is the first entity with a port clause that is
+  not a testbench, and its name is the unit `ghdl -e` elaborates. A testbench is an entity with no port
+  clause, or a file or entity following the naming conventions `*_tb`, `tb_*`, `*_test` or
+  `*_testbench`, or a file under `tb/`, `testbench/`, `testbenches/`, `test/`, `tests/`, `sim/` or
+  `simulation/`. Port declarations are read lexically and tolerate VHDL's own shapes: keywords are case
+  insensitive, several names may share one mode and subtype (`a, b : in std_logic`), and a default value
+  (`:= '0'`) is dropped because it is not part of the type. A tree with sources but no testbench is still
+  analysed and elaborated, and its requirements stay `UNVERIFIED` with the reason that nothing was
+  executed;
+- a build that is VHDL's own first failure: `ghdl -a --std=08 --workdir=<run-artefacts>/vhdl/build`
+  analyses each design unit into a work library, then `ghdl -e --std=08 --workdir=<lib> <top>` elaborates
+  the design entity the tree declares. Analysis is order-sensitive — an architecture that instantiates an
+  entity cannot be analysed until the entity has been — so the adapter analyses the sources one at a time
+  and retries until either everything is in the library or a whole pass makes no progress, which
+  discovers the dependency order rather than requiring one; only a file that fails in a no-progress pass
+  is a real error. Elaboration is the second half of what "the design builds" means, because analysis can
+  succeed on a design whose components cannot be bound, and only `ghdl -e` catches that. The work library
+  is written inside the run's artefact directory, never to the project tree's default `work-obj08.cf`.
+  GHDL writes no machine-readable report, so its diagnostics are read in the shapes it prints:
+  `file.vhd:LINE:COLUMN:error: message` and `warning:`, with the column optional, and the location-less
+  `ghdl:error: message` an elaboration failure carries. An analysis or elaboration error is a failed
+  build, which the engine reports as `BLOCKED` and never as a code defect;
+- existing tests through the simulator, one testbench at a time: the whole tree is analysed once into one
+  work library and each testbench is simulated with
+  `ghdl -r --std=08 --workdir=<lib> <testbench> --assert-level=error`. `--assert-level=error` is
+  essential rather than tidy: without it GHDL prints an assertion error and still exits zero, so a
+  failing design would be reported as passing. VHDL has no case-level test protocol, so one test case per
+  testbench is reported, under the testbench file's own name. A simulation is a failure when it exits
+  non-zero, stops on a GHDL assertion (`(assertion error)` or `(assertion failure)`), a report at failure
+  severity, prints a `CODEWITNESS_COUNTEREXAMPLE|…` line, or prints a line opening with `FAIL`, `FAILED`,
+  `ERROR` or `ASSERTION FAILED`; a simulation that runs to completion is a pass. A tree that does not
+  analyse is an error for each testbench — the engine reports `BLOCKED` — rather than a failing test.
+  There is deliberately no single test command, because a VHDL test is an analysis and then a simulation,
+  so test evidence carries no command and a failing test's replay is the analyse-then-simulate shell
+  recipe;
+- static analysis over a VHDL rule table (`vhdl-heuristics`, ids `CW-VHDL-BUG-*`, `CW-VHDL-CORRECT-*`,
+  `CW-VHDL-STYLE-001` and `CW-VHDL-SEC-*`) read through one literal-aware `VhdlSourceScan` that knows
+  `--` and `/* */` comments, string literals with doubled-quote escapes and character literals such as
+  `'1'`, so a rule sees the code and not a literal that happens to look like it. The rules cover a `case`
+  statement with no `when others`, an `if` in a clocked process with no `else`, a process that declares
+  both a sensitivity list and a `wait`, an unbounded loop with no `wait` or `exit`, `std.env.finish` or
+  `stop` in a design, a division or modulo by a signal, and, in the security rules, a foreign subprogram
+  binding (`VHPIDIRECT`) and file I/O through `std.textio`. A separate security analyzer filters the same
+  table to the security rules, so a rule is defined once and reported under one id. A testbench file is
+  not analysed as design logic, and every finding is advisory — the analyzer id contains "heuristics" —
+  so a rule never fails a requirement on its own;
+- mutation testing through the shared `TextMutator` and a `VhdlLexis` (provider id `vhdl-text-mutation`,
+  report tool `vhdl-text`) that knows what a text mutator gets wrong in VHDL: arithmetic (`+ - * /`),
+  comparison boundaries (`< > >=`) and equality (`= /=`) are the operator set; the signal assignment
+  `<=`, the variable assignment `:=` and the association `=>` are consumed whole and deliberately not
+  mutated, because flipping `<=` would turn an assignment into a dangling comparison; and `--` line
+  comments, string literals and character literals are ignored. Because a VHDL test is
+  analyse-then-simulate, the tester's one command per mutant is a shell pipeline that analyses the tree in
+  dependency order and runs each testbench with `ghdl -r`, stopping at the first failure. A mutant GHDL
+  rejects is non-viable and excluded from the score, never counted as a kill;
+- generated adversarial tests from declared scenarios: the fragments are VHDL, `${name}` becomes the
+  signal `name`, and the generated test is an ordinary testbench entity named
+  `cw_sc_<scenario>_<obligation>` that declares a signal named after each of the design's ports and
+  connects it to an instance of the design. It enumerates up to twelve boundary value combinations — the
+  cartesian product of the declared `values` plus `min` and `max` — and, for a `sequence` or `concurrent`
+  mode with a declared range, adds a seeded search. Two VHDL facts shape the file: a component instance's
+  ports cannot be selected by name — there is no `dut.balance` — so the generated testbench declares a
+  signal after each port and a fragment references the port signals directly; and the language is
+  strongly typed, so an integer boundary value is converted into the port's own subtype with
+  `to_unsigned`, `to_signed` or a std_logic conditional, and the observation is assigned to an `integer`
+  variable named `observation` (a scenario writes `to_integer(new_balance)`, not `new_balance`). The
+  generator waits `1 ns` before sampling the observation, because a combinational design settles in a
+  delta cycle, and a violated invariant prints the shared `CODEWITNESS_COUNTEREXAMPLE|…` line and sets a
+  flag; a single `assert … severity failure` runs at the end if the flag is set, so every case runs and
+  the simulation still exits non-zero. It injects a free-running clock process only when the design has a
+  `clk`/`clock`/`ck` std_logic input that the scenario does not drive. The generator sets
+  `checksInvariant` only when a scenario declares both an `observation` and an `invariant`, and without
+  both the requirement cannot become `VERIFIED`. Generated sources are written under `generated-tests/`,
+  removed unless `report.keep_generated_tests` is set and always kept in the run's artefact store, and
+  the replay command analyses the kept copy together with the project and simulates it.
+
+The end-to-end fixture (`fixtures/vhdl-withdrawal-ledger`) is a combinational ledger with two deliberate
+defects and its own passing testbench that checks only the branch that is already correct. The run finds
+the two defects with generated testbenches — R-001 and R-003 `FAILED` with counterexamples, R-002
+`VERIFIED` by an executed generated test and R-004 `UNVERIFIED` because it declares no scenario, overall
+`FAILED` and exit 1 — while mutation reports three mutants, one killed and two survivors: the fixture's
+own testbench detects the comparison swap because it checks the rejected branch, and the two arithmetic
+mutants survive because it never exercises the accepted branch where they live.
+
+The honest limits of VHDL support are:
+
+- coverage is not measured. GHDL's coverage export is not a form this adapter reads, so the adapter
+  claims no coverage capability and the report says coverage was not measured rather than reporting zero;
+- dependencies are not analysed. VHDL has no package manager and there is no advisory database for HDL,
+  so there is no inventory, no ecosystem and no advisory source to consult; the adapter declares no
+  dependency capability and the report says dependencies were not analysed rather than inventing an
+  inventory;
+- one test case per testbench is all the language allows. A testbench is a top-level simulation with no
+  case-level protocol, so a suite of many checks inside one testbench is reported as one case rather than
+  being split into cases the language does not define;
+- analysis is order-sensitive, so the retry discovers a dependency order but does not invent one; a tree
+  whose design units are genuinely unanalysable — or that declares no entity at all — is reported as a
+  detection warning or a failed build rather than guessed at;
+- there is no single test command, because a VHDL test is an analysis and then a simulation. Test
+  evidence therefore carries no command, and reproducing a failure means running the steps;
+- the heuristic rule table is intentionally small and has a known false-positive profile.
+
 The SQL adapter is implemented and exercised end to end (`fixtures/sql-withdrawal-ledger`), and it is
 the one fixture whose end-to-end test never skips: it needs no toolchain, because the schema is loaded
 into SQLite through the JDBC driver already in the build. The fixture's defect is a constraint the schema
@@ -1934,8 +2107,8 @@ Implemented but limited, and reported as such:
   Where a dependency path can be shown, the reproduction recipe says how: an executable
   `dependency:tree` recipe for Maven, and a named tool for each other ecosystem. That mapping is supplied
   by the adapter that owns the ecosystem, not by the core, so a new language adds its own without an
-  engine change. Verilog contributes no ecosystem at all: it has no package manager and there is no
-  advisory database for HDL, so the adapter declares no dependency capability and the report says
+  engine change. Verilog and VHDL contribute no ecosystem at all: neither has a package manager and there
+  is no advisory database for HDL, so both adapters declare no dependency capability and the report says
   dependencies were not analysed rather than reporting an empty inventory as a clean bill of health.
 - **Gradle** support (detection, commands, report parsing) is implemented and unit tested, but the
   end-to-end demonstration in this repository was exercised with Maven only; no Gradle

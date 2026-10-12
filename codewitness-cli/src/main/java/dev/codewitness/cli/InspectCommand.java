@@ -30,6 +30,7 @@ import dev.codewitness.ruby.RubyAdapterBundle;
 import dev.codewitness.sql.SqlAdapterBundle;
 import dev.codewitness.swift.SwiftAdapterBundle;
 import dev.codewitness.verilog.VerilogAdapterBundle;
+import dev.codewitness.vhdl.VhdlAdapterBundle;
 import dev.codewitness.rust.RustAdapterBundle;
 import dev.codewitness.typescript.TypeScriptAdapterBundle;
 
@@ -79,6 +80,7 @@ public final class InspectCommand implements Callable<Integer> {
         RubyAdapterBundle.register(languages, providers, true);
         SwiftAdapterBundle.register(languages, providers, true);
         VerilogAdapterBundle.register(languages, providers, true);
+        VhdlAdapterBundle.register(languages, providers, true);
         SqlAdapterBundle.register(languages, providers, true);
         PascalAdapterBundle.register(languages, providers, true);
         JavaScriptAdapterBundle.register(languages, providers, true);

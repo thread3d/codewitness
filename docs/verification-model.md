@@ -130,7 +130,11 @@ with `WriteLn` and calls `Halt(1)`, which is what makes it exit non-zero for the
 the failing case, a Verilog generated testbench prints the same
 line to the simulator's output and then calls `$fatal`, which is what makes the simulation exit non-zero
 for the report parser to read as the failing case — the counterexample's inputs are the signal values
-the testbench drove onto the design's ports rather than call arguments — and a C and C++ generated test
+the testbench drove onto the design's ports rather than call arguments — a VHDL generated testbench
+prints the same line with a `report`, sets a flag and then runs a single `assert … severity failure` at
+the end, which is what makes the simulation exit non-zero for the report parser to read as the failing
+case, and its counterexample's inputs are likewise the signal values its testbench drove onto the
+design's ports — and a C and C++ generated test
 is
 one self-contained program that prints the line to standard output and exits non-zero, which CTest
 records as `Failed` with the program's output beside it in `system-out`, so the CTest report parser

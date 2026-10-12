@@ -50,7 +50,7 @@ jobs:
       # Java fixture, Python 3, Cargo, `go`, Node for the others (Node 22.18+ for TypeScript, where
       # type stripping is on by default, and 18.17+ for JavaScript), the .NET SDK for the C# fixture,
       # CMake for the C and C++ one, PHP with Composer for the PHP one, Ruby with Bundler for the
-      # Ruby one, Swift for the Swift one, and Icarus Verilog for the Verilog one.
+      # Ruby one, Swift for the Swift one, Icarus Verilog for the Verilog one, and GHDL for the VHDL one.
       # The Kotlin, PHP and Ruby fixtures are the ones whose test tool is not part of the language
       # toolchain - Kotlin's compiler and Surefire, PHP's PHPUnit and Ruby's RSpec are all resolved as
       # dependencies - so all three are warmed below, and all three need the network this job already has.
@@ -67,6 +67,9 @@ jobs:
       # fpcunit framework it is tested with ships inside the same distribution, so nothing is warmed and
       # the fixture forbids the network. Ubuntu 24.04 does carry `fpc`, so its own step installs it and
       # the assertion below checks the version rather than trusting the image.
+      # VHDL is that same shape once more: GHDL analyses, elaborates and simulates, the fixture has no
+      # dependencies, and Ubuntu 24.04 carries `ghdl` in universe, so its own step installs it and the
+      # assertion below checks the version rather than trusting the image.
       # Each end-to-end test skips itself (a JUnit assumption) when its toolchain is absent, so a missing
       # tool produces a green build with those languages never having run. Installing each one here, then
       # asserting it below, is what keeps that from happening silently.
@@ -155,6 +158,15 @@ jobs:
         run: |
           sudo apt-get install -y fpc
 
+      # GHDL is what the VHDL fixture drives: `ghdl -a` analyses the design units into a work library,
+      # `ghdl -e` elaborates the top entity and `ghdl -r` simulates each testbench. Ubuntu 24.04 carries
+      # 4.1.0, whose `--std=08`, `--workdir`, `--assert-level=error` and `std.env.finish` the adapter
+      # relies on. The version floor is asserted below rather than trusted, like every other toolchain
+      # in this job.
+      - name: Set up GHDL
+        run: |
+          sudo apt-get install -y ghdl
+
       # CMake and the CTest that ships with it are what the C and C++ fixture drives, and they come from
       # the runner image rather than from an action. The version is therefore asserted in the step below
       # instead of trusted: the test phase reads the JUnit report `ctest --output-junit` writes, and that
@@ -235,6 +247,11 @@ jobs:
           # and fpcunit XML output were written against. A missing compiler would otherwise make the
           # Pascal end-to-end test skip itself silently.
           fpc -iV | grep -qE '^(3\.[2-9]|[4-9]\.)'
+          ghdl --version
+          # 4.0 is the floor the adapter's VHDL-2008 (std.env) usage and its simulation options were
+          # written against; Ubuntu 24.04 ships 4.1. A missing simulator would otherwise make the VHDL
+          # end-to-end test skip itself silently.
+          ghdl --version | grep -qE 'GHDL (4\.|5\.|6\.|[7-9]\.|[1-9][0-9]+\.)'
 
       # Unit and integration tests. Surefire excludes the `e2e` group by default (pom.xml:
       # excluded.groups), so this is the fast suite.
@@ -243,6 +260,6 @@ jobs:
 
       # The end-to-end suite, opt-in through the `e2e` profile, which clears excluded.groups. It
       # builds the fixture projects with real Maven, Python, Cargo, Go, Node, .NET, CMake, Composer,
-      # Bundler, Swift, Icarus Verilog and Free Pascal runs.
+      # Bundler, Swift, Icarus Verilog, Free Pascal and GHDL runs.
       - name: End-to-end tests (fixture projects)
         run: ./mvnw -B -Pe2e test

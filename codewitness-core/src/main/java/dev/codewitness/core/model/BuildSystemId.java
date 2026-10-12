@@ -79,6 +79,18 @@ public record BuildSystemId(String id) {
      */
     public static final BuildSystemId ICARUS = new BuildSystemId("icarus");
     /**
+     * GHDL, driven by {@code ghdl -a} for the analysis, {@code ghdl -e} for the elaboration and
+     * {@code ghdl -r} for the simulation.
+     *
+     * <p>VHDL has no package manager and no manifest every project shares: a project is a set of design
+     * units analyzed into a work library, plus zero or more testbench entities. GHDL is the reference
+     * open-source VHDL simulator and the toolchain that makes a VHDL tree analyzable and simulatable on a
+     * machine that has nothing else, so it is the build system this adapter names. The {@code ghdl}
+     * executable is recorded in the project attributes rather than encoded here, because a machine may
+     * carry several backends or select one through {@code PATH}.
+     */
+    public static final BuildSystemId GHDL = new BuildSystemId("ghdl");
+    /**
      * SQL. There is no build tool, so the "build" is the adapter applying the declared schema to a fresh
      * database. Recorded as its own id rather than as {@link #NONE} so a report can say what the
      * language's first failure was checked against.

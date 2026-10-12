@@ -15,3 +15,4 @@ dev.codewitness.languages.ScalaLanguageDetector
 dev.codewitness.languages.SqlLanguageDetector
 dev.codewitness.languages.SwiftLanguageDetector
 dev.codewitness.languages.VerilogLanguageDetector
+dev.codewitness.languages.VhdlLanguageDetector

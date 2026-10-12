@@ -12,16 +12,18 @@ project, plain JavaScript for a JavaScript project, C# for a C#/.NET project, Ko
 project, C or C++ for a project whose sources are either — one adapter covers both, so the
 fragment is written in whichever language the code under test is written in — PHP for a PHP
 project, Ruby for a Ruby project, Swift for a Swift package, Verilog for a Verilog or SystemVerilog
-design (one adapter covers both, the way one adapter covers C and C++), and Pascal for a Pascal unit or
+design (one adapter covers both, the way one adapter covers C and C++), VHDL for a VHDL design, and
+Pascal for a Pascal unit or
 program. Everything else — modes,
 inputs, ranges, seeds, the counterexample protocol — is identical. The examples below are Java; the
-Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++, PHP, Ruby, Swift, Verilog and Pascal forms
-are shown in [Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
+Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++, PHP, Ruby, Swift, Verilog, VHDL and Pascal
+forms are shown in [Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
 [TypeScript projects](#typescript-projects), [JavaScript projects](#javascript-projects),
 [C# projects](#c-projects), [Kotlin projects](#kotlin-projects),
 [C and C++ projects](#c-and-c-projects), [PHP projects](#php-projects),
 [Ruby projects](#ruby-projects), [Swift projects](#swift-projects),
-[Verilog projects](#verilog-projects) and [Pascal projects](#pascal-projects).
+[Verilog projects](#verilog-projects), [VHDL projects](#vhdl-projects) and
+[Pascal projects](#pascal-projects).
 
 ```yaml
 scenarios:
@@ -83,8 +85,8 @@ Each step declares the inputs it searches over:
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`; in PHP it becomes the PHP variable `$name`, in Ruby and Swift the bare local variable `name`, and in Verilog the bare signal `name`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
-| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares, a PHP type name such as `int`, `float`, `string` or `bool`, a Ruby type name such as `int`, `float`, `bool` or `string`, a Swift type name such as `int`, `double`, `bool` or `string` (the generated locals are `Int`, `Double`, `Bool` and `String`), or a Verilog type name such as `integer`, `reg`, `logic` or `bit` (optionally with a width, as in `reg [31:0]`) or `time` — except that a Verilog input naming one of the design's own ports takes that port's declaration instead, so its width is the design's rather than the scenario's. |
+| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`; in PHP it becomes the PHP variable `$name`, in Ruby and Swift the bare local variable `name`, and in Verilog and VHDL the bare signal `name`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares, a PHP type name such as `int`, `float`, `string` or `bool`, a Ruby type name such as `int`, `float`, `bool` or `string`, a Swift type name such as `int`, `double`, `bool` or `string` (the generated locals are `Int`, `Double`, `Bool` and `String`), or a Verilog type name such as `integer`, `reg`, `logic` or `bit` (optionally with a width, as in `reg [31:0]`) or `time` — except that a Verilog input naming one of the design's own ports takes that port's declaration instead, so its width is the design's rather than the scenario's. In VHDL the declared `type` is not used: every scenario input becomes a VHDL `integer` variable, and when the input names one of the design's own ports its value is converted into that port's subtype (`to_unsigned`, `to_signed` or a std_logic conditional) before it is driven. |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -123,7 +125,8 @@ shape is: a standard-library `unittest` case for Python, a Cargo integration tes
 an xUnit class in the tree's own test project for C#, a Kotlin JUnit 5 class in the tree's own test
 sources for Kotlin, a PHPUnit `TestCase` class in the tree's own test root for PHP, an RSpec spec in the
 tree's own test root for Ruby, an XCTest class in the tree's own test target for Swift, a generated
-testbench module for Verilog that instantiates the design under test as `dut`, a generated `program`
+testbench module for Verilog that instantiates the design under test as `dut`, a generated testbench
+entity for VHDL that declares a signal after each of the design's ports and instantiates it, a generated `program`
 for Pascal that `uses` the project's own unit and links it, and, for C and C++,
 one self-contained program with a `main` rather than a class
 in a framework — written into the run's artefact store, never into the tree.
@@ -1105,6 +1108,109 @@ protocol signals rejection with `$error` or `$fatal`, the step trips it and the 
 itself, and the counterexample carries the line the simulator printed. If the implementation rejects by
 a value on an output, the invariant handles it and no wrapper is needed, exactly as the Ruby, PHP and
 Swift fixtures do for a boolean result.
+
+## VHDL projects
+
+For a VHDL design the fragments are VHDL statements and expressions, and the generated test is an
+ordinary testbench entity written under `generated-tests/` in the project. The generator declares a
+signal named after each of the design's ports and connects it to an instance of the design, so a fragment
+refers to a port by its bare signal name: `${name}` is replaced textually by `name`, and a `call` is a
+VHDL statement rather than a method invocation. A component instance's ports cannot be selected by name —
+VHDL has no `dut.balance` — so the port signal names are the whole vocabulary a fragment has. A
+combinational design has no procedure to call, so the fixture's steps are the null statement `null;` and
+the inputs alone are the whole invocation:
+
+```yaml
+language:
+  adapter: vhdl
+
+scenarios:
+  - id: SC-DEBIT
+    requirement: R-001
+    description: An accepted withdrawal reduces the balance by exactly the amount
+    mode: single
+    setup: ""
+    steps:
+      - call: "null;"
+        description: the ledger is combinational, so the inputs are the whole invocation
+        inputs:
+          - name: balance
+            type: integer
+            domain: integer
+            values: ["100000"]
+            range: {min: 100000, max: 100000}
+          - name: amount
+            type: integer
+            domain: integer
+            values: ["1", "99999"]
+            range: {min: 1, max: 99999}
+    observation: "to_integer(new_balance)"
+    invariant: "accepted = '1' and observation = to_integer(balance) - to_integer(amount)"
+    cases: 1
+    seed: 1
+```
+
+That scenario is the fixture's own, from `fixtures/vhdl-withdrawal-ledger/codewitness.yaml`, and it is
+what finds the one-cent defect in the ledger: the boundary cases drive `balance = 100000` with an `amount`
+of `1` and `99999`, and check that the accepted branch reduces the balance by exactly the amount
+requested.
+
+Notes specific to VHDL:
+
+- `setup` is VHDL statements run once per case, before the steps, and each step's `call` is a VHDL
+  statement executed in order. A combinational design declares no procedure to call, so a step's `call`
+  is the null statement `null;` and the declared inputs are the whole invocation; a sequential design can
+  drive its clock and reset in `setup` and pulse them in a `call`, and the generator injects a
+  free-running clock process itself when the design has a `clk`/`clock`/`ck` std_logic input that the
+  scenario does not drive;
+- `observation` is a VHDL expression assigned to an `integer` variable named `observation` after a `1 ns`
+  wait, so a combinational design has settled before the value is sampled. Because the variable is an
+  integer, a scenario reads an `unsigned` or `signed` output through `to_integer` —
+  `to_integer(new_balance)` in the example above — and a `std_logic` output through a conditional such as
+  `1 when accepted = '1' else 0`. `invariant` is a boolean VHDL expression over `observation` and the
+  inputs — `accepted = '1' and observation = to_integer(balance) - to_integer(amount)` above — and it is
+  checked after every step, exactly as it is in every other language;
+- VHDL is strongly typed, so an input is not declared at the design's port subtype. Every scenario input
+  becomes an `integer` variable and each value is converted into the port's own subtype when it is
+  assigned: `to_unsigned` or `to_signed` for a numeric vector, a `'1'`/`'0'` conditional for a
+  `std_logic`, `bit_vector(to_unsigned(…))` for a `bit_vector`, and the `std_logic_vector` conversion
+  otherwise. The declared `type` is not used, and the conversion's width is read from the port's own
+  declaration, or 64 when it cannot be evaluated here. That is why a fragment passes an integer
+  (`accepted = '1'`, `to_integer(balance)`) rather than a typed vector;
+- boundary values come from each input's `values` list plus `range.min` and `range.max`, enumerated as up
+  to twelve combinations, exactly as in the other languages. `mode: sequence` and `mode: concurrent` add
+  a seeded search when the scenario declares a non-negative `range`, so a failing random case is
+  reproducible from the recorded seed and case;
+- the generated file is a testbench entity named `cw_sc_<scenario>_<obligation>`, where every character of
+  the scenario id that is not a letter or a digit becomes an underscore and the result is lower case. It
+  declares a signal after each of the design's ports, instantiates the design, drives the inputs and
+  checks the invariant; a failing case prints the single
+  `CODEWITNESS_COUNTEREXAMPLE|case=…|seed=…|inputs={…}|…` line and sets a flag, and a single
+  `assert … severity failure` runs at the end so the simulation exits non-zero and the engine records a
+  failing test rather than a pass — every case still runs, which a stop at the first failure would not
+  allow. The counterexample's inputs are signal values driven onto the design's ports, which is why a
+  VHDL counterexample names signals such as `balance` and `amount` rather than call arguments;
+- VHDL has no case-level test protocol, so one test case per testbench is reported, under the testbench
+  file's own name. A tree that does not analyse is an error rather than a failing test, and there is no
+  single test command: a VHDL test is analysis then simulation, so the reproduction command analyses the
+  kept generated testbench together with the project and then simulates it. `--assert-level=error` is
+  what makes a failing assertion exit non-zero instead of being printed and ignored:
+
+```bash
+ghdl -a --std=08 --workdir=lib rtl/ledger.vhd
+ghdl -a --std=08 --workdir=lib tb/ledger_tb.vhd
+ghdl -a --std=08 --workdir=lib generated-tests/cw_sc_sc_debit_ob_001.vhd
+ghdl -r --std=08 --workdir=lib cw_sc_sc_debit_ob_001 --assert-level=error
+```
+
+VHDL rejection has no exception mechanism to catch. A design signals rejection through its own outputs —
+the fixture's ledger simply lowers `accepted` and leaves `new_balance` unchanged — so the invariant is
+where the required behaviour is expressed: an over-limit withdrawal is a `call` that drives the inputs
+and an invariant requiring `accepted = '0'` and an unchanged balance. When a design's own protocol signals
+rejection with a `report … severity failure` or an `assert`, the step trips it and the simulation fails by
+itself, and the counterexample carries the line the simulator printed. If the implementation rejects by a
+value on an output, the invariant handles it and no wrapper is needed, exactly as the Ruby, PHP and Swift
+fixtures do for a boolean result.
 
 ## Pascal projects
 
