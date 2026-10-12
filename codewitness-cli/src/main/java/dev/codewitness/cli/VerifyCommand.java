@@ -214,7 +214,7 @@ public final class VerifyCommand implements Callable<Integer> {
                 : result.llm();
         return new VerificationConfig(result.project(), result.language(), limits, tests, mutation,
                 propertyTesting, staticAnalysis, security, llm, result.report(), result.sandbox(),
-                result.scenarios());
+                result.scenarios(), result.database());
     }
 
     /**

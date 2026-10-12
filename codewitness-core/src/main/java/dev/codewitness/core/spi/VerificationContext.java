@@ -38,6 +38,7 @@ public final class VerificationContext {
     private final Instant startedAt;
     private final RunState state;
     private final RequirementCodeMap codeMap;
+    private final PreparedDatabase database;
     private final dev.codewitness.core.evidence.EvidenceLedger evidenceLedger;
 
     private VerificationContext(Builder builder) {
@@ -55,6 +56,7 @@ public final class VerificationContext {
         this.state = builder.state;
         this.evidenceLedger = builder.evidenceLedger;
         this.codeMap = builder.codeMap;
+        this.database = builder.database;
         this.projectInfo = rebase(builder.projectInfo);
     }
 
@@ -131,6 +133,18 @@ public final class VerificationContext {
      */
     public RequirementCodeMap codeMap() {
         return codeMap;
+    }
+
+    /**
+     * The database this run prepared, or an honest statement that there is none.
+     *
+     * <p>Never {@code null}. A provider that wants to exercise real SQL asks here rather than assuming a
+     * database exists, and its environment is already in every sandboxed process, so a test reaches it
+     * through {@link DatabaseFixture#URL_VARIABLE} without the engine threading the value into that
+     * language's tool.
+     */
+    public PreparedDatabase database() {
+        return database;
     }
 
     /** The evidence ledger of this run; strategies record their observations here. */
@@ -212,6 +226,7 @@ public final class VerificationContext {
         private Instant startedAt = Instant.now();
         private RunState state = new RunState();
         private RequirementCodeMap codeMap = RequirementCodeMap.empty();
+        private PreparedDatabase database = PreparedDatabase.none("no database fixture was prepared");
         private dev.codewitness.core.evidence.EvidenceLedger evidenceLedger;
 
         public Builder runId(String value) {
@@ -288,6 +303,17 @@ public final class VerificationContext {
          */
         public Builder codeMap(RequirementCodeMap value) {
             this.codeMap = value == null ? RequirementCodeMap.empty() : value;
+            return this;
+        }
+
+        /**
+         * Sets the database the run prepared.
+         *
+         * <p>A {@code null} value keeps the empty outcome, so a context built by hand still answers the
+         * question with "none" instead of failing.
+         */
+        public Builder database(PreparedDatabase value) {
+            this.database = value == null ? PreparedDatabase.none("no database fixture was prepared") : value;
             return this;
         }
 

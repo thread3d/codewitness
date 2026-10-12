@@ -614,7 +614,21 @@ report:  { html: true, json: true }
 sandbox:
   mode: local-process    # local-process | docker
   allow_network: false
+
+database:                # an ephemeral database for tests and scenarios; off by default
+  enabled: false
+  engine: sqlite         # sqlite
+  schema: db/schema.sql  # one .sql file, or a directory of them applied in file-name order
+  seed: db/seed.sql      # optional, applied after the schema
+  url: null              # or a connection URL the project manages itself; then nothing is created
+  timeout: 30s
 ```
+
+A database that is prepared is exported to every process the run starts as `CODEWITNESS_DATABASE_URL`,
+so a test or a generated scenario reaches it in whatever language it is written, and the database
+itself is kept in the run directory so a counterexample that names a table can be replayed against the
+schema that was actually loaded. A requested database that cannot be prepared is a reported limitation
+and leaves the requirements that needed one `UNVERIFIED`; it never turns into a pass.
 
 The language model is optional, disabled by default, and never decides anything. When it is enabled,
 its output is stored as `LLM_ANALYSIS` evidence with `ADVISORY` confidence,

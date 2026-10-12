@@ -25,6 +25,7 @@ public final class VerificationProviderRegistry {
     private final List<VerificationTools.TestGenerator> testGenerators = new ArrayList<>();
     private final List<VerificationTools.GeneratedTestExecutor> generatedTestExecutors = new ArrayList<>();
     private final List<VerificationStrategy> strategies = new ArrayList<>();
+    private final List<DatabaseFixture> databaseFixtures = new ArrayList<>();
 
     public static VerificationProviderRegistry empty() {
         return new VerificationProviderRegistry();
@@ -77,6 +78,11 @@ public final class VerificationProviderRegistry {
 
     public VerificationProviderRegistry register(VerificationStrategy strategy) {
         strategies.add(strategy);
+        return this;
+    }
+
+    public VerificationProviderRegistry register(DatabaseFixture fixture) {
+        databaseFixtures.add(fixture);
         return this;
     }
 
@@ -161,6 +167,11 @@ public final class VerificationProviderRegistry {
         return List.copyOf(strategies);
     }
 
+    /** @return every registered database fixture, in registration order. */
+    public List<DatabaseFixture> databaseFixtures() {
+        return List.copyOf(databaseFixtures);
+    }
+
     public List<String> providerIds() {
         List<String> ids = new ArrayList<>();
         compilers.forEach(c -> ids.add("compiler:" + c.id()));
@@ -173,6 +184,7 @@ public final class VerificationProviderRegistry {
         testGenerators.forEach(c -> ids.add("test-generator:" + c.id()));
         generatedTestExecutors.forEach(c -> ids.add("generated-test-executor:" + c.id()));
         strategies.forEach(c -> ids.add("strategy:" + c.id()));
+        databaseFixtures.forEach(c -> ids.add("database:" + c.id()));
         return List.copyOf(ids);
     }
 }

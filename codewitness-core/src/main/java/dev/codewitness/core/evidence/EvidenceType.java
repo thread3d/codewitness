@@ -29,6 +29,8 @@ public enum EvidenceType {
     SECURITY_SCAN,
     /** Dependency analysis. */
     DEPENDENCY_SCAN,
+    /** Preparation of an ephemeral database the run's tests and scenarios can exercise. */
+    DATABASE_FIXTURE,
     /** A concrete reproduction of a requirement violation. */
     COUNTEREXAMPLE,
     /** A structured interpretation of a natural language requirement. */

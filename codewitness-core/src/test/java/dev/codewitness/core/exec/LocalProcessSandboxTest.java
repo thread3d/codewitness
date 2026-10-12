@@ -44,6 +44,27 @@ class LocalProcessSandboxTest {
     }
 
     @Test
+    @DisplayName("the run's own environment variables reach every child process")
+    void runEnvironmentReachesChildProcesses(@TempDir Path root) {
+        // A database fixture's URL is not a host credential, so it is merged over the allow-list rather than
+        // filtered by it. This is what lets a project's tests in any language reach the same database: the
+        // engine never has to thread the value into that language's tool.
+        LocalProcessSandbox sandbox = new LocalProcessSandbox(List.of(root),
+                Map.of("PATH", "/usr/bin:/bin"), false,
+                Map.of("CODEWITNESS_DATABASE_URL", "jdbc:sqlite:/tmp/ledger.db"));
+
+        assertEquals("jdbc:sqlite:/tmp/ledger.db", sandbox.baseEnvironment().get("CODEWITNESS_DATABASE_URL"));
+
+        ProcessResult result = sandbox.runner()
+                .run(spec(root, "/bin/sh", "-c", "printf %s \"$CODEWITNESS_DATABASE_URL\""));
+
+        assertTrue(result.success(), result.stderr());
+        assertEquals("jdbc:sqlite:/tmp/ledger.db", result.stdout());
+        assertFalse(sandbox.baseEnvironment().containsKey("SECRET_TOKEN"),
+                "the run's own variables do not widen the host allow-list: " + sandbox.baseEnvironment());
+    }
+
+    @Test
     @DisplayName("permits() accepts paths under its roots and rejects everything else")
     void permitsOnlyRoots(@TempDir Path root) {
         LocalProcessSandbox sandbox = sandbox(root);

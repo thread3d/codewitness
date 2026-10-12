@@ -21,6 +21,7 @@ import dev.codewitness.ruby.RubyAdapterBundle;
 import dev.codewitness.swift.SwiftAdapterBundle;
 import dev.codewitness.verilog.VerilogAdapterBundle;
 import dev.codewitness.rust.RustAdapterBundle;
+import dev.codewitness.support.database.SqliteDatabaseFixture;
 import dev.codewitness.typescript.TypeScriptAdapterBundle;
 
 import java.nio.file.Files;
@@ -79,6 +80,9 @@ final class CliSupport {
         // engine falls back to this same set only when nothing at all is registered, so an embedder that
         // wires no strategies gets verification rather than an empty report.
         DefaultStrategies.create(providers).forEach(providers::register);
+        // A database fixture is infrastructure rather than a language, so it is registered here for every
+        // run: the engine asks it to prepare one only when codewitness.yaml declares database.enabled.
+        providers.register(new SqliteDatabaseFixture());
         return new Wiring(languages, providers);
     }
 

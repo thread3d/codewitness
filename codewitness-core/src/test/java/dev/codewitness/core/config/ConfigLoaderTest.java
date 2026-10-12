@@ -87,6 +87,38 @@ class ConfigLoaderTest {
     }
 
     @Test
+    @DisplayName("a database section is parsed, and no database is prepared unless it is asked for")
+    void databaseSectionIsParsed() {
+        VerificationConfig off = load("").config();
+        assertFalse(off.database().enabled(), "preparing a database is opt-in");
+        assertEquals("sqlite", off.database().engine());
+        assertNull(off.database().schema());
+
+        VerificationConfig config = load("""
+                database:
+                  enabled: true
+                  engine: sqlite
+                  schema: db/schema.sql
+                  seed: db/seed.sql
+                  timeout: 45s
+                """).config();
+
+        assertTrue(config.database().enabled());
+        assertEquals("sqlite", config.database().engine());
+        assertEquals(Path.of("db/schema.sql"), config.database().schema());
+        assertEquals(Path.of("db/seed.sql"), config.database().seed());
+        assertEquals(Duration.ofSeconds(45), config.database().timeout());
+    }
+
+    @Test
+    @DisplayName("a misspelled key under database is rejected like a misspelled key anywhere else")
+    void unknownDatabaseKeyIsRejected() {
+        // The whole point of the strict loader: a typo must not silently leave the default in place and
+        // produce a run that looks like it used a database it never prepared.
+        assertThrows(IllegalArgumentException.class, () -> load("database:\n  schmea: db/schema.sql\n"));
+    }
+
+    @Test
     @DisplayName("15m, 90s and 2h durations parse from the verification and mutation sections")
     void yamlParsesHumanDurations() {
         VerificationConfig config = load("""

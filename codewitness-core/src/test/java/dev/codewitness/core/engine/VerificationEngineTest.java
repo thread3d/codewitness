@@ -1,6 +1,8 @@
 package dev.codewitness.core.engine;
 
 import dev.codewitness.core.config.VerificationConfig;
+import dev.codewitness.core.evidence.EvidenceStatus;
+import dev.codewitness.core.evidence.EvidenceType;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
@@ -17,10 +19,12 @@ import dev.codewitness.core.result.Budget;
 import dev.codewitness.core.result.Counterexample;
 import dev.codewitness.core.result.RunStatus;
 import dev.codewitness.core.result.VerificationReport;
+import dev.codewitness.core.spi.DatabaseFixture;
 import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
 import dev.codewitness.core.spi.LanguageDetector;
 import dev.codewitness.core.spi.LanguageDetectorRegistry;
+import dev.codewitness.core.spi.PreparedDatabase;
 import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
@@ -164,6 +168,43 @@ class VerificationEngineTest {
                 "no registered strategy claimed the requirement, so nothing verified it: " + report.verdicts());
     }
 
+    @Test
+    @DisplayName("a database fixture is prepared and its result is on the context a strategy sees")
+    void aDatabaseFixtureIsPreparedForStrategies() {
+        // The point of the fixture SPI: a strategy in any language reaches the run's database through the
+        // context, without the engine knowing which engine or driver is behind it.
+        VerificationProviderRegistry providers = VerificationProviderRegistry.empty();
+        providers.register(new RecordingDatabaseFixture(true));
+        providers.register(new RequiresDatabaseStrategy());
+
+        VerificationReport report = runProviders(
+                List.of(adapter(Set.of(Capability.INSPECT, Capability.BUILD), true)), requirements(),
+                configWithDatabase(true), providers);
+
+        assertEquals(RequirementStatus.UNVERIFIED, report.verdicts().getFirst().status(),
+                "the strategy saw a prepared database, so it had nothing to report: " + report.verdicts());
+        assertTrue(report.evidence().stream().anyMatch(e -> e.type() == EvidenceType.DATABASE_FIXTURE
+                && e.status() == EvidenceStatus.SUPPORTS), report.evidence().toString());
+    }
+
+    @Test
+    @DisplayName("a database that was requested and not prepared is a limitation, not a silent absence")
+    void anUnpreparedDatabaseIsReported() {
+        VerificationProviderRegistry providers = VerificationProviderRegistry.empty();
+        providers.register(new RequiresDatabaseStrategy());
+
+        VerificationReport report = runProviders(
+                List.of(adapter(Set.of(Capability.INSPECT, Capability.BUILD), true)), requirements(),
+                configWithDatabase(true), providers);
+
+        assertEquals(RequirementStatus.FAILED, report.verdicts().getFirst().status(),
+                "nothing prepared a database and the strategy said so: " + report.verdicts());
+        assertTrue(report.limitations().stream().anyMatch(l -> l.contains("A database was requested but none")),
+                report.limitations().toString());
+        assertTrue(report.evidence().stream().anyMatch(e -> e.type() == EvidenceType.DATABASE_FIXTURE
+                && e.status() == EvidenceStatus.INCONCLUSIVE), report.evidence().toString());
+    }
+
     /**
      * The shape an embedder registers: it claims the project and refutes the requirement with a single
      * counterexample, so whether it ran is visible in the verdict rather than only in a log.
@@ -209,6 +250,69 @@ class VerificationEngineTest {
         public StrategyOutcome verify(VerificationContext context, Requirement requirement,
                 List<VerificationObligation> obligations) {
             throw new AssertionError("a strategy that declines the project must never be called");
+        }
+    }
+
+    /**
+     * A database fixture an embedder might register: it prepares a database whose URL is a test value, so
+     * the test can tell the difference between "a database was prepared" and "the pipeline ran anyway".
+     */
+    private static final class RecordingDatabaseFixture implements DatabaseFixture {
+
+        private final boolean prepared;
+
+        RecordingDatabaseFixture(boolean prepared) {
+            this.prepared = prepared;
+        }
+
+        @Override
+        public String id() {
+            return "recording";
+        }
+
+        @Override
+        public boolean supports(Request request) {
+            return request.config().database().enabled();
+        }
+
+        @Override
+        public PreparedDatabase prepare(Request request) {
+            if (!prepared) {
+                return PreparedDatabase.notPrepared(id(), "the test fixture declined to prepare one");
+            }
+            return PreparedDatabase.prepared(id(), "jdbc:sqlite::memory:",
+                    Map.of(URL_VARIABLE, "jdbc:sqlite::memory:"), "a test database");
+        }
+    }
+
+    /**
+     * Refutes the requirement when the context carries no prepared database, so a run that prepared one is
+     * distinguishable from a run that did not.
+     */
+    private static final class RequiresDatabaseStrategy implements VerificationStrategy {
+
+        @Override
+        public String id() {
+            return "requires-database";
+        }
+
+        @Override
+        public boolean supports(ProjectInfo project) {
+            return true;
+        }
+
+        @Override
+        public StrategyOutcome verify(VerificationContext context, Requirement requirement,
+                List<VerificationObligation> obligations) {
+            if (context.database().prepared()) {
+                return StrategyOutcome.empty(id(), requirement.id());
+            }
+            Counterexample counterexample = new Counterexample("CE-NO-DB", requirement.id(), null,
+                    "no database was prepared", Map.<String, Object>of(), "a database", "none",
+                    "the requirement needs a database", "requires-database", null, null, null,
+                    Counterexample.DiscoveryMethod.STATIC_ANALYSIS);
+            return new StrategyOutcome(id(), requirement.id(), List.of(), List.of(counterexample), List.of(),
+                    List.of("no database was prepared"));
         }
     }
 
@@ -364,6 +468,25 @@ class VerificationEngineTest {
         return new VerificationEngine(registry, VerificationProviderRegistry.empty(), detectors,
                 new dev.codewitness.core.exec.LocalProcessSandbox(List.of(tmp)).runner())
                 .verify(ProjectRef.of(tmp), requirements, config, (phase, message) -> { });
+    }
+
+    /** Runs with a registry the test filled itself, which is what a database fixture needs. */
+    private VerificationReport runProviders(List<LanguageAdapter> adapters, RequirementSet requirements,
+            VerificationConfig config, VerificationProviderRegistry providers) {
+        LanguageAdapterRegistry registry = new LanguageAdapterRegistry();
+        adapters.forEach(registry::register);
+        return new VerificationEngine(registry, providers, LanguageDetectorRegistry.of(),
+                new dev.codewitness.core.exec.LocalProcessSandbox(List.of(tmp)).runner())
+                .verify(ProjectRef.of(tmp), requirements, config, (phase, message) -> { });
+    }
+
+    /** The defaults with only the database section changed, so a test says one thing at a time. */
+    private static VerificationConfig configWithDatabase(boolean enabled) {
+        VerificationConfig defaults = VerificationConfig.defaults();
+        return new VerificationConfig(defaults.project(), defaults.language(), defaults.limits(), defaults.tests(),
+                defaults.mutation(), defaults.propertyTesting(), defaults.staticAnalysis(), defaults.security(),
+                defaults.llm(), defaults.report(), defaults.sandbox(), defaults.scenarios(),
+                new VerificationConfig.Database(enabled, "sqlite", null, null, null, Duration.ofSeconds(30)));
     }
 
     /** An adapter that can be told to succeed or fail its build, and that declares nothing else. */

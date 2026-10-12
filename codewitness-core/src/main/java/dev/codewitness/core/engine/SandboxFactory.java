@@ -9,6 +9,7 @@ import dev.codewitness.core.exec.ProcessRunner;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Chooses the isolation strategy for a run.
@@ -23,32 +24,39 @@ public final class SandboxFactory {
     }
 
     /**
-     * @param config        effective configuration
-     * @param workspaceRoot project root inside the run workspace
-     * @param runDirectory  run directory (artifacts, logs) that the sandbox may write to
-     * @param hostRunner    raw process runner used for the Docker probe
+     * @param config         effective configuration
+     * @param workspaceRoot  project root inside the run workspace
+     * @param runDirectory   run directory (artifacts, logs) that the sandbox may write to
+     * @param hostRunner     raw process runner used for the Docker probe
+     * @param runEnvironment variables the run prepared for itself - a database fixture's URL, for
+     *                       instance - merged into every process the sandbox starts
      * @return the sandbox to use
      */
     public static ExecutionSandbox create(
-            VerificationConfig config, Path workspaceRoot, Path runDirectory, ProcessRunner hostRunner) {
+            VerificationConfig config,
+            Path workspaceRoot,
+            Path runDirectory,
+            ProcessRunner hostRunner,
+            Map<String, String> runEnvironment) {
 
         List<Path> roots = new ArrayList<>();
         roots.add(workspaceRoot);
         roots.add(runDirectory);
         roots.add(Path.of(System.getProperty("java.io.tmpdir")));
 
+        Map<String, String> environment = runEnvironment == null ? Map.of() : runEnvironment;
         String mode = config.sandbox().mode() == null ? "local-process" : config.sandbox().mode().trim();
         if ("docker".equalsIgnoreCase(mode)) {
             if (DockerSandbox.isAvailable(hostRunner, runDirectory, "docker")) {
                 return new DockerSandbox(workspaceRoot, config.sandbox().image(),
-                        config.sandbox().containerWorkdir(), hostRunner);
+                        config.sandbox().containerWorkdir(), hostRunner, environment);
             }
             LocalProcessSandbox fallback = new LocalProcessSandbox(roots, System.getenv(),
-                    config.sandbox().allowNetwork());
+                    config.sandbox().allowNetwork(), environment);
             System.err.println("[codewitness] sandbox.mode=docker was requested but no Docker daemon is "
                     + "reachable; falling back to " + fallback.id() + " (" + fallback.isolationLevel() + ")");
             return fallback;
         }
-        return new LocalProcessSandbox(roots, System.getenv(), config.sandbox().allowNetwork());
+        return new LocalProcessSandbox(roots, System.getenv(), config.sandbox().allowNetwork(), environment);
     }
 }

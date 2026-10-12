@@ -26,6 +26,12 @@
       <groupId>dev.codewitness</groupId>
       <artifactId>codewitness-report</artifactId>
     </dependency>
+    <!-- The composition root wires the shared database fixture, so it says so explicitly rather than
+         relying on an adapter happening to bring the module along. -->
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-adapter-support</artifactId>
+    </dependency>
     <dependency>
       <groupId>dev.codewitness</groupId>
       <artifactId>codewitness-adapter-java</artifactId>

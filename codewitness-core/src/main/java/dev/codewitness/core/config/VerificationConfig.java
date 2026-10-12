@@ -30,7 +30,8 @@ public record VerificationConfig(
         Llm llm,
         Report report,
         Sandbox sandbox,
-        List<Scenario> scenarios) {
+        List<Scenario> scenarios,
+        Database database) {
 
     public VerificationConfig {
         project = project == null ? Project.defaults() : project;
@@ -45,6 +46,30 @@ public record VerificationConfig(
         report = report == null ? Report.defaults() : report;
         sandbox = sandbox == null ? Sandbox.defaults() : sandbox;
         scenarios = List.copyOf(scenarios == null ? List.of() : scenarios);
+        database = database == null ? Database.disabled() : database;
+    }
+
+    /**
+     * The configuration without a database section, for a caller that has none to declare.
+     *
+     * <p>A record has one canonical constructor, so this overload exists to keep every existing call
+     * site compiling and reading the same: a run with no {@code database:} block asks for no fixture.
+     */
+    public VerificationConfig(
+            Project project,
+            Language language,
+            Limits limits,
+            Toggle tests,
+            Mutation mutation,
+            PropertyTesting propertyTesting,
+            StaticAnalysis staticAnalysis,
+            Security security,
+            Llm llm,
+            Report report,
+            Sandbox sandbox,
+            List<Scenario> scenarios) {
+        this(project, language, limits, tests, mutation, propertyTesting, staticAnalysis, security, llm, report,
+                sandbox, scenarios, null);
     }
 
     public static VerificationConfig defaults() {
@@ -70,6 +95,9 @@ public record VerificationConfig(
                 .append(security.vulnerabilities().source()).append('|')
                 .append(llm.enabled()).append('|').append(llm.provider()).append('|').append(llm.model()).append('|')
                 .append(report).append('|').append(sandbox).append('|');
+        sb.append(database.enabled()).append('|').append(database.engine()).append('|')
+                .append(database.schema()).append('|').append(database.seed()).append('|')
+                .append(database.url()).append('|');
         for (Scenario scenario : scenarios) {
             sb.append(scenario.id()).append(':').append(scenario.requirement()).append(':')
                     .append(scenario.mode()).append(':').append(scenario.cases()).append(':')
@@ -227,11 +255,53 @@ public record VerificationConfig(
         }
     }
 
+    /**
+     * An ephemeral database the run may prepare so that tests and scenarios exercise real SQL rather
+     * than a mock.
+     *
+     * <p>Disabled by default. It is the user who says which schema is the source of truth, because
+     * CodeWitness cannot invent a project's data model any more than it can invent its API: the
+     * {@code schema} path is either one {@code .sql} file or a directory of them applied in name order,
+     * and {@code seed} optionally loads rows after it.
+     *
+     * <p>Nothing here is language specific. The engine asks a registered
+     * {@link dev.codewitness.core.spi.DatabaseFixture} to prepare the database and hands the result to
+     * every child process in the run's environment, so a test in any language reaches the same ephemeral
+     * database through the variable the fixture names.
+     *
+     * @param enabled whether to prepare a database at all
+     * @param engine  fixture to use, by id; {@code sqlite} is the only one implemented
+     * @param schema  a {@code .sql} file, or a directory of {@code .sql} files applied in name order
+     * @param seed    an optional {@code .sql} file applied after the schema
+     * @param url     an explicit connection URL to use instead of creating a database; the fixture then
+     *                prepares nothing and only exports it, which is how a project with a real database
+     *                it manages itself can still receive one
+     * @param timeout per-statement and preparation timeout
+     */
+    public record Database(
+            boolean enabled,
+            String engine,
+            Path schema,
+            Path seed,
+            String url,
+            Duration timeout) {
+
+        public Database {
+            engine = engine == null || engine.isBlank() ? "sqlite" : engine.trim();
+            timeout = timeout == null || timeout.isZero() || timeout.isNegative()
+                    ? Duration.ofSeconds(30) : timeout;
+        }
+
+        public static Database disabled() {
+            return new Database(false, "sqlite", null, null, null, Duration.ofSeconds(30));
+        }
+    }
+
     /** Copies this configuration with a different report output directory. */
     public VerificationConfig withOutputDirectory(Path directory) {
         return new VerificationConfig(project, language, limits, tests, mutation, propertyTesting,
                 staticAnalysis, security, llm, new Report(report.html(), report.json(), directory,
-                report.keepGeneratedTests()), sandbox, scenarios);
+                report.keepGeneratedTests()), sandbox, scenarios, database);
     }
 
     public VerificationConfig withBudget(Budget budget) {
@@ -241,12 +311,12 @@ public record VerificationConfig(
         Llm updatedLlm = new Llm(llm.enabled(), llm.provider(), llm.model(), llm.baseUrl(),
                 llm.apiKeyEnvironmentVariable(), budget.maxLlmCalls(), llm.temperature(), llm.timeout());
         return new VerificationConfig(project, language, updated, tests, mutation, propertyTesting,
-                staticAnalysis, security, updatedLlm, report, sandbox, scenarios);
+                staticAnalysis, security, updatedLlm, report, sandbox, scenarios, database);
     }
 
     public VerificationConfig withScenarios(List<Scenario> newScenarios) {
         return new VerificationConfig(project, language, limits, tests, mutation, propertyTesting,
-                staticAnalysis, security, llm, report, sandbox, newScenarios);
+                staticAnalysis, security, llm, report, sandbox, newScenarios, database);
     }
 
     /**
@@ -258,7 +328,7 @@ public record VerificationConfig(
      */
     public VerificationConfig withLanguage(Language newLanguage) {
         return new VerificationConfig(project, newLanguage, limits, tests, mutation, propertyTesting,
-                staticAnalysis, security, llm, report, sandbox, scenarios);
+                staticAnalysis, security, llm, report, sandbox, scenarios, database);
     }
 
     /** @return a map representation suitable for embedding in a report. */
@@ -284,6 +354,13 @@ public record VerificationConfig(
                 "model", String.valueOf(llm.model())));
         map.put("sandbox", Map.of("mode", sandbox.mode(), "image", sandbox.image(),
                 "allowNetwork", sandbox.allowNetwork()));
+        Map<String, Object> databaseMap = new LinkedHashMap<>();
+        databaseMap.put("enabled", database.enabled());
+        databaseMap.put("engine", database.engine());
+        databaseMap.put("schema", String.valueOf(database.schema()));
+        databaseMap.put("seed", String.valueOf(database.seed()));
+        databaseMap.put("url", String.valueOf(database.url()));
+        map.put("database", databaseMap);
         List<Object> scenarioMaps = new ArrayList<>();
         for (Scenario scenario : scenarios) {
             scenarioMaps.add(scenario.asMap());

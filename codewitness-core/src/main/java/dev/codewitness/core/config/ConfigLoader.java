@@ -32,7 +32,7 @@ public final class ConfigLoader {
     /** Keys understood at the root of {@code codewitness.yaml}. */
     private static final Set<String> ROOT_KEYS = Set.of("project", "language", "verification", "tests",
             "mutation", "property_testing", "static_analysis", "security", "llm", "report", "sandbox",
-            "scenarios");
+            "database", "scenarios");
 
     /** Keys understood inside each top-level section. */
     private static final Map<String, Set<String>> SECTION_KEYS = Map.ofEntries(
@@ -48,7 +48,8 @@ public final class ConfigLoader {
             Map.entry("llm", Set.of("enabled", "provider", "model", "base_url", "api_key_env", "max_calls",
                     "temperature", "timeout")),
             Map.entry("report", Set.of("html", "json", "output_directory", "keep_generated_tests")),
-            Map.entry("sandbox", Set.of("mode", "image", "allow_network", "container_workdir")));
+            Map.entry("sandbox", Set.of("mode", "image", "allow_network", "container_workdir")),
+            Map.entry("database", Set.of("enabled", "engine", "schema", "seed", "url", "timeout")));
 
     /** Keys understood inside {@code security.vulnerabilities}. */
     private static final Set<String> VULNERABILITY_KEYS = Set.of("enabled", "source", "endpoint", "timeout",
@@ -151,6 +152,7 @@ public final class ConfigLoader {
         Map<String, Object> llmMap = mapOf(map, "llm");
         Map<String, Object> reportMap = mapOf(map, "report");
         Map<String, Object> sandboxMap = mapOf(map, "sandbox");
+        Map<String, Object> databaseMap = mapOf(map, "database");
         for (Map.Entry<String, Set<String>> section : SECTION_KEYS.entrySet()) {
             if (section.getKey().equals("project") || section.getKey().equals("language")) {
                 continue;
@@ -209,6 +211,14 @@ public final class ConfigLoader {
                 bool(sandboxMap, "allow_network", false),
                 string(sandboxMap, "container_workdir", defaults.sandbox().containerWorkdir()));
 
+        VerificationConfig.Database database = new VerificationConfig.Database(
+                bool(databaseMap, "enabled", defaults.database().enabled()),
+                string(databaseMap, "engine", defaults.database().engine()),
+                path(databaseMap, "schema"),
+                path(databaseMap, "seed"),
+                string(databaseMap, "url", null),
+                DurationParser.parse(string(databaseMap, "timeout", null), defaults.database().timeout()));
+
         List<Scenario> scenarios = parseScenarios(map.get("scenarios"), warnings);
 
         Map<String, Object> vulnerabilitiesMap = mapOf(securityMap, "vulnerabilities");
@@ -223,7 +233,7 @@ public final class ConfigLoader {
         VerificationConfig config = new VerificationConfig(project, language, limits,
                 new VerificationConfig.Toggle(bool(testsMap, "enabled", true)), mutation, propertyTesting,
                 staticAnalysis, new VerificationConfig.Security(bool(securityMap, "enabled", true), vulnerabilityScan),
-                llm, report, sandbox, scenarios);
+                llm, report, sandbox, scenarios, database);
         return new Loaded(config, source, warnings);
     }
 

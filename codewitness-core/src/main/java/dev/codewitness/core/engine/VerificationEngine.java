@@ -50,9 +50,11 @@ import dev.codewitness.core.result.RequirementVerdict;
 import dev.codewitness.core.result.RunStatus;
 import dev.codewitness.core.result.VerificationReport;
 import dev.codewitness.core.result.VerificationRun;
+import dev.codewitness.core.spi.DatabaseFixture;
 import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
 import dev.codewitness.core.spi.LanguageDetectorRegistry;
+import dev.codewitness.core.spi.PreparedDatabase;
 import dev.codewitness.core.spi.ProgressListener;
 import dev.codewitness.core.spi.RequirementCodeMap;
 import dev.codewitness.core.spi.RunState;
@@ -194,9 +196,16 @@ public final class VerificationEngine {
                     limitations, startedAt, evidence, "No language adapter supports this project.");
         }
 
-        ExecutionSandbox sandbox = SandboxFactory.create(config, workspace.root(), runDirectory, hostRunner);
+        // The database is prepared before the sandbox so that its connection details are part of the
+        // environment every process of the run starts with, and it is prepared before any phase so that a
+        // test runner or a generated test can use it. A fixture that cannot prepare one reports why, and
+        // the run says the database was unavailable instead of proceeding as though it had been used.
+        PreparedDatabase database = prepareDatabase(config, workspace.root(), runDirectory, artifacts, listener);
+        ExecutionSandbox sandbox = SandboxFactory.create(config, workspace.root(), runDirectory, hostRunner,
+                database.environment());
         limitations.add("Execution isolation: " + sandbox.isolationLevel() + " via " + sandbox.id() + ". "
                 + sandbox.description());
+        limitations.addAll(recordDatabase(database, config, ledger, listener));
 
         ProgressListener scoped = (phase, message) -> listener.onEvent(phase, message);
 
@@ -205,7 +214,7 @@ public final class VerificationEngine {
         List<Inspection> inspections;
         try {
             inspections = inspectAll(adapters, runId, project, config, workspace, artifacts, budget, requirements,
-                    scoped, sandbox, state, ledger, startedAt);
+                    scoped, sandbox, state, ledger, startedAt, database);
         } catch (RuntimeException e) {
             phases.add(new PhaseRecord("inspect", true, false, Duration.between(inspectStart, Instant.now()),
                     "inspection failed: " + e, List.of(), e.toString()));
@@ -279,7 +288,7 @@ public final class VerificationEngine {
                 for (Inspection inspection : builders) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
                             artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty());
+                            RequirementCodeMap.empty(), database);
                     BuildResult build = firstCompiler(languageContext)
                             .map(compiler -> compiler.build(languageContext))
                             .orElseGet(() -> inspection.adapter().build(languageContext));
@@ -340,7 +349,7 @@ public final class VerificationEngine {
 
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
                             artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty());
+                            RequirementCodeMap.empty(), database);
                     Optional<VerificationTools.TestRunner> testRunner = firstTestRunner(languageContext);
                     TestResult tests = testRunner
                             .map(runner -> runner.runTests(languageContext))
@@ -387,7 +396,7 @@ public final class VerificationEngine {
                 for (Inspection inspection : analysable) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
                             artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty());
+                            RequirementCodeMap.empty(), database);
                     // Registered providers are the extension point, and every bundled adapter registers
                     // one. Calling adapter.analyze() as well ran the whole pass twice - including a second
                     // -Xlint:all compile - for findings that were then deduplicated away. The adapter level
@@ -437,7 +446,7 @@ public final class VerificationEngine {
                 for (Inspection inspection : analysable) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
                             artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty());
+                            RequirementCodeMap.empty(), database);
                     var analyzers = providers.securityAnalyzers(inspection.info());
                     List<Finding> found = new ArrayList<>();
                     for (var analyzer : analyzers) {
@@ -469,7 +478,7 @@ public final class VerificationEngine {
                 for (Inspection inspection : analysable(inspections, builds)) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
                             artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty());
+                            RequirementCodeMap.empty(), database);
                     List<VerificationTools.DependencyAnalyzer> analyzers =
                             providers.dependencyAnalyzers(inspection.info());
                     DependencyReport report = analyzers.isEmpty()
@@ -530,7 +539,7 @@ public final class VerificationEngine {
                 for (Inspection inspection : coverable) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
                             artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty());
+                            RequirementCodeMap.empty(), database);
                     List<VerificationTools.CoverageProvider> coverageProviders =
                             providers.coverageProviders(inspection.info());
                     CoverageReport coverage = coverageProviders.isEmpty()
@@ -576,7 +585,7 @@ public final class VerificationEngine {
                 for (Inspection inspection : mutable) {
                     VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
                             artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty());
+                            RequirementCodeMap.empty(), database);
                     List<VerificationTools.MutationTester> testers = providers.mutationTesters(inspection.info());
                     MutationReport report = testers.isEmpty()
                             ? MutationReport.notMeasured("none", "no mutation tester registered for "
@@ -655,7 +664,8 @@ public final class VerificationEngine {
             Inspection owner = ownerOf(requirement, mapper, inspections);
             Inspection running = owner != null ? owner : inspections.getFirst();
             VerificationContext requirementContext = contextFor(running, runId, project, config, workspace,
-                    artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt, mapper);
+                    artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt, mapper,
+                    database);
             if (inspections.size() > 1 && owner == null) {
                 notes.add("This requirement could not be attributed to any language in the project, so its "
                         + "strategies ran against " + running.adapter().id()
@@ -809,13 +819,14 @@ public final class VerificationEngine {
             ExecutionSandbox sandbox,
             RunState state,
             EvidenceLedger ledger,
-            Instant startedAt) {
+            Instant startedAt,
+            PreparedDatabase database) {
 
         List<Inspection> inspections = new ArrayList<>();
         for (LanguageAdapter adapter : adapters) {
             VerificationContext inspectContext = context(runId, project, emptyInfo(project), config, workspace,
                     artifacts, budget, requirements, LlmProvider.disabled("not initialised"), listener, sandbox,
-                    state, ledger, startedAt, RequirementCodeMap.empty());
+                    state, ledger, startedAt, RequirementCodeMap.empty(), database);
             inspections.add(new Inspection(adapter, adapter.inspect(project, inspectContext)));
         }
         return inspections;
@@ -891,9 +902,10 @@ public final class VerificationEngine {
             RunState state,
             EvidenceLedger ledger,
             Instant startedAt,
-            RequirementCodeMap codeMap) {
+            RequirementCodeMap codeMap,
+            PreparedDatabase database) {
         return context(runId, project, inspection.info(), config, workspace, artifacts, budget, requirements, llm,
-                listener, sandbox, state, ledger, startedAt, codeMap);
+                listener, sandbox, state, ledger, startedAt, codeMap, database);
     }
 
     /**
@@ -1225,6 +1237,97 @@ public final class VerificationEngine {
         }
     }
 
+    /**
+     * Prepares the run's database, if the configuration asked for one.
+     *
+     * <p>The fixture is chosen by the registry, exactly as a compiler or a test runner is: the engine
+     * names no database engine. A fixture that cannot prepare a database - a missing schema, a URL that
+     * nothing answers, an engine nobody implements - comes back as an honest "not prepared" with the
+     * reason, which becomes a limitation rather than a crash or a silent pass.
+     */
+    private PreparedDatabase prepareDatabase(
+            VerificationConfig config,
+            Path projectRoot,
+            Path runDirectory,
+            ArtifactStore artifacts,
+            ProgressListener listener) {
+        if (!config.database().enabled()) {
+            return PreparedDatabase.none("no database was requested (set database.enabled to prepare one)");
+        }
+        DatabaseFixture.Request request =
+                new DatabaseFixture.Request(config, projectRoot, runDirectory, artifacts);
+        for (DatabaseFixture fixture : providers.databaseFixtures()) {
+            if (!fixture.supports(request)) {
+                continue;
+            }
+            listener.onEvent("database", "preparing the database with " + fixture.id());
+            try {
+                PreparedDatabase prepared = fixture.prepare(request);
+                return prepared == null
+                        ? PreparedDatabase.notPrepared(fixture.id(), "the fixture returned no result")
+                        : prepared;
+            } catch (RuntimeException e) {
+                // A throwing fixture is a bug in the fixture, but a run must not die on it: the database is
+                // reported as unavailable and everything that needed one stays unverified.
+                return PreparedDatabase.notPrepared(fixture.id(),
+                        "the fixture failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            }
+        }
+        return PreparedDatabase.notPrepared(config.database().engine(),
+                "no registered database fixture claims engine \"" + config.database().engine()
+                        + "\"; registered fixtures are " + providers.databaseFixtures().stream()
+                                .map(DatabaseFixture::id).toList());
+    }
+
+    /**
+     * Records what the database fixture produced.
+     *
+     * <p>A prepared database is evidence about the experiment, not about the code, and it is recorded so
+     * that a counterexample naming a table can be traced to the schema that was actually loaded. A
+     * requested database that could not be prepared is a limitation, because every requirement that needed
+     * one is then unverified for a reason the reader can act on.
+     */
+    private List<String> recordDatabase(
+            PreparedDatabase database,
+            VerificationConfig config,
+            EvidenceLedger ledger,
+            ProgressListener listener) {
+        List<String> limitations = new ArrayList<>();
+        if (database.prepared()) {
+            Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.DATABASE_FIXTURE)
+                    .description("Prepared a database for the run: " + database.description())
+                    .source(database.id())
+                    .confidence(EvidenceConfidence.DETERMINISTIC)
+                    .status(EvidenceStatus.SUPPORTS)
+                    .result(database.description())
+                    .metadata("jdbcUrl", String.valueOf(database.jdbcUrl()))
+                    .metadata("environment", database.environment().keySet().stream().sorted().toList())
+                    .build());
+            listener.onEvent("database", database.description());
+            if (!database.environment().isEmpty()) {
+                limitations.add("A database was prepared for this run (" + database.description()
+                        + ") and exported to every process as "
+                        + String.join(", ", database.environment().keySet())
+                        + "; the run directory keeps it so a counterexample against it can be replayed.");
+            }
+            return limitations;
+        }
+        if (!config.database().enabled()) {
+            return limitations;
+        }
+        Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.DATABASE_FIXTURE)
+                .description("A database was requested but not prepared")
+                .source(database.id())
+                .confidence(EvidenceConfidence.DETERMINISTIC)
+                .status(EvidenceStatus.INCONCLUSIVE)
+                .result(String.valueOf(database.note()))
+                .build());
+        limitations.add("A database was requested but none is available: " + database.limitation()
+                + " Requirements that need one stay UNVERIFIED rather than being reported as verified.");
+        listener.onEvent("database", "not prepared: " + database.note());
+        return limitations;
+    }
+
     private Optional<dev.codewitness.core.spi.VerificationTools.Compiler> firstCompiler(VerificationContext context) {
         var compilers = providers.compilers(context.projectInfo());
         return compilers.isEmpty() ? Optional.empty() : Optional.of(compilers.getFirst());
@@ -1261,7 +1364,8 @@ public final class VerificationEngine {
             RunState state,
             EvidenceLedger ledger,
             Instant startedAt,
-            RequirementCodeMap codeMap) {
+            RequirementCodeMap codeMap,
+            PreparedDatabase database) {
         return VerificationContext.builder()
                 .runId(runId.value())
                 .projectRef(project)
@@ -1276,6 +1380,7 @@ public final class VerificationEngine {
                 .sandbox(sandbox)
                 .state(state)
                 .codeMap(codeMap)
+                .database(database)
                 .evidenceLedger(ledger)
                 .startedAt(startedAt)
                 .build();

@@ -51,6 +51,22 @@ public final class LocalProcessSandbox implements ExecutionSandbox {
     }
 
     public LocalProcessSandbox(List<Path> permittedRoots, Map<String, String> hostEnvironment, boolean allowNetwork) {
+        this(permittedRoots, hostEnvironment, allowNetwork, Map.of());
+    }
+
+    /**
+     * @param runEnvironment variables the run itself supplies, merged over the allow-list.
+     *
+     * <p>They come from infrastructure the engine prepared for this run - a database fixture's connection
+     * URL, for instance - rather than from the host environment, so they are not credentials the
+     * allow-list exists to keep out. Every process the sandbox starts sees them, which is what lets a
+     * project's tests in any language reach the same resource.
+     */
+    public LocalProcessSandbox(
+            List<Path> permittedRoots,
+            Map<String, String> hostEnvironment,
+            boolean allowNetwork,
+            Map<String, String> runEnvironment) {
         this.permittedRoots = permittedRoots.stream().map(p -> p.toAbsolutePath().normalize()).toList();
         this.allowNetwork = allowNetwork;
         Map<String, String> env = new LinkedHashMap<>();
@@ -65,6 +81,9 @@ public final class LocalProcessSandbox implements ExecutionSandbox {
         // description below names it instead of claiming no proxy setting can reach the child.
         env.put("CODEWITNESS_SANDBOX", "local-process");
         env.remove("MAVEN_OPTS");
+        if (runEnvironment != null) {
+            env.putAll(runEnvironment);
+        }
         this.baseEnvironment = Map.copyOf(env);
     }
 
