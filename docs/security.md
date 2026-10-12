@@ -77,7 +77,8 @@ module, an image with a Node runtime for a TypeScript project (22.6+) or a JavaS
 (18.17+), an image with the .NET SDK (8+) for a C# project, an image with CMake, a C or C++ compiler and
 `gcov` for a C or C++ project, an image with PHP 8, Composer and a coverage driver (Xdebug or PCOV) for
 a PHP project, an image with Ruby and Bundler for a Ruby project, an image with a Swift toolchain for a
-Swift package, or an image with a JVM and the
+Swift package, an image with Icarus Verilog for a Verilog or SystemVerilog design, or an image with a
+JVM and the
 project's own build tool for a Kotlin project — Kotlin
 needs no image of its own, because it is compiled by the same `kotlinc` the project's Maven or Gradle
 build already invokes. The local-process sandbox needs no image
@@ -151,6 +152,16 @@ has no switch that forbids the network the way Cargo's `CARGO_NET_OFFLINE` does,
 dependencies, so it resolves nothing and builds and tests offline. The Swift dependency phase reads the
 inventory it can read — `Package.resolved` — and reports a pin with neither a version nor a revision as
 unresolved rather than treating an unknown as a clean result.
+
+Verilog is the case where the toolchain needs no state of its own. Icarus Verilog keeps no user-level
+cache and reads no configuration from the environment, so a run redirects nothing and there is no
+`~/.iverilog` to protect or to share between runs. `iverilog` compiles the design and `vvp` simulates
+it, and both the compiled simulation and any waveform a testbench dumps are written inside the run's
+artefact directory rather than into the tree being verified. The fixture's `sandbox.allow_network:
+false` is honest because nothing in the run fetches: a combinational design with no manifest has no
+dependency to resolve and the simulator reaches no network. There is also nothing to inventory — Verilog
+has no package manager and there is no advisory ecosystem for HDL — so the dependency phase reads no lock
+file and consults no advisory source, rather than reporting a clean result it cannot support.
 
 ## Recommendations
 

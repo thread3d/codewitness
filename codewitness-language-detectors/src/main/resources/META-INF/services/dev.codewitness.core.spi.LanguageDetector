@@ -12,3 +12,4 @@ dev.codewitness.languages.PhpLanguageDetector
 dev.codewitness.languages.RubyLanguageDetector
 dev.codewitness.languages.ScalaLanguageDetector
 dev.codewitness.languages.SwiftLanguageDetector
+dev.codewitness.languages.VerilogLanguageDetector

@@ -1,0 +1,136 @@
+# CodeWitness configuration for the Verilog withdrawal-ledger fixture.
+#
+# This file declares how each requirement can be *executed* against the design. CodeWitness supplies
+# boundary enumeration, seeded random search, execution and reproducible counterexamples; the Verilog
+# fragments below are the oracle, and they are attributed to the user, not to CodeWitness.
+#
+# The fragments are Verilog: `${name}` is replaced by the signal `name`, `setup` and each step's `call`
+# are statements run at the start of a case, `observation` is assigned to a 64-bit register, and
+# `invariant` is the boolean expression that must hold. `dut` is the design under test, which the
+# generator instantiates and connects to the declared inputs. The ledger is combinational, so a step
+# has nothing to call and `call` is the empty statement: the inputs below are the whole invocation.
+#
+# Money is in integer cents. The tree has no dependencies and Icarus Verilog needs no network, so the
+# build, the testbenches and every generated testbench run with the sandbox's network access forbidden.
+
+project:
+  name: verilog-withdrawal-ledger
+
+language:
+  adapter: verilog
+
+verification:
+  timeout: 5m
+  max_duration: 10m
+  max_test_generation_iterations: 3
+  max_generated_tests: 120
+  max_mutation_time: 5m
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: true
+  tool: verilog-text
+
+property_testing:
+  enabled: true
+  max_scenarios: 10
+
+static_analysis:
+  enabled: true
+  analyzers: [heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: false
+
+scenarios:
+  # R-001: an accepted withdrawal must reduce the balance by exactly the amount. The design adds one
+  # cent back, so both an ordinary amount and the largest amount below the balance fail.
+  - id: SC-DEBIT
+    requirement: R-001
+    description: An accepted withdrawal reduces the balance by exactly the amount
+    mode: single
+    setup: ""
+    steps:
+      - call: ";"
+        description: the ledger is combinational, so the inputs are the whole invocation
+        inputs:
+          - name: balance
+            type: integer
+            domain: integer
+            values: ["100000"]
+            range: {min: 100000, max: 100000}
+          - name: amount
+            type: integer
+            domain: integer
+            values: ["1", "99999"]
+            range: {min: 1, max: 99999}
+    observation: "dut.new_balance"
+    invariant: "dut.accepted == 1 && observation == balance - amount"
+    cases: 1
+    seed: 1
+
+  # R-002: a withdrawal larger than the balance is rejected and changes nothing. This branch is
+  # correct, so the requirement should end up verified rather than merely reported.
+  - id: SC-REJECT
+    requirement: R-002
+    description: An over-limit withdrawal is rejected and leaves the balance unchanged
+    mode: single
+    setup: ""
+    steps:
+      - call: ";"
+        description: the ledger is combinational, so the inputs are the whole invocation
+        inputs:
+          - name: balance
+            type: integer
+            domain: integer
+            values: ["100000"]
+            range: {min: 100000, max: 100000}
+          - name: amount
+            type: integer
+            domain: integer
+            values: ["100001", "200000"]
+            range: {min: 100001, max: 200000}
+    observation: "dut.new_balance"
+    invariant: "dut.accepted == 0 && observation == balance"
+    cases: 1
+    seed: 1
+
+  # R-003: the boundary is inclusive. A withdrawal of exactly the balance must be accepted and empty
+  # the account; the design uses `<` and rejects it.
+  - id: SC-EXACT
+    requirement: R-003
+    description: A withdrawal of exactly the balance is accepted and empties the account
+    mode: single
+    setup: ""
+    steps:
+      - call: ";"
+        description: the ledger is combinational, so the inputs are the whole invocation
+        inputs:
+          - name: balance
+            type: integer
+            domain: integer
+            values: ["100000"]
+            range: {min: 100000, max: 100000}
+          - name: amount
+            type: integer
+            domain: integer
+            values: ["100000"]
+            range: {min: 100000, max: 100000}
+    observation: "dut.new_balance"
+    invariant: "dut.accepted == 1 && observation == 0"
+    cases: 1
+    seed: 1

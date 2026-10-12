@@ -27,6 +27,7 @@ import dev.codewitness.php.PhpAdapterBundle;
 import dev.codewitness.python.PythonAdapterBundle;
 import dev.codewitness.ruby.RubyAdapterBundle;
 import dev.codewitness.swift.SwiftAdapterBundle;
+import dev.codewitness.verilog.VerilogAdapterBundle;
 import dev.codewitness.rust.RustAdapterBundle;
 import dev.codewitness.typescript.TypeScriptAdapterBundle;
 
@@ -75,6 +76,7 @@ public final class InspectCommand implements Callable<Integer> {
         PhpAdapterBundle.register(languages, providers, true);
         RubyAdapterBundle.register(languages, providers, true);
         SwiftAdapterBundle.register(languages, providers, true);
+        VerilogAdapterBundle.register(languages, providers, true);
         JavaScriptAdapterBundle.register(languages, providers, true);
         TypeScriptAdapterBundle.register(languages, providers, true);
 

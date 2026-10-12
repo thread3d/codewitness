@@ -74,6 +74,10 @@
       <groupId>dev.codewitness</groupId>
       <artifactId>codewitness-adapter-swift</artifactId>
     </dependency>
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-adapter-verilog</artifactId>
+    </dependency>
     <!-- Recognition of languages nothing can verify. A dependency rather than a hard-coded table in the
          core, so that a report can name Perl or Elixir without the engine knowing what Perl or Elixir
          are. -->

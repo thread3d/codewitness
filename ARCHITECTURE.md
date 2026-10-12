@@ -54,8 +54,9 @@ flowchart TD
     PHP["PHP<br/>composer · phpunit · xdebug · pcov"]
     RUBY["Ruby<br/>bundler · rspec · simplecov"]
     SWIFT["Swift<br/>SwiftPM · swift build · swift test · XCTest · llvm-cov"]
+    VERILOG["Verilog / SystemVerilog<br/>iverilog -g2012 · vvp -N · heuristics"]
 
-    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet · kotlinc<br/>cmake · ctest · gcov · clang · gcc · php · composer · phpunit<br/>ruby · bundler · rspec · simplecov · swift · SwiftPM · XCTest · llvm-cov"]
+    TOOLS["External tools<br/>javac · Maven · Gradle · JUnit · PIT · JaCoCo · python<br/>pytest · coverage.py · cargo · rustc · go · node · tsc · dotnet · kotlinc<br/>cmake · ctest · gcov · clang · gcc · php · composer · phpunit<br/>ruby · bundler · rspec · simplecov · swift · SwiftPM · XCTest · llvm-cov<br/>iverilog · vvp"]
 
     CLI ==> ENGINE ==> MODEL ==> STRATEGIES ==> SPI
     SPI ==> JAVA
@@ -70,6 +71,7 @@ flowchart TD
     SPI ==> PHP
     SPI ==> RUBY
     SPI ==> SWIFT
+    SPI ==> VERILOG
     JAVA --> TOOLS
     PYTHON --> TOOLS
     RUST --> TOOLS
@@ -82,6 +84,7 @@ flowchart TD
     PHP --> TOOLS
     RUBY --> TOOLS
     SWIFT --> TOOLS
+    VERILOG --> TOOLS
 ```
 
 Enforced by module boundaries, not by convention:
@@ -101,6 +104,7 @@ Enforced by module boundaries, not by convention:
 | `codewitness-adapter-php` | core, adapter-support | PHP, the interpreter's own parse, Composer, PHPUnit, Xdebug/PCOV coverage, source mutation, Packagist inventory |
 | `codewitness-adapter-ruby` | core, adapter-support | Ruby, the interpreter's own parse, Bundler, RSpec, SimpleCov coverage, source mutation, RubyGems inventory |
 | `codewitness-adapter-swift` | core, adapter-support | Swift, Swift Package Manager, `swift build`/`swift test`, XCTest results read from the runner's console, LLVM coverage, source mutation, `Package.resolved` inventory |
+| `codewitness-adapter-verilog` | core, adapter-support | Verilog and SystemVerilog, Icarus Verilog, `iverilog -g2012` build, `vvp -N` testbench simulation, heuristic rule table, source mutation; no coverage and no dependency inventory |
 | `codewitness-storage` | core | SQLite persistence |
 | `codewitness-report` | core, Jackson | JSON and HTML rendering |
 | `codewitness-cli` | all of the above | argument parsing and wiring |
@@ -121,7 +125,8 @@ them.
    build wrapper, runtime version (the language's project detector: `JavaProjectDetector`,
    `PythonProjectDetector`, `RustProjectDetector`, `GoProjectDetector`, `TypeScriptProjectDetector`,
    `JavaScriptProjectDetector`, `CSharpProjectDetector`, `KotlinProjectDetector`,
-   `CppProjectDetector`, `PhpProjectDetector`, `RubyProjectDetector`, `SwiftProjectDetector`).
+   `CppProjectDetector`, `PhpProjectDetector`, `RubyProjectDetector`, `SwiftProjectDetector`,
+   `VerilogProjectDetector`).
 2. **workspace** — the project is copied into the run directory, excluding build output, VCS metadata
    and previous run data, with executable bits restored on `mvnw`/`gradlew`. `bin` and `obj` are
    excluded too, because `obj/project.assets.json` holds absolute package paths belonging to the
@@ -137,7 +142,11 @@ them.
    previous run, so neither is copied either; `.yardoc` is excluded with them. SwiftPM's `.build` holds the
    whole compiled product, the checked-out dependencies and the coverage output of the run that produced
    them, and `.swiftpm` holds the package's local configuration; `DerivedData` is Xcode's equivalent, so
-   all three are excluded and the adapter's `swift build` restores what it needs.
+   all three are excluded and the adapter's `swift build` restores what it needs. Verilator's `obj_dir`
+   is the same kind of leftover — the generated C++ a Verilator build compiles the design into — so it is
+   excluded too, even though this adapter drives Icarus Verilog. Icarus writes its compiled simulation
+   and any waveform dump as plain files and the adapter deletes each one it creates, so no other
+   exclusion is needed for the toolchain it drives.
 3. **build** — `test-compile`/`testClasses` for Java, a syntax compile of every source file for
    Python, `cargo build --all-targets` for Rust, `go build ./...` for Go, `tsc --noEmit` (or a Node
    type-stripping syntax check when no compiler is installed) for TypeScript, `node --check` over
@@ -170,7 +179,12 @@ them.
    `swift build --build-tests`, which compiles the package's own targets and its test targets alike; the
    compiler's canonical `path:line:column: severity: message` line and the module-level `error: message`
    line are both read, so a compile error is `BLOCKED` here too. Compiling the tests is deliberate: a
-   test that does not compile is a broken build rather than a test failure.
+   test that does not compile is a broken build rather than a test failure. Verilog is compiled by
+   Icarus the way any other language is built: `iverilog -g2012` over every source and testbench,
+   writing the compiled simulation into the run's artefact directory. Icarus prints diagnostics rather
+   than a report, so its parser reads the toolchain's own line shapes — `file.v:LINE: error:` and
+   `warning:`, the bare `file.v:LINE: syntax error`, the location-less `Elaboration failed` and the
+   preprocessor's missing-include line — and a compile error is `BLOCKED` here too.
 4. **tests** — stale reports are deleted, the suite is run, and results are parsed from the raw XML
    reports, not from console output. Rust has no XML report, so results are parsed from libtest's
    line protocol instead; the pairing of Cargo's two output streams is documented in the adapter. Go
@@ -203,7 +217,14 @@ them.
    `Test Case '-[Module.Class method]'` open and close lines and takes a failure's message from the
    compiler-style error line between them, which is where a generated test's counterexample line lands.
    A suite written with Swift Testing rather than XCTest is reported as carrying no readable case rather
-   than as a pass.
+   than as a pass. Verilog has no test framework at all, so like Swift it is read from the toolchain's
+   own output: each testbench is compiled with `iverilog -g2012 -s <testbench>` and simulated with
+   `vvp -N`, and the unit is the testbench rather than a case inside it, because the language gives a
+   caller no way to ask for one case of several. That is why one test case per testbench is reported,
+   under the testbench file's own name. A simulation is a failure when it exits non-zero, prints a
+   generated test's counterexample line, or prints a line opening with `FAIL`, `FAILED`, `ERROR` or
+   `ASSERTION FAILED`; one that runs to completion is a pass, and one that does not compile is an error
+   rather than a failing test.
 5. **static analysis** — compiler diagnostics plus the adapter's heuristic rule table. For C# that
    is the Roslyn diagnostics the build phase already produced, plus a C# rule table; for Kotlin it is
    a Kotlin rule table read through one scanner that knows the language's literals; for C and C++ it
@@ -217,7 +238,11 @@ them.
    literal-masked view of the same length so a match maps back to the line that produced it; for Swift it
    is a rule table read through one `SwiftSourceScan` that knows `//` and nestable `/* */` comments,
    ordinary strings with escapes and `\(…)` interpolation, `"""…"""` multi-line strings and `#"…"#` raw
-   strings with matching hash counts, and offers the same offset-aligned code and literal views.
+   strings with matching hash counts, and offers the same offset-aligned code and literal views. For
+   Verilog it is a rule table read through one literal-aware `VerilogSourceScan` that knows `//` and
+   `/* */` comments, string literals and the based-literal apostrophe (`4'b1010`, `8'hFF`), and offers
+   the same offset-aligned code and literal views. A testbench file is not analysed as design logic,
+   because a testbench is not the design.
 6. **security** — the same rule table, filtered to security rules, reported separately.
 7. **dependencies** — a resolved inventory per language, read from the lock file when there is one
    (`package-lock.json`, `poetry.lock`, `Cargo.lock`, `packages.lock.json`) or from the versions the
@@ -238,9 +263,11 @@ them.
    rather than reporting an empty one. For Swift the source is `Package.resolved`, in either of the two
    schemas SwiftPM writes, whose pins are queried as the `SwiftURL` ecosystem under the package's own
    location rather than a registry name; a package with only `Package.swift` resolves nothing, which is an
-   inventory of zero, and a pin with neither a version nor a revision is reported unresolved. Which
-   dependencies exist is a separate question from whether any of them has an advisory, and the report
-   answers the two separately.
+   inventory of zero, and a pin with neither a version nor a revision is reported unresolved. Verilog is
+   the one language here with no inventory at all: there is no package manager and no advisory ecosystem
+   for HDL, so the adapter declares no dependency capability and the phase reports that dependencies were
+   not analysed rather than an empty inventory. Which dependencies exist is a separate question from
+   whether any of them has an advisory, and the report answers the two separately.
 8. **coverage** — the adapter's coverage provider (JaCoCo for Java, coverage.py for Python,
    cargo-llvm-cov for Rust, `go test -coverprofile` for Go, V8 through LCOV for TypeScript and
    JavaScript, coverlet's cobertura report for C# and JaCoCo over the JVM bytecode Kotlin shares with
@@ -261,10 +288,13 @@ them.
    `swift test --enable-code-coverage`, `swift test --show-codecov-path` names the `codecov` JSON (with a
    scan of `.build` as a fallback), stale reports are cleared first, and the totals are summed over the
    project's own Swift files only, so a checked-out dependency, the generated test runner SwiftPM
-   instruments for itself, or XCTest itself is not counted.
+   instruments for itself, or XCTest itself is not counted. Verilog is the exception: Icarus Verilog
+   exports no coverage data, so the adapter claims no coverage capability and the phase reports coverage
+   as not measured rather than as zero. Verilator can export coverage, but this adapter does not drive
+   Verilator.
 9. **mutation** — the adapter's mutation tester (PIT for Java, a bounded AST mutator for Python, a
-   bounded source-operator mutator for Rust, Go, TypeScript, JavaScript, C#, Kotlin, C and C++, PHP and
-   Ruby), with stale reports deleted first. C# re-runs each mutant with `dotnet test --no-restore`;
+   bounded source-operator mutator for Rust, Go, TypeScript, JavaScript, C#, Kotlin, C and C++, PHP,
+   Ruby and Verilog), with stale reports deleted first. C# re-runs each mutant with `dotnet test --no-restore`;
    Kotlin re-runs the project's own test goal, because PIT's bytecode mutants do not map back to Kotlin
    source lines; C and C++ re-run each mutant through the platform shell, because CMake has no single
    invocation that builds and tests in one command, and decide viability by whether CTest reached its
@@ -276,7 +306,10 @@ them.
    load the project and a run that discovered no example are all excluded from the score rather than
    counted as killed. Swift re-runs each mutant through `swift test`, which is also what compiles it, and
    decides viability from whether the output shows a build failure with no XCTest case line at all, so a
-   mutant the compiler rejects is excluded rather than credited as a kill.
+   mutant the compiler rejects is excluded rather than credited as a kill. Verilog re-runs each mutant
+   through a shell pipeline that compiles every testbench and simulates it with `vvp -N`, stopping at
+   the first failure, and decides viability from whether Icarus printed an `error:`, a `syntax error` or
+   an `Elaboration failed`, so a mutant that does not compile is excluded rather than counted as a kill.
 10. **obligation planning** — scenarios declared by the user, properties derived from requirement
     text, or an explicit "nothing can be attempted here" obligation.
 11. **strategies** — per requirement: existing tests, static analysis, generated tests, mutation,
@@ -341,7 +374,10 @@ and it now names Ruby only for a tree the adapter does not claim, so a verified 
 described twice while one left unverified is still reported rather than dropped from the report.
 `SwiftLanguageDetector` declares the same for `swift`, so a Swift package the adapter verified is not
 described twice, and a tree with `.swift` files but no `Package.swift` — a CocoaPods project, say — is
-still recognised and reported as present and not verified.
+still recognised and reported as present and not verified. `VerilogLanguageDetector` declares the same
+for `verilog`, so a tree the adapter claimed is not described a second time as present and
+unverifiable; it still speaks for a classpath without the adapter, which is where recognition is the
+only thing CodeWitness can say about the tree.
 
 ## 4. The verdict rules, and why
 
@@ -421,13 +457,13 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
   requirement declares `paths:`/`tests:` explicitly. The extensions that count as source come from the
   adapter (`sourceExtensions`), so the same rule works for `.java` files, Python modules, Rust files,
   Go files, TypeScript files, JavaScript files, C# files, Kotlin files, C and C++ files, PHP files,
-  Ruby files and Swift files;
+  Ruby files, Swift files and Verilog files (`.v`, `.sv`, `.vh` and `.svh`);
   Go adds one refinement, because its tests
   live beside the code rather than in a separate tree, so only `*_test.go` files in a Go test tree are
   treated as tests;
 - a mutation location is mapped to its source file path, whether the tool reports a Java class name,
   a Python file, a Rust file, a Go file, a TypeScript file, a JavaScript file, a C# file, a Kotlin
-  file, a C or C++ file, a PHP file, a Ruby file or a Swift file;
+  file, a C or C++ file, a PHP file, a Ruby file, a Swift file or a Verilog file;
 - a test declared in a requirement is matched by the identifier the language's own report uses, which
   is why `RequirementCodeMapper` derives a .NET test class identifier as `<namespace>.<file stem>` —
   the shape of the TRX `className` — the same way it already special-cases Go and Node. PHP is the same
@@ -444,6 +480,9 @@ Mapping evidence to requirements is deliberately mechanical, so that a reader ca
   reports a case under `Module.Class`, the test target's module followed by the class, so the mapper
   derives the class from the file's own name and lets the simple-name fallback match the module prefix,
   which is also what lets a generated class whose module is recorded at run time be attributed;
+  Verilog is the simplest case of the same idea: the adapter reports a testbench under its file's own
+  name, so the mapper returns the testbench file's stem directly rather than relativising it against
+  the test root, which would produce an identifier the report never carries;
 - anything unmapped stays unmapped and the report says so. CodeWitness never silently attributes a
   passing test to a requirement it does not mention.
 
@@ -455,8 +494,8 @@ providers. The engine needs no change: it selects an adapter by asking each one 
 the project, and never switches on a language string. `codewitness-adapter-python`,
 `codewitness-adapter-rust`, `codewitness-adapter-go`, `codewitness-adapter-typescript`,
 `codewitness-adapter-javascript`, `codewitness-adapter-csharp`, `codewitness-adapter-kotlin`,
-`codewitness-adapter-cpp`, `codewitness-adapter-php`, `codewitness-adapter-ruby` and
-`codewitness-adapter-swift` are the worked
+`codewitness-adapter-cpp`, `codewitness-adapter-php`, `codewitness-adapter-ruby`,
+`codewitness-adapter-swift` and `codewitness-adapter-verilog` are the worked
 examples: each reuses the whole pipeline and adds only
 detection, tool providers and a generator. A language that shares a build tool with another one — Kotlin with Java, over Gradle and
 Maven — has to claim by *source language* as well as by build system, because two adapters claiming
@@ -471,7 +510,8 @@ A header names neither, because a header belongs to whichever language includes 
 `TestGenerator`, `GeneratedTestExecutor`) and register it in the composition root
 (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`, `GoAdapterBundle`,
 `TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle`, `KotlinAdapterBundle`,
-`CppAdapterBundle`, `PhpAdapterBundle`, `RubyAdapterBundle` and `SwiftAdapterBundle` are the examples).
+`CppAdapterBundle`, `PhpAdapterBundle`, `RubyAdapterBundle`, `SwiftAdapterBundle` and
+`VerilogAdapterBundle` are the examples).
 Registration is data, not code paths. A `TestRunner` or `GeneratedTestExecutor` may also implement the
 optional replay-command methods, which is how a language supplies a reproducible command without the
 core knowing how tests are invoked. PHP is also where a test runner turns out to be a project
@@ -482,7 +522,11 @@ same case with a different package manager: RSpec does not exist until `bundle i
 the project's bundle, so its runner is resolved after the build too. Swift is the opposite case: XCTest
 ships with the toolchain, so its runner resolves nothing beyond the `swift` driver the build already
 drove, and the only thing it has to read is the runner's own console, because XCTest gives a
-command-line caller no structured report.
+command-line caller no structured report. Verilog is the case where a test is two processes: the test
+runner compiles a testbench with `iverilog` and then simulates it with `vvp`, so it carries the
+two-step replay recipe itself, because the core has no single command to ask for. Its generated-test
+executor does the same for a generated testbench, and its mutation tester wraps the pair in one shell
+command per mutant, which is the shape the shared mutator's one-command-per-mutant loop accepts.
 
 **Another verification strategy.** Implement `VerificationStrategy`. It receives the context, the
 requirement and its obligations, and returns evidence plus per-obligation outcomes. It cannot assign
@@ -500,7 +544,8 @@ security boundary.
 A run records everything needed to reproduce it: project identifier, source revision, CodeWitness
 version, runtime version (Java, Python, Rust, Go, Node for TypeScript and JavaScript, the .NET SDK for
 C#, the Kotlin release for Kotlin, the CMake release for C and C++, the PHP release for PHP, the Ruby
-release for Ruby, or the Swift release for Swift), build tool and version, configuration fingerprint,
+release for Ruby, the Swift release for Swift, or the Icarus Verilog release for Verilog), build tool
+and version, configuration fingerprint,
 tool versions, language model
 identifier,
 requirements hash, isolation level, timestamps, and every command. Run data is kept
@@ -523,8 +568,9 @@ reports live in the artifact store on disk, not in the database.
   Go scenario into a `_test.go` file, rendering a JavaScript scenario into a plain `node:test` module,
   rendering a C# scenario into an xUnit class in a project that compiles and rendering a C++ scenario
   into a self-contained program with its compile and link commands, a PHP scenario into a PHPUnit
-  `TestCase` class, a Ruby scenario into an RSpec spec file, and a Swift scenario into an XCTest class
-  whose generated methods carry the `test` prefix XCTest discovers by). The Kotlin generator's
+  `TestCase` class, a Ruby scenario into an RSpec spec file, a Swift scenario into an XCTest class
+  whose generated methods carry the `test` prefix XCTest discovers by, and a Verilog scenario into a
+  testbench module that instantiates the design under test). The Kotlin generator's
   output is proved by the end-to-end test instead, which compiles and runs it with the real compiler
   rather than putting a second Kotlin compiler on a unit test classpath; the C++ generator's output is
   proved the same way, by compiling it with the compiler the fixture's own build records.
@@ -536,7 +582,7 @@ reports live in the artifact store on disk, not in the database.
   report whose failing example carries the counterexample line in its `exception.message`.
 - **End-to-end tests** (`-Pe2e`) run `./codewitness verify` against the fixture projects and assert the
   verdicts, the counterexample contents and the exit codes. The Java, Python, Rust, Go, TypeScript,
-  JavaScript, C#, Kotlin, C/C++, PHP, Ruby and Swift fixtures are all covered; the Python one uses only the
+  JavaScript, C#, Kotlin, C/C++, PHP, Ruby, Swift and Verilog fixtures are all covered; the Python one uses only the
   standard library, the Rust
   one and the Go one have no dependencies and the TypeScript and JavaScript ones have no packages, so
   each needs an interpreter, a toolchain, the `go` tool or a Node runtime and nothing else. The C# one
@@ -556,7 +602,10 @@ reports live in the artifact store on disk, not in the database.
   fixture's sandbox config allows network and why the continuous-integration job warms its bundle first.
   The Swift fixture is the one that needs neither a package manager nor the network: XCTest ships with
   the Swift toolchain and the package declares no dependencies, so the build, tests, coverage and
-  mutation all run offline against the toolchain the machine already has.
+  mutation all run offline against the toolchain the machine already has. The Verilog fixture is the
+  same case on the toolchain side: `iverilog` and `vvp` ship together as one simulator and the tree
+  declares no dependencies, so the build, testbenches and mutation run offline against the toolchain
+  the machine already has, with no coverage figure to collect because Icarus exports none.
 - **Fixtures** are projects with known defects — off-by-one boundaries, null handling, concurrency,
   security, weak tests, and a requirement that cannot be verified at all — used to prove that
   CodeWitness distinguishes them, in more than one language.

@@ -39,10 +39,14 @@ change has to respect.
 - A Swift toolchain on `PATH` for the Swift adapter and its end-to-end fixture (the fixture is a Swift
   package with no external dependencies, and XCTest ships with the toolchain, so nothing has to be
   resolved and the fixture's sandbox forbids the network)
+- Icarus Verilog 12.0 or newer on `PATH` for the Verilog and SystemVerilog adapter and its end-to-end
+  fixture (`iverilog` compiles and `vvp` simulates; the fixture is a combinational design with no
+  manifest and no dependencies, so nothing has to be resolved and the fixture's sandbox forbids the
+  network)
 - Network access for the first build (dependencies) and for the end-to-end tests, except the C#
-  fixture, the C/C++ fixture and the Swift fixture, which need none, and the PHP and Ruby fixtures,
-  which need it until their `vendor/` directory or bundle exists, because PHPUnit and RSpec are
-  package-manager dependencies rather than part of the toolchain
+  fixture, the C/C++ fixture, the Swift fixture and the Verilog fixture, which need none, and the PHP
+  and Ruby fixtures, which need it until their `vendor/` directory or bundle exists, because PHPUnit and
+  RSpec are package-manager dependencies rather than part of the toolchain
 
 ## Build and test
 
@@ -105,9 +109,10 @@ To add one:
    `fixtures/kotlin-withdrawal-ledger` (Kotlin, `pom.xml` with `kotlin-maven-plugin`, `kotlin.test`/
    JUnit 5), `fixtures/cpp-withdrawal-ledger` (C++, `CMakeLists.txt`, `ctest`),
    `fixtures/php-withdrawal-ledger` (PHP, `composer.json`, `phpunit.xml`, PHPUnit),
-   `fixtures/ruby-withdrawal-ledger` (Ruby, `Gemfile`, RSpec) or
-   `fixtures/swift-withdrawal-ledger` (Swift, `Package.swift`, XCTest). Keep at least
-   one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
+   `fixtures/ruby-withdrawal-ledger` (Ruby, `Gemfile`, RSpec),
+   `fixtures/swift-withdrawal-ledger` (Swift, `Package.swift`, XCTest) or
+   `fixtures/verilog-withdrawal-ledger` (Verilog, no manifest, Icarus Verilog `iverilog`/`vvp`). Keep
+   at least one Java fixture on an older release (currently `correct-implementation` on Java 17) so the
    adapter's "Java 17+" claim stays exercised against real bytecode.
 2. Introduce **one** defect, and state it in a comment at the top of the class — the comment is part
    of the fixture's contract.
@@ -129,8 +134,9 @@ To add one:
 3. Implement the tool providers you need from `VerificationTools` and register them where the CLI
    wires everything (`JavaAdapterBundle`, `PythonAdapterBundle`, `RustAdapterBundle`,
    `GoAdapterBundle`, `TypeScriptAdapterBundle`, `JavaScriptAdapterBundle`, `CSharpAdapterBundle`,
-   `KotlinAdapterBundle`, `CppAdapterBundle`, `PhpAdapterBundle`, `RubyAdapterBundle` and
-   `SwiftAdapterBundle` are the worked
+   `KotlinAdapterBundle`, `CppAdapterBundle`, `PhpAdapterBundle`, `RubyAdapterBundle`,
+   `SwiftAdapterBundle` and
+   `VerilogAdapterBundle` are the worked
    examples). Two languages can share a
    build tool — Kotlin and Java both use Gradle and Maven — so a provider has to select on the
    project's *language* as well as on its build system, or both adapters answer for one tree. The
@@ -142,7 +148,9 @@ To add one:
    manager: RSpec arrives from RubyGems through `bundle install`, so a `TestRunner` must resolve it after
    the build too and report "no test runner" rather than a suite of zero when there is none. Swift is
    the opposite case: XCTest ships with the toolchain, so its `TestRunner` resolves nothing beyond the
-   `swift` driver the build already drove. If your
+   `swift` driver the build already drove. Verilog is the case where a test is two processes rather than
+   one: `iverilog` compiles and `vvp` simulates, so the adapter reports one case per testbench instead
+   of a case-level protocol and its replay recipe is the compile-then-simulate pair. If your
    tests are invoked in a way the core cannot guess, override the optional replay-command methods so a
    counterexample carries a command that actually runs.
 4. Answer the advisory hook on the `DependencyAnalyzer` your adapter registers. Declare
@@ -156,7 +164,9 @@ To add one:
    explicitly — the registry holds the wrapper, so an inherited default would answer "no ecosystem" and
    the recipe would silently lose its hint.
 5. Add `src/main/resources/META-INF/services/dev.codewitness.core.spi.LanguageAdapter` containing the
-   adapter class name.
+   adapter class name. Every shipped adapter carries one, Verilog's included: it is the entry the
+   service loader reads and the file the shade plugin merges into the CLI jar, so without it the
+   adapter's classes are on the classpath and still never run.
 6. Do not add anything language specific to `codewitness-core`. If you believe the core must change,
    say so in the pull request instead of changing it — an engine that grows a language branch is an
    engine that can no longer claim to be language independent. Declaring the file extensions your
@@ -213,8 +223,9 @@ outcomes. You cannot assign a verdict; the engine does that from your evidence. 
       and R-002 as `VERIFIED`, and `./codewitness verify fixtures/rust-withdrawal-ledger`,
       `fixtures/go-withdrawal-ledger`, `fixtures/typescript-withdrawal-ledger`,
       `fixtures/javascript-withdrawal-ledger`, `fixtures/csharp-withdrawal-ledger`,
-      `fixtures/kotlin-withdrawal-ledger`, `fixtures/cpp-withdrawal-ledger` and
-      `fixtures/php-withdrawal-ledger` still report R-001 and
+      `fixtures/kotlin-withdrawal-ledger`, `fixtures/cpp-withdrawal-ledger`,
+      `fixtures/php-withdrawal-ledger`, `fixtures/ruby-withdrawal-ledger`,
+      `fixtures/swift-withdrawal-ledger` and `fixtures/verilog-withdrawal-ledger` still report R-001 and
       R-003 as `FAILED`, R-002 as `VERIFIED` and R-004 as `UNVERIFIED`.
 - [ ] No `.codewitness` run data, build output or generated test sources are committed.
 - [ ] The README's "honest status" section still describes what the tool actually does.

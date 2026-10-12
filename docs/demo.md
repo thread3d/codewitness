@@ -17,14 +17,16 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ```
 
 The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin,
-C/C++, PHP, Ruby and Swift fixtures at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for
-TypeScript, 18.17+ for JavaScript), the .NET SDK (8+), Maven with network access the first time, CMake
-with CTest, an interpreter with Composer, an interpreter with Bundler and a Swift toolchain
-respectively, and nothing
+C/C++, PHP, Ruby, Swift and Verilog fixtures at the end need Python 3, Cargo, the `go` tool, a Node
+runtime (22.6+ for TypeScript, 18.17+ for JavaScript), the .NET SDK (8+), Maven with network access the
+first time, CMake with CTest, an interpreter with Composer, an interpreter with Bundler, a Swift
+toolchain and Icarus Verilog (`iverilog` and `vvp`) respectively, and nothing
 else: the Kotlin section is a Maven build, so `kotlinc` and the standard library arrive as dependencies,
 the C and C++ section fetches no package at all, the PHP and Ruby sections' PHPUnit and RSpec arrive
-from Packagist and RubyGems as dependencies rather than as part of the toolchain, and the Swift section's
-XCTest ships with the toolchain and the package declares no dependencies, so it runs offline.
+from Packagist and RubyGems as dependencies rather than as part of the toolchain, the Swift section's
+XCTest ships with the toolchain and the package declares no dependencies, so it runs offline, and the
+Verilog section's Icarus compiler and simulator come from the machine and compile and simulate a
+combinational design with the network forbidden.
 
 ## 1. What is in the project?
 
@@ -720,3 +722,67 @@ scenario, so it stays `UNVERIFIED`. The limit to know before pointing this at a 
 adapter drives Swift Package Manager and nothing else: a tree with `.swift` files but no `Package.swift`
 is recognised and reported as present and not verified, and a suite written with Swift Testing rather
 than XCTest is reported as having no readable case rather than quietly passing.
+
+## 19. The same thing for Verilog
+
+The Verilog fixture is the same ledger once more, this time as a combinational module with a testbench.
+It needs only Icarus Verilog: the design has no manifest and no dependencies, so the sandbox forbids the
+network and the run compiles, simulates and mutates without fetching anything.
+
+```bash
+./codewitness verify fixtures/verilog-withdrawal-ledger \
+    --requirements fixtures/verilog-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001  An accepted withdrawal reduces the balance by exactly the amount  FAILED
+  ✓ R-002  An over-limit withdrawal is rejected                              VERIFIED
+  ✗ R-003  A withdrawal of exactly the balance is accepted                   FAILED
+  ? R-004  The balance never goes negative                                   UNVERIFIED
+
+Counterexamples
+  cw_sc_SC_DEBIT_OB_001  R-001  inputs: {balance=100000, amount=1}
+                                expected: accepted == 1 && new_balance == balance - amount
+                                actual: 100000
+  cw_sc_SC_EXACT_OB_001  R-003  inputs: {balance=100000, amount=100000}
+                                expected: accepted == 1 && new_balance == 0
+                                actual: 100000
+
+Tests
+  1 executed, 1 passed, 0 failed, 0 skipped  (ledger_tb, the project's own testbench)
+
+Coverage
+  coverage not measured (Icarus Verilog exports no coverage data)
+
+Mutation testing
+  3 mutants, 0 killed, 3 survived, score 0.0%
+```
+
+The run exits 1, because a requirement failed. R-002 is discharged by an executed generated testbench,
+which is the only path to `VERIFIED`; R-004 declares no scenario, so it stays `UNVERIFIED` for the
+honest reason rather than counting a passing build as evidence. Dependencies are not analysed: Verilog
+has no package manager and there is no advisory ecosystem for HDL, so the phase has no inventory to read
+and consults no source.
+
+The scenario fragments are Verilog. `${name}` becomes the bare signal `name`, `setup` is Verilog
+statements run once per case, and each step's `call` is a Verilog statement — the fixture's ledger is
+combinational, so a step's `call` is the empty statement `;` and the declared inputs are the whole
+invocation. The generator instantiates the design under test as `dut`, drives the inputs at the design's
+own port widths, assigns `observation` to a 64-bit register after a `#1` delay so the combinational
+logic has settled, and checks `invariant` as a plain Verilog boolean expression — in the fixture,
+`dut.accepted == 1 && observation == balance - amount`. Boundary values come from `values` and
+`range.min`/`range.max`, and `sequence` and `concurrent` modes add a seeded `$urandom_range` search when
+the scenario declares a non-negative range. A failing case prints the same
+`CODEWITNESS_COUNTEREXAMPLE|…` line every other adapter uses, and the testbench calls `$fatal` once at
+the end, so the simulation exits non-zero and the engine records a failure.
+
+Existing tests are testbenches. Verilog has no case-level test protocol, so each testbench is reported as
+a single test case under the file's own name, which is why the fixture's own `ledger_tb` is one executed
+test — it passes because it checks only the rejected branch, which is the point of the fixture. A
+Verilog test is two processes, `iverilog` to compile and `vvp` to simulate, so there is no single test
+command and a counterexample's reproduction is the compile-then-simulate pair. The limit to know before
+pointing this at a real project is that the adapter drives Icarus and nothing else: `.v` and `.sv` files
+are the same language to `iverilog -g2012`, a tree with sources but no testbench is still built and
+analysed with its requirements left `UNVERIFIED`, and a design that does not compile is reported as
+`BLOCKED` rather than as incorrect code.

@@ -64,7 +64,13 @@ public final class WorkspaceManager {
             // checkout that wrote them, so a copy would carry a stale build into the isolated workspace
             // and the adapter's `swift build` restores them for itself. DerivedData is Xcode's equivalent
             // for a tree opened in the IDE.
-            ".build", ".swiftpm", "DerivedData");
+            ".build", ".swiftpm", "DerivedData",
+            // Verilator's scratch tree, obj_dir, holds the generated C++ it compiles the design into;
+            // it is keyed to the machine and the design it was generated from, so a copy would carry a
+            // stale build into the isolated workspace. Icarus Verilog writes its compiled simulation
+            // and any waveform dump as plain files rather than into a directory, and the adapter deletes
+            // each one it creates, so no other exclusion is needed for the toolchain this adapter drives.
+            "obj_dir");
 
     private static boolean isExcludedDirectory(String name) {
         return EXCLUDED_DIRECTORIES.contains(name) || name.endsWith(".egg-info");

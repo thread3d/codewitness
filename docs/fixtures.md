@@ -23,6 +23,7 @@ not install a `codewitness` command on `PATH`.
 | `php-withdrawal-ledger` | PHP: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language whose test tool is a Composer dependency rather than part of the toolchain: detection from the Composer manifest and the PHPUnit configuration, a build that is the interpreter's own parse followed by `composer install`, PHPUnit with JUnit parsing, scenario-generated PHPUnit `TestCase` classes written into the tree's own test root, counterexamples with a real PHPUnit replay command, coverage reported as not measured when no Xdebug or PCOV driver is loaded, and bounded source mutation — with nothing installed beyond the interpreter and Composer. |
 | `ruby-withdrawal-ledger` | Ruby: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language whose test tool is a Bundler dependency rather than part of the toolchain: detection from the `Gemfile` and the RSpec conventions, a build that is the interpreter's own parse followed by `bundle install`, RSpec with JSON parsing, scenario-generated RSpec specs written into the tree's own `spec/` root, counterexamples with a real `bundle exec rspec` replay command, coverage reported as not measured because the fixture does not load SimpleCov, and bounded source mutation — with nothing installed beyond the interpreter and Bundler. |
 | `swift-withdrawal-ledger` | Swift: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language whose build system and test runner both ship with the toolchain: detection from `Package.swift`, `swift build --build-tests` with swiftc diagnostics parsed from the compiler's own lines, `swift test` with XCTest results read from the runner's console, scenario-generated XCTest classes written into the tree's own test target, counterexamples with a real `swift test --filter` replay command, LLVM coverage from SwiftPM's own export, and bounded source mutation — with no package resolved and no network needed. |
+| `verilog-withdrawal-ledger` | Verilog: an accepted withdrawal adds one cent back, and a withdrawal of exactly the balance is rejected | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a hardware description language with no package manager and no manifest: detection from `.v`/`.sv` sources, an Icarus `iverilog -g2012` build, one test case per testbench simulated with `vvp -N`, scenario-generated testbenches that instantiate the design under test as `dut`, counterexamples whose inputs are signal values, and bounded source mutation — with coverage and dependencies both declared not measured, because Icarus exports no coverage and HDL has no advisory ecosystem. |
 | `polyglot-service` | six languages in one directory, plus a `mix.exs` for Elixir that nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
@@ -587,6 +588,70 @@ Swift Package Manager is driven: a tree with `.swift` files but no `Package.swif
 project, say — is recognised and reported as present and not verified rather than built by a guess at
 its commands.
 
+### `verilog-withdrawal-ledger`
+
+The Verilog counterpart of the Swift fixture: a combinational `ledger` module whose `balance` and
+`amount` inputs are integer cents and whose `accepted` and `new_balance` outputs carry the result. It
+holds the same two kinds of defect. R-001 is a one-cent drift — an accepted withdrawal computes
+`new_balance = balance - amount + 32'd1`, so it returns one cent too much — and R-003 is a boundary
+defect: the comparison is `<` rather than `<=`, so a withdrawal of exactly the balance is rejected
+instead of emptying the account. R-002, the rejected branch, is implemented correctly. The project's own
+testbench `tb/ledger_tb.v` passes, which is the point: it checks only R-002 and never the boundary where
+the defects live.
+
+The fixture is `rtl/ledger.v`, `tb/ledger_tb.v`, `requirements.md` and its own `codewitness.yaml`.
+Verilog has no package manager and no manifest, so there is nothing to declare and nothing to resolve;
+the whole run is driven by Icarus Verilog, and the sandbox forbids the network because a combinational
+design fetches nothing.
+
+```text
+Requirements
+  ✗ R-001  An accepted withdrawal reduces the balance by exactly the amount  FAILED
+  ✓ R-002  An over-limit withdrawal is rejected                              VERIFIED
+  ✗ R-003  A withdrawal of exactly the balance is accepted                   FAILED
+  ? R-004  The balance never goes negative                                   UNVERIFIED
+
+Counterexamples
+  R-001  inputs: {balance=100000, amount=1}       expected: accepted == 1 && new_balance == balance - amount
+  R-003  inputs: {balance=100000, amount=100000}  expected: accepted == 1 && new_balance == 0
+
+Coverage:         not measured (Icarus Verilog exports no coverage data)
+Mutation testing: 3 mutants, 0 killed, 3 survived  (verilog-text)
+```
+
+R-001 and R-003 fail through generated testbench modules written under `generated-tests/`, one per
+scenario, each instantiating the design under test as `dut` and driving the declared inputs; R-002 is
+discharged by an executed generated test, which is the only path to `VERIFIED`; R-004 declares no
+scenario and stays `UNVERIFIED`.
+
+The generated-test shape is Verilog-specific in three ways worth knowing. First, Verilog has no
+case-level test protocol, so the run reports **one test case per testbench**, under the testbench file's
+own name, rather than one case per generated input combination. Second, the generated module declares
+the scenario's inputs at the design's own port widths — or `reg [63:0]` when a name is not a port —
+assigns `observation` to a 64-bit register after a `#1` delay so a combinational design has settled,
+and checks `invariant` as a plain Verilog boolean expression. Third, a failing case prints the shared
+`CODEWITNESS_COUNTEREXAMPLE|…` line and the testbench calls `$fatal` once at the end, so the simulation
+exits non-zero and the failing case is recorded, rather than a simulation that runs to completion.
+
+A Verilog test is two processes, compile then simulate, so there is no single command to replay: the
+counterexample's reproduction command compiles the kept generated testbench together with the project
+and runs it with `vvp -N`. Mutation runs through the shared `TextMutator` with a `VerilogLexis` and one
+shell pipeline per mutant that compiles every testbench and stops at the first failure. It generates
+three mutants, kills none and reports three survivors, because the fixture's own testbench exercises
+only the rejected branch: the defects the scenarios find are exactly the ones no test the project ships
+distinguishes from correct code.
+
+Coverage is reported as not measured, because Icarus Verilog exports no coverage data and the adapter
+does not drive Verilator. Dependencies are reported as not analysed, because Verilog has no package
+manager and there is no advisory ecosystem for HDL, so the phase has no inventory to read and consults
+no source rather than reporting a clean result it cannot support.
+
+The fixture needs Icarus Verilog 12.0 or newer and nothing else: `iverilog` compiles and `vvp`
+simulates, both come from the machine, and `-g2012` and the `$fatal` exit-code behaviour the adapter
+relies on are present in 12.0. The end-to-end test skips itself when either executable is absent, and CI
+installs `iverilog` (which brings `vvp`) and asserts both, so the Verilog path is exercised rather than
+silently skipped.
+
 ### `polyglot-service`
 
 One directory holding six languages' projects and a `mix.exs`: a Maven project, a Python package with a
@@ -730,6 +795,7 @@ with the `./codewitness` launcher:
 ./codewitness verify fixtures/php-withdrawal-ledger --requirements fixtures/php-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/ruby-withdrawal-ledger --requirements fixtures/ruby-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/swift-withdrawal-ledger --requirements fixtures/swift-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/verilog-withdrawal-ledger --requirements fixtures/verilog-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 

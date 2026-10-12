@@ -50,7 +50,7 @@ jobs:
       # Java fixture, Python 3, Cargo, `go`, Node for the others (Node 22.18+ for TypeScript, where
       # type stripping is on by default, and 18.17+ for JavaScript), the .NET SDK for the C# fixture,
       # CMake for the C and C++ one, PHP with Composer for the PHP one, Ruby with Bundler for the
-      # Ruby one, and Swift for the Swift one.
+      # Ruby one, Swift for the Swift one, and Icarus Verilog for the Verilog one.
       # The Kotlin, PHP and Ruby fixtures are the ones whose test tool is not part of the language
       # toolchain - Kotlin's compiler and Surefire, PHP's PHPUnit and Ruby's RSpec are all resolved as
       # dependencies - so all three are warmed below, and all three need the network this job already has.
@@ -59,6 +59,10 @@ jobs:
       # itself comes from the runner image, like CMake and CTest, and is asserted below rather than
       # installed: the image's Swift 6.x satisfies the fixture's 5.9 tools version, and a silently
       # substituted toolchain is what the assertion makes visible.
+      # Verilog is the same shape as Swift: Icarus Verilog is a compiler and a simulator in one
+      # package, and the fixture has no dependencies to resolve, so nothing is warmed for it. Unlike
+      # Swift it is not on the runner image - Ubuntu 24.04 ships neither iverilog nor verilator - so
+      # the package is installed in its own step below and asserted with the rest.
       # Each end-to-end test skips itself (a JUnit assumption) when its toolchain is absent, so a missing
       # tool produces a green build with those languages never having run. Installing each one here, then
       # asserting it below, is what keeps that from happening silently.
@@ -129,6 +133,16 @@ jobs:
         with:
           ruby-version: '4.0'
 
+      # Icarus Verilog is what the Verilog fixture drives: `iverilog` compiles a testbench and `vvp`
+      # simulates it. Ubuntu 24.04 ships neither simulator, so the package is installed here. The
+      # adapter relies on `-g2012` (the SystemVerilog dialect flag) and on `$fatal` making `vvp` exit
+      # non-zero; both are present in the distribution's 12.0, and the version floor is asserted below
+      # rather than trusted, like every other toolchain in this job.
+      - name: Set up Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+
       # CMake and the CTest that ships with it are what the C and C++ fixture drives, and they come from
       # the runner image rather than from an action. The version is therefore asserted in the step below
       # instead of trusted: the test phase reads the JUnit report `ctest --output-junit` writes, and that
@@ -197,6 +211,13 @@ jobs:
           # the 6.x line the image ships satisfies it. Asserted rather than trusted for the same reason
           # every other toolchain here is: a silently substituted compiler must be visible.
           swift --version | grep -qE 'Swift version (5\.(9|[1-9][0-9])|[6-9]\.|[1-9][0-9]+\.)'
+          iverilog -V
+          vvp -V
+          # 12.0 is the distribution's Icarus release and the floor for -g2012 and for $fatal making
+          # vvp exit non-zero, which the build, the test phase and every mutant depend on. A missing
+          # simulator would otherwise make the Verilog end-to-end test skip itself silently. grep reads
+          # the whole output rather than piping through head, which would risk a SIGPIPE under pipefail.
+          iverilog -V | grep -qE 'Icarus Verilog version (1[2-9]|[2-9][0-9])\.'
 
       # Unit and integration tests. Surefire excludes the `e2e` group by default (pom.xml:
       # excluded.groups), so this is the fast suite.
@@ -205,6 +226,6 @@ jobs:
 
       # The end-to-end suite, opt-in through the `e2e` profile, which clears excluded.groups. It
       # builds the fixture projects with real Maven, Python, Cargo, Go, Node, .NET, CMake, Composer,
-      # Bundler and Swift runs.
+      # Bundler, Swift and Icarus Verilog runs.
       - name: End-to-end tests (fixture projects)
         run: ./mvnw -B -Pe2e test

@@ -82,6 +82,24 @@ public record LanguageId(String id) {
      */
     public static final LanguageId SWIFT = new LanguageId("swift");
     /**
+     * Verilog, and the SystemVerilog dialect of it, compiled by Icarus Verilog and simulated with
+     * {@code vvp}.
+     *
+     * <p>One identifier covers Verilog and SystemVerilog because one toolchain does: {@code iverilog}
+     * accepts both from the same command line ({@code -g2012} selects the SystemVerilog dialect), they
+     * share a source-file vocabulary ({@code .v} and {@code .sv} are the same language to the
+     * compiler), a testbench, a simulator and a simulator's output. The adapter reports the extensions
+     * it found so that a report says which of the two a tree actually holds. The language is named for
+     * the language and not for the tool, exactly as {@link #CPP} is not called {@code cmake}: the build
+     * system is reported separately as {@link BuildSystemId#ICARUS}.
+     *
+     * <p>Verilog is not a software language with a runtime: its unit of execution is a testbench, a
+     * top-level module with no ports that drives the design and calls {@code $finish}. The compile is
+     * a real first failure - a file the compiler rejects is BLOCKED, not a code defect - and the
+     * simulation is the test.
+     */
+    public static final LanguageId VERILOG = new LanguageId("verilog");
+    /**
      * More than one language, verified together because more than one adapter claimed part of the
      * project. Reported instead of silently naming whichever language happened to be inspected first.
      */

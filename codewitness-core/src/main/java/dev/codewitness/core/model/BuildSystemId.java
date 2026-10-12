@@ -66,6 +66,18 @@ public record BuildSystemId(String id) {
      * have several toolchains selected through {@code swiftly}, Xcode or {@code PATH}.
      */
     public static final BuildSystemId SWIFTPM = new BuildSystemId("swiftpm");
+    /**
+     * Icarus Verilog, driven by {@code iverilog} for the compile and {@code vvp} for the simulation.
+     *
+     * <p>Verilog has no package manager and no manifest: a project is a set of source files plus one
+     * or more testbenches, and the only build descriptor the toolchain itself defines is the file list
+     * ({@code -f}), which this adapter reads but does not require. Icarus Verilog is the reference
+     * open-source simulator and is what a Verilog tree can be built and simulated with on a machine
+     * that has nothing else, so it is the toolchain this build system names. The {@code iverilog}
+     * executable is recorded in the project attributes rather than encoded here, because a machine may
+     * carry several builds or select one through {@code PATH}.
+     */
+    public static final BuildSystemId ICARUS = new BuildSystemId("icarus");
     public static final BuildSystemId NONE = new BuildSystemId("none");
     /** More than one build system, because more than one language adapter claimed part of the project. */
     public static final BuildSystemId POLYGLOT = new BuildSystemId("polyglot");

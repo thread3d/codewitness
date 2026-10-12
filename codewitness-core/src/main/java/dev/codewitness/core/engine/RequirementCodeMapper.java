@@ -197,6 +197,14 @@ public final class RequirementCodeMapper {
             // by the convention every PHP project follows, so reading the file's namespace is enough.
             return phpClassName(file, stripExtension(fileName));
         }
+        if (extension.equals("v") || extension.equals("sv") || extension.equals("vh") || extension.equals("svh")) {
+            // The Verilog adapter reports a testbench under its file's own name: a testbench is the
+            // unit of execution, and the module it declares is named after the file by the convention
+            // every Verilog project follows. Relativising against the test root would produce
+            // `tb.ledger_tb`, which the report never carries, and the simple-name fallback would then
+            // have to stand in for a fact the mapper can read directly.
+            return stripExtension(fileName);
+        }
         if (extension.equals("swift")) {
             // XCTest reports a case under `Module.ClassName`: the test target's module name, a dot, and
             // the class that declares the case. The class is the file's own name by the convention every

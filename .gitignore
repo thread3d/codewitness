@@ -62,6 +62,17 @@ fixtures/**/.build/
 fixtures/**/.swiftpm/
 fixtures/**/DerivedData/
 
+# Icarus Verilog's build output. The adapter writes its compiled simulation inside the run's artefact
+# directory, but a developer who runs `iverilog`/`vvp` in a fixture by hand writes `a.out` (Icarus's
+# default output name when no -o is given), a `.vvp` simulation and a `.vcd`/`.fst` waveform into the
+# tree. Verilator's scratch tree, obj_dir, and its coverage data are the same kind of thing. Nothing
+# here is a source file: a Verilog project is source, testbenches and at most a file list.
+fixtures/**/a.out
+fixtures/**/*.vvp
+fixtures/**/*.vcd
+fixtures/**/*.fst
+fixtures/**/obj_dir/
+
 # CodeWitness run data produced inside the repository
 .codewitness/
 **/.codewitness/

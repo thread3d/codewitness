@@ -236,6 +236,46 @@ abstract class EndToEndSupport {
         return findExecutable(executable);
     }
 
+    /**
+     * Skips the test when no Icarus Verilog toolchain is available, instead of failing spuriously.
+     *
+     * <p>Verilog is the one adapter whose toolchain is two programs: {@code iverilog} compiles a
+     * testbench and {@code vvp} simulates it. Both are looked for the way the adapter looks for them:
+     * the override variable first, then {@code PATH}. Either one missing means the fixture cannot be
+     * compiled or simulated at all.
+     */
+    static void assumeVerilogAvailable() {
+        Assumptions.assumeTrue(findVerilog() != null,
+                "no iverilog executable on PATH or in IVERILOG: Verilog end-to-end verification cannot run");
+        Assumptions.assumeTrue(findVvp() != null,
+                "no vvp executable on PATH or in VVP: Verilog end-to-end verification cannot run");
+    }
+
+    /** @return the {@code iverilog} executable, or {@code null} when none can be found. */
+    static String findVerilog() {
+        return findVerilogTool("IVERILOG", "iverilog");
+    }
+
+    /** @return the {@code vvp} executable, or {@code null} when none can be found. */
+    static String findVvp() {
+        return findVerilogTool("VVP", "vvp");
+    }
+
+    private static String findVerilogTool(String variable, String name) {
+        String executable = isWindows() ? name + ".exe" : name;
+        String configured = System.getenv(variable);
+        if (configured != null && !configured.isBlank() && Files.isExecutable(Path.of(configured))) {
+            return configured;
+        }
+        for (String directory : List.of("/usr/local/bin", "/opt/homebrew/bin", "/usr/bin")) {
+            Path candidate = Path.of(directory, executable);
+            if (Files.isExecutable(candidate)) {
+                return candidate.toString();
+            }
+        }
+        return findExecutable(executable);
+    }
+
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }

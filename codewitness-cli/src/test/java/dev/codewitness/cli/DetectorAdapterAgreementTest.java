@@ -47,6 +47,8 @@ class DetectorAdapterAgreementTest {
                 "the PHP adapter must be on the classpath of the CLI: " + adapters.ids());
         assertTrue(adapters.ids().contains("swift"),
                 "the Swift adapter must be on the classpath of the CLI: " + adapters.ids());
+        assertTrue(adapters.ids().contains("verilog"),
+                "the Verilog adapter must be on the classpath of the CLI: " + adapters.ids());
 
         for (LanguageDetector detector : detectors.all()) {
             detector.verifiedAsAdapterLanguage().ifPresent(language -> assertTrue(
@@ -182,6 +184,30 @@ class DetectorAdapterAgreementTest {
                 .map(LanguageDetectorRegistry.Detection::displayName).toList();
         assertTrue(uncovered.contains("Swift"),
                 "a Swift tree the adapter does not claim is still named: " + uncovered);
+    }
+
+    @Test
+    @DisplayName("a Verilog design is verified, and a Verilog tree with no adapter is still reported as unverifiable")
+    void verilogIsNotReportedTwice(@TempDir Path project) throws IOException {
+        write(project, "rtl/ledger.v", """
+                module ledger (input wire a, output reg y);
+                  always @(*) y = a;
+                endmodule
+                """);
+        LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
+
+        List<String> covered = detectors.detect(project, Set.of(LanguageId.VERILOG)).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(covered.isEmpty(),
+                "the adapter claimed this tree, so nothing about it is unverifiable: " + covered);
+
+        // The adapter claims any tree that holds a Verilog source, so a Verilog tree the adapter does not
+        // claim is one where the adapter is absent from the classpath. With nothing in the covered set,
+        // the detector must still name the language, which is what keeping it registered is for.
+        List<String> uncovered = detectors.detect(project, Set.of()).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(uncovered.contains("Verilog"),
+                "a Verilog tree no adapter claimed is still named: " + uncovered);
     }
 
     private static void write(Path base, String relative, String content) throws IOException {        Path file = base.resolve(relative);

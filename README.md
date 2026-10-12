@@ -124,6 +124,12 @@ or a Swift package:
 ./codewitness verify ./my-swift-package --requirements requirements.md
 ```
 
+or a Verilog project:
+
+```bash
+./codewitness verify ./my-verilog-project --requirements requirements.md
+```
+
 The language is detected, and a project may be written in several. `LanguageAdapterRegistry.selectAll`
 runs **every** adapter that claims part of the tree — a Java service with a TypeScript frontend is two
 verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
@@ -143,7 +149,7 @@ that is not there. Recognition comes from `LanguageDetector` implementations dis
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
 `language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp`, `kotlin`,
-`cpp`, `php`, `ruby` or `swift`
+`cpp`, `php`, `ruby`, `swift` or `verilog`
 *narrows* the run
 to that one adapter instead of being merged with the automatic choice. It is not forced: the named adapter
 is used when it exists and actually claims the project, and otherwise the run falls back to
@@ -198,7 +204,17 @@ target. XCTest ships with the toolchain, so unlike PHP and Ruby there is no test
 package with no external dependencies needs no network to build, test or verify. A tree with `.swift`
 files but no `Package.swift` — a CocoaPods project, say — is recognised and reported as present and not
 verified, because this adapter drives Swift Package Manager and does not guess at a build it does not
-understand.
+understand. Verilog support needs only Icarus Verilog: a tree holding `.v`, `.sv`, `.vh` or `.svh`
+files is claimed, the design under test is the first module with ports that is not a testbench, and
+the tree is compiled with `iverilog -g2012` over every source and testbench while each testbench is
+simulated with `vvp -N`. There is no case-level test protocol in the language, so one test case per
+testbench is reported under the testbench file's own name, and a testbench that does not compile is
+an error rather than a failing test. Icarus Verilog writes its diagnostics to the console rather than
+to a machine-readable report, so a compile error is read from Icarus's own line shapes and is a
+failed build. Static analysis reads a Verilog rule table, and generated scenarios become ordinary
+testbench modules that instantiate the design under test as `dut`. Icarus Verilog exports no coverage
+data and Verilog has no package manager or advisory ecosystem for HDL, so coverage and the dependency
+inventory are reported as not measured rather than as zero.
 
 ---
 
@@ -520,6 +536,38 @@ failure message, so the counterexample carries data rather than a stack trace.
 mvn -Dtest=Cw_SC_ROLLING_OB_001_Test -Dcodewitness.seed=42 -Dcodewitness.case=37 test
 ```
 
+For a Verilog project the fragments are Verilog statements, `${name}` becomes the signal `name`, and
+the generated test is an ordinary testbench module named `cw_sc_<scenario>_<obligation>` that
+instantiates the design under test as `dut` and connects the scenario's inputs to it, declaring each
+one at the design's own port width (or `reg [63:0]` when the name is not a port). The generator
+enumerates the declared boundary values and adds a seeded `$urandom_range` search when a scenario
+declares a range, advances time with `#1` before sampling the observation — a combinational design
+settles in a delta cycle — and checks the invariant once per case:
+
+```yaml
+language:
+  adapter: verilog
+
+scenarios:
+  - id: SC-DEBIT
+    requirement: R-001
+    mode: single
+    setup: ""
+    steps:
+      - call: ";"
+        inputs:
+          - {name: balance, type: integer, domain: integer, values: ["100000"]}
+          - {name: amount, type: integer, domain: integer, values: ["1", "99999"], range: {min: 1, max: 99999}}
+    observation: "dut.new_balance"
+    invariant: "dut.accepted == 1 && observation == balance - amount"
+    cases: 1
+    seed: 1
+```
+
+A violated invariant prints the shared `CODEWITNESS_COUNTEREXAMPLE|…` line and the simulation calls
+`$fatal` once at the end, so it exits non-zero; because a Verilog test is a compile and then a
+simulation rather than one command, the replay is the two-step `iverilog` then `vvp` recipe.
+
 See [`docs/writing-scenarios.md`](docs/writing-scenarios.md) for the full reference.
 
 ---
@@ -533,7 +581,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php | ruby | swift
+  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php | ruby | swift | verilog
 
 verification:
   timeout: 15m           # per build or test command
@@ -598,7 +646,7 @@ A report is only useful if it can be reproduced, so every run records: the proje
 source revision, the CodeWitness version, the runtime version (the Java version for a Java project,
 the .NET SDK version for a C# one, the Kotlin release for a Kotlin one, the CMake version for a C and
 C++ one, the PHP version for a PHP one, the Ruby version for a Ruby one, the Swift version for a Swift
-one), the build tool and its version,
+one, the Icarus Verilog version for a Verilog one), the build tool and its version,
 the verification configuration fingerprint, every tool version, the language model identifier if any,
 the requirements hash, the isolation level, timestamps and every command that was executed. Evidence
 records carry their command and inputs, and counterexamples carry a replayable command.
@@ -674,6 +722,9 @@ codewitness/
 ├── codewitness-adapter-swift/   Swift packages: swift build and swift test with XCTest results read
 │                               from the runner's console, heuristics, security, LLVM coverage,
 │                               bounded source mutation, Package.resolved inventory
+├── codewitness-adapter-verilog/ Verilog and SystemVerilog projects: iverilog -g2012 build and vvp -N
+│                               testbench simulation, heuristics, security, bounded source mutation;
+│                               no coverage export and no dependency inventory
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -686,9 +737,11 @@ engine. Recognising a language CodeWitness has no adapter for is the same shape:
 `dev.codewitness.core.spi.LanguageDetector`, discovered the same way, and the detectors for the languages
 nothing here implements live in `codewitness-language-detectors`. A few platform defaults do remain in core
 — the `LanguageId` and `BuildSystemId` constants (`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`,
-`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `RUBY`, `SWIFT`, `CMAKE`, `COMPOSER`, `BUNDLER`,
-`SWIFTPM`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
-needs (`PACKAGIST` for PHP, `RUBYGEMS` for Ruby and `SWIFT_URL` for Swift among them), and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
+`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `RUBY`, `SWIFT`, `VERILOG`, `CMAKE`, `COMPOSER`,
+`BUNDLER`, `SWIFTPM`, `ICARUS`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory
+lookup needs (`PACKAGIST` for PHP, `RUBYGEMS` for Ruby and `SWIFT_URL` for Swift among them — Verilog
+adds none, because HDL has no advisory ecosystem), and the excluded-directory and build-wrapper names
+in `WorkspaceManager` — but they are
 vocabulary and platform defaults, not language logic, and the engine never switches on a language.
 Nothing in core names a language it cannot already verify.
 
@@ -704,10 +757,10 @@ mvn -pl codewitness-core test   # one module
 ```
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
-plus Python 3, Cargo, Go, Node, the .NET SDK, CMake with CTest, PHP with Composer, Ruby with Bundler and
-a Swift toolchain
-for the Python, Rust, Go, TypeScript, JavaScript, C#, C/C++, PHP, Ruby and Swift fixtures, and network
-access the
+plus Python 3, Cargo, Go, Node, the .NET SDK, CMake with CTest, PHP with Composer, Ruby with Bundler,
+a Swift toolchain and Icarus Verilog with `vvp`
+for the Python, Rust, Go, TypeScript, JavaScript, C#, C/C++, PHP, Ruby, Swift and Verilog fixtures, and
+network access the
 first time, because it builds real projects. The Kotlin fixture
 needs no toolchain of its own beyond Maven: it is a Maven build with `kotlin-maven-plugin`, so the
 compiler, the standard library and Surefire are resolved from a repository the way a dependency is. The C# fixture
@@ -722,7 +775,9 @@ a different package manager: RSpec arrives from RubyGems as a bundle dependency,
 network access for `bundle install` and nothing else is installed by hand. The Swift fixture is the
 opposite case: XCTest ships with the toolchain and the package declares no dependencies, so the sandbox
 config sets `allow_network: false` and the run compiles and tests offline with nothing installed by
-hand. An end-to-end test is skipped
+hand. The Verilog fixture is the same case as the Swift one: `iverilog` and `vvp` ship together and the
+tree declares no dependencies, so its sandbox config sets `allow_network: false` and the run compiles,
+simulates, analyses and mutates offline with nothing installed by hand. An end-to-end test is skipped
 rather than failed when its toolchain is absent.
 
 ---
@@ -1497,6 +1552,88 @@ The honest limits of Swift support are:
   considered, so an unformatted expression may be skipped. A surviving mutant never changes a verdict;
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
+The Verilog adapter is implemented and exercised end to end as well (`fixtures/verilog-withdrawal-ledger`):
+
+- detection of Verilog and SystemVerilog trees by extension — `.v`, `.sv`, `.vh` and `.svh` are one
+  language to `iverilog -g2012`, so one adapter claims them and the extensions it found are reported.
+  The design under test is the first module with ports that is not a testbench, and its name is what the
+  root `iverilog -s` selects for the build. A testbench is a module with no ports whose body calls a
+  simulation control task (`$finish`, `$fatal`, `$dumpfile`, `$dumpvars`, `$stop`), or a module or file
+  that follows the naming conventions `*_tb`, `tb_*`, `*_test` or `*_testbench`, or a file under `tb/`,
+  `testbench/`, `test/`, `tests/` or `sim/`. A `.f` file list is recognised and reported as a detected
+  descriptor but is not required. Both ANSI and non-ANSI module headers are read; a non-ANSI header's
+  ports have direction `unknown`. A tree with sources but no testbench is still built and analysed, and
+  its requirements stay `UNVERIFIED` with the reason that nothing was executed;
+- a build through `iverilog -g2012 -o <run-artefacts>/verilog/build.vvp` over every source and
+  testbench. Icarus writes no machine-readable report, so its diagnostics are read in the shapes it
+  prints: `file.v:LINE: error: message`, `file.v:LINE: warning: message`, the bare
+  `file.v:LINE: syntax error`, the location-less `Elaboration failed` and the preprocessor's
+  `file.v:LINE: Include file X not found`. A compile error is a failed build, which the engine reports
+  as `BLOCKED` and never as a code defect;
+- existing tests through the simulator, one testbench at a time: each is compiled with
+  `iverilog -g2012 -s <testbench>` and simulated with `vvp -N` (`-N` makes `$stop` fatal instead of an
+  interactive prompt, so a run cannot hang). Verilog has no case-level test protocol, so one test case
+  per testbench is reported, under the testbench file's own name. A simulation is a failure when it
+  exits non-zero, prints a `CODEWITNESS_COUNTEREXAMPLE|…` line, or prints a line opening with `FAIL`,
+  `FAILED`, `ERROR` or `ASSERTION FAILED`; a simulation that runs to completion is a pass. A testbench
+  that does not compile is an error, not a failing test. There is deliberately no single test command,
+  because a Verilog test is two processes — compile, then simulate — so test evidence carries no command
+  and a failing test's replay is the two-step shell recipe;
+- static analysis over a Verilog rule table (`verilog-heuristics`, ids `CW-VLOG-BUG-*`,
+  `CW-VLOG-CORRECT-*`, `CW-VLOG-STYLE-001` and `CW-VLOG-SEC-*`) read through one literal-aware
+  `VerilogSourceScan` that knows `//` and `/* */` comments, string literals and the based-literal
+  apostrophe (`4'b1010`, `8'hFF`), so a rule sees the code and not a literal that happens to look like
+  it. A separate security analyzer filters the same table to the security rules, so a rule is defined
+  once and reported under one id. A testbench file is not analysed as design logic, and every finding is
+  advisory — the analyzer id contains "heuristics" — so a rule never fails a requirement on its own;
+- mutation testing through the shared `TextMutator` and a `VerilogLexis` (provider id
+  `verilog-text-mutation`, report tool `verilog-text`) that knows what a text mutator gets wrong in
+  Verilog: arithmetic (`+ - * / %`), comparison boundaries (`< <= > >=`), equality (`== !=`), boolean
+  (`&& ||`), bitwise (`& | ^ ~^`) and shifts (`<< >>`) are the operator set; `<=` is a site rather than
+  an exclusion because it is also the nonblocking assignment; based literals such as `4'b1010` and
+  `8'hFF` are consumed whole, so their apostrophe and base digits expose no operator; `===` and `!==`
+  are single tokens; and comments and strings are ignored. Because a Verilog test is compile-then-
+  simulate, the tester's one command per mutant is a shell pipeline that compiles every testbench and
+  runs it with `vvp -N`, stopping at the first failure. A mutant that does not compile is non-viable and
+  excluded from the score, never counted as a kill;
+- generated adversarial tests from declared scenarios: the fragments are Verilog, `${name}` becomes the
+  signal `name`, and the generated test is an ordinary testbench module named
+  `cw_sc_<scenario>_<obligation>` that instantiates the design under test as `dut`, declares the
+  scenario's inputs at the design's own port widths (or `reg [63:0]` when a name is not a port),
+  enumerates up to twelve boundary value combinations — the cartesian product of the declared `values`
+  plus `min` and `max` — and, for a `sequence` or `concurrent` mode with a declared range, adds a seeded
+  `$urandom_range` search. It waits `#1` before sampling the observation, because a combinational design
+  settles in a delta cycle, and a violated invariant prints the shared `CODEWITNESS_COUNTEREXAMPLE|…`
+  line; `$fatal` is called once at the end if any case failed, so the simulation exits non-zero. The
+  generator sets `checksInvariant` only when a scenario declares both an `observation` and an
+  `invariant`, and without both the requirement cannot become `VERIFIED`. Generated sources are written
+  under `generated-tests/`, removed unless `report.keep_generated_tests` is set and always kept in the
+  run's artefact store, and the replay command compiles the kept copy together with the project and
+  simulates it.
+
+The end-to-end fixture (`fixtures/verilog-withdrawal-ledger`) is a combinational ledger with two
+deliberate defects and its own passing testbench that checks only the branch that is already correct.
+The run finds the two defects with generated testbenches — R-001 and R-003 `FAILED` with
+counterexamples, R-002 `VERIFIED` by an executed generated test and R-004 `UNVERIFIED` because it
+declares no scenario, overall `FAILED` and exit 1 — while mutation reports three survivors, because the
+fixture's own testbench never exercises the branch the defects live in.
+
+The honest limits of Verilog support are:
+
+- coverage is not measured. Icarus Verilog exports no coverage data, so the adapter claims no coverage
+  capability and the report says coverage was not measured rather than reporting zero. Verilator can
+  export coverage, but this adapter does not drive Verilator;
+- dependencies are not analysed. Verilog has no package manager and there is no advisory database for
+  HDL, so there is no inventory, no ecosystem and no advisory source to consult; the adapter declares no
+  dependency capability and the report says dependencies were not analysed rather than inventing an
+  inventory;
+- one test case per testbench is all the language allows. A testbench is a top-level simulation with no
+  case-level protocol, so a suite of many checks inside one testbench is reported as one case rather
+  than being split into cases the language does not define;
+- there is no single test command, because a Verilog test is a compile and then a simulation. Test
+  evidence therefore carries no command, and reproducing a failure means running the two steps;
+- the heuristic rule table is intentionally small and has a known false-positive profile.
+
 Implemented but limited, and reported as such:
 
 - **Dependency advisories** are checked only when you turn the scan on. It covers every ecosystem the
@@ -1526,7 +1663,9 @@ Implemented but limited, and reported as such:
   Where a dependency path can be shown, the reproduction recipe says how: an executable
   `dependency:tree` recipe for Maven, and a named tool for each other ecosystem. That mapping is supplied
   by the adapter that owns the ecosystem, not by the core, so a new language adds its own without an
-  engine change.
+  engine change. Verilog contributes no ecosystem at all: it has no package manager and there is no
+  advisory database for HDL, so the adapter declares no dependency capability and the report says
+  dependencies were not analysed rather than reporting an empty inventory as a clean bill of health.
 - **Gradle** support (detection, commands, report parsing) is implemented and unit tested, but the
   end-to-end demonstration in this repository was exercised with Maven only; no Gradle
   distribution was available in the environment it was built in.

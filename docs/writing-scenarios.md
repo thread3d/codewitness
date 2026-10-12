@@ -11,14 +11,16 @@ Python for a Python project, Rust for a Rust project, Go for a Go module, TypeSc
 project, plain JavaScript for a JavaScript project, C# for a C#/.NET project, Kotlin for a Kotlin
 project, C or C++ for a project whose sources are either — one adapter covers both, so the
 fragment is written in whichever language the code under test is written in — PHP for a PHP
-project, Ruby for a Ruby project, and Swift for a Swift package. Everything else — modes,
+project, Ruby for a Ruby project, Swift for a Swift package, and Verilog for a Verilog or SystemVerilog
+design (one adapter covers both, the way one adapter covers C and C++). Everything else — modes,
 inputs, ranges, seeds, the counterexample protocol — is identical. The examples below are Java; the
-Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++, PHP, Ruby and Swift forms are shown in
-[Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
+Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++, PHP, Ruby, Swift and Verilog forms are
+shown in [Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
 [TypeScript projects](#typescript-projects), [JavaScript projects](#javascript-projects),
 [C# projects](#c-projects), [Kotlin projects](#kotlin-projects),
 [C and C++ projects](#c-and-c-projects), [PHP projects](#php-projects),
-[Ruby projects](#ruby-projects) and [Swift projects](#swift-projects).
+[Ruby projects](#ruby-projects), [Swift projects](#swift-projects) and
+[Verilog projects](#verilog-projects).
 
 ```yaml
 scenarios:
@@ -80,8 +82,8 @@ Each step declares the inputs it searches over:
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`; in PHP it becomes the PHP variable `$name`, and in Ruby and Swift the bare local variable `name`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
-| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares, a PHP type name such as `int`, `float`, `string` or `bool`, a Ruby type name such as `int`, `float`, `bool` or `string`, or a Swift type name such as `int`, `double`, `bool` or `string` (the generated locals are `Int`, `Double`, `Bool` and `String`). |
+| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`; in PHP it becomes the PHP variable `$name`, in Ruby and Swift the bare local variable `name`, and in Verilog the bare signal `name`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares, a PHP type name such as `int`, `float`, `string` or `bool`, a Ruby type name such as `int`, `float`, `bool` or `string`, a Swift type name such as `int`, `double`, `bool` or `string` (the generated locals are `Int`, `Double`, `Bool` and `String`), or a Verilog type name such as `integer`, `reg`, `logic` or `bit` (optionally with a width, as in `reg [31:0]`) or `time` — except that a Verilog input naming one of the design's own ports takes that port's declaration instead, so its width is the design's rather than the scenario's. |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -119,7 +121,8 @@ shape is: a standard-library `unittest` case for Python, a Cargo integration tes
 `_test.go` file in the package under test for Go, a `node:test` module for TypeScript and JavaScript,
 an xUnit class in the tree's own test project for C#, a Kotlin JUnit 5 class in the tree's own test
 sources for Kotlin, a PHPUnit `TestCase` class in the tree's own test root for PHP, an RSpec spec in the
-tree's own test root for Ruby, an XCTest class in the tree's own test target for Swift, and, for C and C++,
+tree's own test root for Ruby, an XCTest class in the tree's own test target for Swift, a generated
+testbench module for Verilog that instantiates the design under test as `dut`, and, for C and C++,
 one self-contained program with a `main` rather than a class
 in a framework — written into the run's artefact store, never into the tree.
 
@@ -1006,6 +1009,99 @@ steps:
 If the implementation rejects by returning a value, the invariant handles it and no wrapper is needed;
 the Swift fixture's `withdraw` returns a boolean and its acceptance is observed through the state it
 leaves, exactly as the Ruby and PHP fixtures do.
+
+## Verilog projects
+
+For a Verilog or SystemVerilog design the fragments are Verilog statements and expressions, and the
+generated test is an ordinary testbench module written under `generated-tests/` in the project. The
+generator instantiates the design under test as `dut` and connects the declared inputs to its ports, so
+a fragment refers to an input by its bare signal name: `${name}` is replaced textually by `name`, and a
+`call` is a Verilog statement rather than a method invocation. A combinational design has no procedure
+to call, so the fixture's steps are the empty statement `;` and the inputs alone are the whole
+invocation:
+
+```yaml
+language:
+  adapter: verilog
+
+scenarios:
+  - id: SC-DEBIT
+    requirement: R-001
+    description: An accepted withdrawal reduces the balance by exactly the amount
+    mode: single
+    setup: ""
+    steps:
+      - call: ";"
+        description: the ledger is combinational, so the inputs are the whole invocation
+        inputs:
+          - name: balance
+            type: integer
+            domain: integer
+            values: ["100000"]
+            range: {min: 100000, max: 100000}
+          - name: amount
+            type: integer
+            domain: integer
+            values: ["1", "99999"]
+            range: {min: 1, max: 99999}
+    observation: "dut.new_balance"
+    invariant: "dut.accepted == 1 && observation == balance - amount"
+    cases: 1
+    seed: 1
+```
+
+That scenario is the fixture's own, from `fixtures/verilog-withdrawal-ledger/codewitness.yaml`, and it
+is what finds the one-cent defect in the ledger: the boundary cases drive `balance = 100000` with an
+`amount` of `1` and `99999`, and check that the accepted branch reduces the balance by exactly the
+amount requested.
+
+Notes specific to Verilog:
+
+- `setup` is Verilog statements run once per case, before the steps, and each step's `call` is a Verilog
+  statement executed in order. A combinational design declares no procedure to call, so a step's `call`
+  is the empty statement `;` and the declared inputs are the whole invocation; a sequential design can
+  drive its clock and reset in `setup` and pulse them in a `call`;
+- `observation` is a Verilog expression assigned to a 64-bit register named `observation` after a `#1`
+  delay, so a combinational design has settled before the value is sampled. `invariant` is a boolean
+  Verilog expression over `observation` and the inputs — `dut.accepted == 1 && observation == balance -
+  amount` in the example above — and it is checked after every step, exactly as it is in every other
+  language;
+- inputs are declared at the design's own port widths: the generator reads the design under test's ports
+  and declares each input as a `reg` of the same width, or `reg [63:0]` when a name is not a port.
+  `type` is a Verilog type name the generator can produce for the input — `integer`, `reg`, `logic` or
+  `bit` (with an optional width such as `reg [31:0]`), `real` or `time` — but a name that is a port
+  keeps the port's own width, so a value wider than the design can hold is truncated by Verilog's own
+  rules rather than by a guess at the generator's;
+- boundary values come from each input's `values` list plus `range.min` and `range.max`, enumerated as up
+  to twelve combinations, exactly as in the other languages. `mode: sequence` and `mode: concurrent` add
+  a seeded `$urandom_range(min, max)` search when the scenario declares a non-negative `range`, so a
+  failing random case is reproducible from the recorded seed and case;
+- the generated file is a testbench module named `cw_sc_<scenario>_<obligation>`, where every character
+  of the scenario id that is not a letter or a digit becomes an underscore. It instantiates the design
+  under test as `dut`, drives the inputs, and checks the invariant; a failing case prints the single
+  `CODEWITNESS_COUNTEREXAMPLE|case=…|seed=…|inputs={…}|…` line and the testbench calls `$fatal` once at
+  the end, so the simulation exits non-zero and the engine records a failing test rather than a pass.
+  The counterexample's inputs are signal values driven onto the design's ports, which is why a Verilog
+  counterexample names signals such as `balance` and `amount` rather than call arguments;
+- Verilog has no case-level test protocol, so one test case per testbench is reported, under the
+  testbench file's own name. A testbench that does not compile is an error rather than a failing test,
+  and there is no single test command: a Verilog test is two processes, so the reproduction command
+  compiles the kept generated testbench together with the project and then simulates it:
+
+```bash
+iverilog -g2012 -s cw_sc_SC_DEBIT_OB_001 \
+    -o build.vvp rtl/ledger.v tb/ledger_tb.v generated-tests/cw_sc_SC_DEBIT_OB_001.v
+vvp -N build.vvp
+```
+
+Verilog rejection has no exception mechanism to catch. A design signals rejection through its own
+outputs — the fixture's ledger simply lowers `accepted` and leaves `new_balance` unchanged — so the
+invariant is where the required behaviour is expressed: an over-limit withdrawal is a `call` that drives
+the inputs and an invariant requiring `accepted == 0` and an unchanged balance. When a design's own
+protocol signals rejection with `$error` or `$fatal`, the step trips it and the simulation fails by
+itself, and the counterexample carries the line the simulator printed. If the implementation rejects by
+a value on an output, the invariant handles it and no wrapper is needed, exactly as the Ruby, PHP and
+Swift fixtures do for a boolean result.
 
 ## Practical advice
 
