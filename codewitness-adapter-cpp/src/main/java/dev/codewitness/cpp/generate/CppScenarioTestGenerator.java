@@ -179,7 +179,7 @@ public final class CppScenarioTestGenerator implements VerificationTools.TestGen
         sb.append("// This file is temporary: CodeWitness keeps a copy with the run so a counterexample can "
                 + "be replayed.\n\n");
         sb.append("#include <chrono>\n#include <cstdio>\n#include <cstdlib>\n#include <cstring>\n")
-                .append("#include <random>\n#include <string>\n#include <vector>\n");
+                .append("#include <random>\n#include <string>\n#include <type_traits>\n#include <vector>\n");
         if (scenario.mode() == Scenario.Mode.CONCURRENT) {
             sb.append("#include <atomic>\n#include <thread>\n");
         }
@@ -589,7 +589,15 @@ public final class CppScenarioTestGenerator implements VerificationTools.TestGen
                 return value;
             }
 
-            std::string cwFormat(long long value) {
+            /// Formats any integral value that is not bool, whatever width the project's own typedef has.
+            ///
+            /// A project's 64-bit type is `long long` on one platform and `long` on another - std::int64_t
+            /// is exactly that - so a single `long long` overload makes cwFormat(observation) ambiguous
+            /// wherever the project's own type is `long`, and the generated test fails to compile before it
+            /// can check anything. The constraint is on what the value is, not on how wide it is.
+            template <typename T,
+                      typename = std::enable_if_t<std::is_integral<T>::value && !std::is_same<T, bool>::value>>
+            std::string cwFormat(T value) {
                 return std::to_string(value);
             }
 

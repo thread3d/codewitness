@@ -122,6 +122,26 @@ class CppScenarioTestGeneratorTest {
     }
 
     @Test
+    @DisplayName("the value formatter accepts every integer width a project's own typedef may have")
+    void formatsEveryIntegerWidth(@TempDir Path project, @TempDir Path run) throws IOException {
+        String source = generated(project, run).sourceCode();
+
+        // The generated file is compiled by the project's own compiler, and a project's 64-bit type is
+        // `long long` on one platform and `long` on another - std::int64_t is exactly that. A fixed
+        // `long long` overload leaves cwFormat(observation) with three equally ranked conversions to
+        // long long, double and bool, so the call is ambiguous wherever the project's own type is `long`
+        // and the batch never compiles to report anything. The integral formatter is therefore constrained
+        // on what the value is rather than on how wide it happens to be.
+        assertTrue(source.contains("#include <type_traits>"),
+                "the constrained formatter is declared through <type_traits>: " + source);
+        assertTrue(source.contains("std::is_integral<T>::value && !std::is_same<T, bool>::value"),
+                "integral values other than bool are formatted generically: " + source);
+        assertFalse(source.contains("cwFormat(long long"),
+                "an integral overload of one fixed width is ambiguous for a project whose 64-bit type is long: "
+                        + source);
+    }
+
+    @Test
     @DisplayName("a scenario name and an obligation name become a stable identifier")
     void namesTheGeneratedProgram() {
         assertEquals("ScRolling", CppScenarioTestGenerator.camel("SC-ROLLING"));
