@@ -53,6 +53,15 @@ fixtures/**/.bundle/
 fixtures/**/coverage/
 fixtures/**/.rspec_status
 
+# Swift Package Manager's scratch tree. `Package.resolved` *is* committed, for the same reason the
+# Ruby and Composer lock files are: it pins the exact package revisions a later `swift build`
+# reproduces. `.build` is the compiled product, the checked-out dependencies and the coverage output of
+# whichever run produced them, all keyed to this machine's toolchain; `.swiftpm` is the package's own
+# local configuration.
+fixtures/**/.build/
+fixtures/**/.swiftpm/
+fixtures/**/DerivedData/
+
 # CodeWitness run data produced inside the repository
 .codewitness/
 **/.codewitness/

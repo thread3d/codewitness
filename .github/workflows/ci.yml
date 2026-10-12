@@ -49,11 +49,16 @@ jobs:
       # `./mvnw -Pe2e test` runs the fixture projects through their own toolchains: Maven for the
       # Java fixture, Python 3, Cargo, `go`, Node for the others (Node 22.18+ for TypeScript, where
       # type stripping is on by default, and 18.17+ for JavaScript), the .NET SDK for the C# fixture,
-      # CMake for the C and C++ one and PHP with Composer for the PHP one, Ruby with Bundler for the
-      # Ruby one.
+      # CMake for the C and C++ one, PHP with Composer for the PHP one, Ruby with Bundler for the
+      # Ruby one, and Swift for the Swift one.
       # The Kotlin, PHP and Ruby fixtures are the ones whose test tool is not part of the language
       # toolchain - Kotlin's compiler and Surefire, PHP's PHPUnit and Ruby's RSpec are all resolved as
       # dependencies - so all three are warmed below, and all three need the network this job already has.
+      # Swift is the opposite case twice over: XCTest ships with the toolchain, and the fixture has no
+      # external packages, so nothing is warmed and the fixture's sandbox forbids the network. Swift
+      # itself comes from the runner image, like CMake and CTest, and is asserted below rather than
+      # installed: the image's Swift 6.x satisfies the fixture's 5.9 tools version, and a silently
+      # substituted toolchain is what the assertion makes visible.
       # Each end-to-end test skips itself (a JUnit assumption) when its toolchain is absent, so a missing
       # tool produces a green build with those languages never having run. Installing each one here, then
       # asserting it below, is what keeps that from happening silently.
@@ -187,6 +192,11 @@ jobs:
           # resolved with; the adapter itself assumes only a 3.1 floor, but a substituted interpreter
           # here would mean the fixture ran against a Bundler the lock does not name.
           ruby -e 'exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new("4.0") ? 0 : 1)'
+          swift --version
+          # 5.9 is the fixture's swift-tools-version, so anything older cannot even read its manifest;
+          # the 6.x line the image ships satisfies it. Asserted rather than trusted for the same reason
+          # every other toolchain here is: a silently substituted compiler must be visible.
+          swift --version | grep -qE 'Swift version (5\.(9|[1-9][0-9])|[6-9]\.|[1-9][0-9]+\.)'
 
       # Unit and integration tests. Surefire excludes the `e2e` group by default (pom.xml:
       # excluded.groups), so this is the fast suite.
@@ -194,7 +204,7 @@ jobs:
         run: ./mvnw -B test
 
       # The end-to-end suite, opt-in through the `e2e` profile, which clears excluded.groups. It
-      # builds the fixture projects with real Maven, Python, Cargo, Go, Node, .NET, CMake, Composer and
-      # Bundler runs.
+      # builds the fixture projects with real Maven, Python, Cargo, Go, Node, .NET, CMake, Composer,
+      # Bundler and Swift runs.
       - name: End-to-end tests (fixture projects)
         run: ./mvnw -B -Pe2e test

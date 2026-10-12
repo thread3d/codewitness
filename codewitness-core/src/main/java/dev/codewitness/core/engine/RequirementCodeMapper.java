@@ -197,6 +197,15 @@ public final class RequirementCodeMapper {
             // by the convention every PHP project follows, so reading the file's namespace is enough.
             return phpClassName(file, stripExtension(fileName));
         }
+        if (extension.equals("swift")) {
+            // XCTest reports a case under `Module.ClassName`: the test target's module name, a dot, and
+            // the class that declares the case. The class is the file's own name by the convention every
+            // Swift test target follows, so the mapping derives that here. The module prefix is matched
+            // through the simple-name fallback below rather than read from Package.swift, which is what
+            // lets a generated test whose module the mapper never inspected still be attributed to the
+            // requirement its own file names.
+            return stripExtension(fileName);
+        }
         for (Path root : roots) {
             if (root != null && file.startsWith(root)) {
                 String relative = root.relativize(file).toString().replace(java.io.File.separatorChar, '.')

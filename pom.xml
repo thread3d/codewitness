@@ -48,6 +48,7 @@
     <module>codewitness-adapter-cpp</module>
     <module>codewitness-adapter-php</module>
     <module>codewitness-adapter-ruby</module>
+    <module>codewitness-adapter-swift</module>
     <module>codewitness-cli</module>
   </modules>
 
@@ -175,6 +176,11 @@
       <dependency>
         <groupId>dev.codewitness</groupId>
         <artifactId>codewitness-adapter-ruby</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.codewitness</groupId>
+        <artifactId>codewitness-adapter-swift</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

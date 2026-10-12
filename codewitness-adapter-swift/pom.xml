@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>dev.codewitness</groupId>
+    <artifactId>codewitness-parent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>codewitness-adapter-swift</artifactId>
+  <name>CodeWitness :: Swift Adapter</name>
+  <description>Swift language adapter: the SwiftPM toolchain, a build with swift build, and XCTest
+    results read from the runner's own output. Needs the Swift toolchain; XCTest ships with it, so a
+    package with no dependencies needs no network to build or test.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-core</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>dev.codewitness</groupId>
+      <artifactId>codewitness-adapter-support</artifactId>
+    </dependency>
+
+    <!-- Package.resolved and SwiftPM's exported code coverage report are JSON, and a package URL or a
+         coverage percentage misread as flat text would attach the wrong dependency to the wrong
+         advisory or report the wrong line count. Both are read with a real parser, the same managed
+         Jackson version every other adapter already depends on; nothing new is added to the build.
+         Package.swift is Swift source and is read as text with the few line patterns the detector
+         needs, because evaluating it would execute the project before the run has decided to. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

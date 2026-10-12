@@ -1,0 +1,154 @@
+package dev.codewitness.swift;
+
+import dev.codewitness.core.config.Scenario;
+import dev.codewitness.core.config.VerificationConfig;
+import dev.codewitness.core.evidence.EvidenceLedger;
+import dev.codewitness.core.exec.ExecutionSandbox;
+import dev.codewitness.core.exec.LocalProcessSandbox;
+import dev.codewitness.core.io.ArtifactStore;
+import dev.codewitness.core.io.WorkspaceManager;
+import dev.codewitness.core.model.ProjectInfo;
+import dev.codewitness.core.model.ProjectRef;
+import dev.codewitness.core.result.BudgetUsage;
+import dev.codewitness.core.spi.VerificationContext;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Builds a real {@link VerificationContext} around a temporary Swift package.
+ *
+ * <p>The detector, the command builders, the coverage helpers and the generator only read files and
+ * configuration, so the context is complete as soon as it has a project, a workspace, an artefact store,
+ * a ledger, a budget and a sandbox. Nothing here requires the Swift toolchain: a test that exercises a
+ * provider whose toolchain is missing points the project at an executable path that does not exist and
+ * asserts the reason, rather than depending on what the machine happens to have installed.
+ *
+ * <p>This mirrors {@code RubyTestContexts} in the Ruby adapter. There is no shared helper in the core or
+ * CLI test sources that a module could reach through the dependency graph, so each adapter carries its
+ * own, the same way every other adapter in this repository does.
+ */
+public final class SwiftTestContexts {
+
+    /** A swift path that is guaranteed not to exist, for asserting the unavailable path. */
+    public static final String MISSING_SWIFT = "/nonexistent/codewitness-swift-binary";
+
+    private SwiftTestContexts() {
+    }
+
+    /** Writes a UTF-8 file below {@code base}, creating parent directories as needed. */
+    public static Path write(Path base, String relative, String content) throws IOException {
+        Path file = base.resolve(relative);
+        if (file.getParent() != null) {
+            Files.createDirectories(file.getParent());
+        }
+        Files.writeString(file, content, StandardCharsets.UTF_8);
+        return file;
+    }
+
+    /**
+     * Writes a conventional SwiftPM package with a library target, a test target and one source file in
+     * each, so the detector records both the test module XCTest reports a class under and the host module
+     * a generated class imports.
+     */
+    public static void writePackageWithTests(Path root) throws IOException {
+        write(root, "Package.swift", """
+                // swift-tools-version:5.9
+                import PackageDescription
+                let package = Package(
+                    name: "Ledger",
+                    targets: [
+                        .target(name: "Ledger"),
+                        .testTarget(name: "LedgerTests"),
+                    ]
+                )
+                """);
+        write(root, "Sources/Ledger/Ledger.swift", "public struct Ledger {}\n");
+        write(root, "Tests/LedgerTests/LedgerTests.swift",
+                "import XCTest\nfinal class LedgerTests: XCTestCase {}\n");
+    }
+
+    /** Writes a conventional SwiftPM package with a library target but no test target. */
+    public static void writePackageWithoutTests(Path root) throws IOException {
+        write(root, "Package.swift", """
+                // swift-tools-version:5.9
+                import PackageDescription
+                let package = Package(
+                    name: "Ledger",
+                    targets: [.target(name: "Ledger")]
+                )
+                """);
+        write(root, "Sources/Ledger/Ledger.swift", "public struct Ledger {}\n");
+    }
+
+    /** @return project information detected from a real directory. */
+    public static ProjectInfo projectInfo(Path root) {
+        return SwiftProjectDetector.inspect(ProjectRef.of(root));
+    }
+
+    /**
+     * @return the detector's description of {@code root} with the given attributes merged over it.
+     *
+     * <p>Needed because the toolchain facts - which {@code swift}, whether the probe succeeded - are what
+     * the adapter normally records during inspection, and a test of a provider has to be able to state
+     * them without running a probe.
+     */
+    public static ProjectInfo withAttributes(Path root, Map<String, String> attributes) {
+        ProjectInfo detected = projectInfo(root);
+        return ProjectInfo.builder(detected.project())
+                .language(detected.language())
+                .buildSystem(detected.buildSystem())
+                .buildRoot(detected.buildRoot())
+                .sourceExtensions(detected.sourceExtensions())
+                .attributes(detected.attributes())
+                .attributes(attributes)
+                .modules(detected.modules())
+                .build();
+    }
+
+    /** A context with the default configuration and no scenarios. */
+    public static VerificationContext context(Path root, Path runDirectory) {
+        return context(projectInfo(root), runDirectory, List.of(),
+                new LocalProcessSandbox(List.of(root, runDirectory)));
+    }
+
+    /** A context with the given scenarios and the default sandbox. */
+    public static VerificationContext context(Path root, Path runDirectory, List<Scenario> scenarios) {
+        return context(projectInfo(root), runDirectory, scenarios,
+                new LocalProcessSandbox(List.of(root, runDirectory)));
+    }
+
+    /** A context around project information the caller built, with the default configuration. */
+    public static VerificationContext context(ProjectInfo info, Path runDirectory) {
+        return context(info, runDirectory, List.of(),
+                new LocalProcessSandbox(List.of(info.project().root(), runDirectory)));
+    }
+
+    /** A context whose sandbox the caller supplies, for tests that replace the process runner. */
+    public static VerificationContext context(
+            ProjectInfo info, Path runDirectory, List<Scenario> scenarios, ExecutionSandbox sandbox) {
+        ProjectRef projectRef = info.project();
+        WorkspaceManager.Workspace workspace =
+                WorkspaceManager.prepare(projectRef, runDirectory, WorkspaceManager.Mode.IN_PLACE);
+        VerificationConfig defaults = VerificationConfig.defaults();
+        VerificationConfig config = new VerificationConfig(
+                defaults.project(), defaults.language(), defaults.limits(), defaults.tests(),
+                defaults.mutation(), defaults.propertyTesting(), defaults.staticAnalysis(),
+                defaults.security(), defaults.llm(), defaults.report(), defaults.sandbox(), scenarios);
+        return VerificationContext.builder()
+                .runId("CW-2026-01-01-TEST0")
+                .projectRef(projectRef)
+                .projectInfo(info)
+                .config(config)
+                .workspace(workspace)
+                .artifacts(new ArtifactStore(runDirectory))
+                .budget(new BudgetUsage.Tracker(config.toBudget()))
+                .sandbox(sandbox)
+                .evidenceLedger(new EvidenceLedger("CW-2026-01-01-TEST0"))
+                .build();
+    }
+}

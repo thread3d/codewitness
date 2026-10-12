@@ -45,6 +45,8 @@ class DetectorAdapterAgreementTest {
                 "the C and C++ adapter must be on the classpath of the CLI: " + adapters.ids());
         assertTrue(adapters.ids().contains("php"),
                 "the PHP adapter must be on the classpath of the CLI: " + adapters.ids());
+        assertTrue(adapters.ids().contains("swift"),
+                "the Swift adapter must be on the classpath of the CLI: " + adapters.ids());
 
         for (LanguageDetector detector : detectors.all()) {
             detector.verifiedAsAdapterLanguage().ifPresent(language -> assertTrue(
@@ -151,6 +153,35 @@ class DetectorAdapterAgreementTest {
                 .map(LanguageDetectorRegistry.Detection::displayName).toList();
         assertTrue(uncovered.contains("Elixir"),
                 "a language no adapter claimed is still named: " + uncovered);
+    }
+
+    @Test
+    @DisplayName("a Swift package is verified, and a CocoaPods tree is still reported as unverifiable")
+    void swiftIsNotReportedTwice(@TempDir Path project) throws IOException {
+        write(project, "Package.swift", """
+                // swift-tools-version:5.9
+                import PackageDescription
+                let package = Package(name: "Ledger", targets: [.target(name: "Ledger")])
+                """);
+        write(project, "Sources/Ledger/Ledger.swift", "public struct Ledger {}\n");
+        LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
+
+        List<String> covered = detectors.detect(project, Set.of(LanguageId.SWIFT)).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(covered.isEmpty(),
+                "the adapter claimed this tree, so nothing about it is unverifiable: " + covered);
+
+        // The adapter drives Swift Package Manager and nothing else, so a CocoaPods tree - recognised by
+        // its Podfile and its .swift sources, with no Package.swift - is exactly what is left for the
+        // detector to speak for. Reporting it is the point of keeping the detector registered rather than
+        // deleting it once an adapter existed.
+        Path cocoaPods = project.resolve("pods");
+        write(cocoaPods, "Podfile", "platform :ios, '17.0'\n");
+        write(cocoaPods, "Ledger/Ledger.swift", "public struct Ledger {}\n");
+        List<String> uncovered = detectors.detect(cocoaPods, Set.of()).stream()
+                .map(LanguageDetectorRegistry.Detection::displayName).toList();
+        assertTrue(uncovered.contains("Swift"),
+                "a Swift tree the adapter does not claim is still named: " + uncovered);
     }
 
     private static void write(Path base, String relative, String content) throws IOException {        Path file = base.resolve(relative);

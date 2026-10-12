@@ -70,6 +70,14 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
      * that exist in that ecosystem whether or not they were fetched through it.
      */
     public static final String RUBYGEMS = "RubyGems";
+    /**
+     * The SwiftURL ecosystem id, which covers Swift Package Manager packages.
+     *
+     * <p>Spelled {@code SwiftURL} because that is the name the advisory service knows the ecosystem by,
+     * and a Swift package is identified in it by the URL of its git or registry location rather than by
+     * a bare name - a Swift package has no registry-assigned name to be queried under.
+     */
+    public static final String SWIFT_URL = "SwiftURL";
 
     public PackageCoordinate {
         Objects.requireNonNull(ecosystem, "ecosystem");
@@ -148,6 +156,17 @@ public record PackageCoordinate(String ecosystem, String name, String version, S
      */
     public static PackageCoordinate rubygem(String name, String version) {
         return new PackageCoordinate(RUBYGEMS, name, version, null);
+    }
+
+    /**
+     * @return a SwiftURL coordinate for a Swift package, at the version a lock file resolved.
+     *
+     * <p>The name is the package's location - the git URL the {@code Package.resolved} pin records -
+     * because that is the identity a Swift package has in the ecosystem: SwiftPM identifies a package
+     * by where it is fetched from, not by a registry-assigned name.
+     */
+    public static PackageCoordinate swiftPackage(String location, String version) {
+        return new PackageCoordinate(SWIFT_URL, location, version, null);
     }
 
     /** @return a coordinate in an arbitrary ecosystem, for sources this class has no shortcut for. */

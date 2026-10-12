@@ -57,7 +57,14 @@ public final class WorkspaceManager {
             // directory are result data belonging to a previous run, and copying either would make a
             // fresh run report the last one's numbers. Bundler's gem store lives elsewhere (under the
             // run's artefact directory), so no installed bundle is copied either.
-            ".bundle", "coverage", ".yardoc");
+            ".bundle", "coverage", ".yardoc",
+            // Swift Package Manager's scratch tree. `.build` holds the whole compiled product, the
+            // checked-out dependency sources and the code coverage output of the run that produced them;
+            // `.swiftpm` holds the package's own configuration. Both are keyed to the machine and the
+            // checkout that wrote them, so a copy would carry a stale build into the isolated workspace
+            // and the adapter's `swift build` restores them for itself. DerivedData is Xcode's equivalent
+            // for a tree opened in the IDE.
+            ".build", ".swiftpm", "DerivedData");
 
     private static boolean isExcludedDirectory(String name) {
         return EXCLUDED_DIRECTORIES.contains(name) || name.endsWith(".egg-info");

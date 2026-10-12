@@ -11,14 +11,14 @@ Python for a Python project, Rust for a Rust project, Go for a Go module, TypeSc
 project, plain JavaScript for a JavaScript project, C# for a C#/.NET project, Kotlin for a Kotlin
 project, C or C++ for a project whose sources are either — one adapter covers both, so the
 fragment is written in whichever language the code under test is written in — PHP for a PHP
-project, and Ruby for a Ruby project. Everything else — modes,
+project, Ruby for a Ruby project, and Swift for a Swift package. Everything else — modes,
 inputs, ranges, seeds, the counterexample protocol — is identical. The examples below are Java; the
-Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++, PHP and Ruby forms are shown in
+Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin, C/C++, PHP, Ruby and Swift forms are shown in
 [Python projects](#python-projects), [Rust projects](#rust-projects), [Go projects](#go-projects),
 [TypeScript projects](#typescript-projects), [JavaScript projects](#javascript-projects),
 [C# projects](#c-projects), [Kotlin projects](#kotlin-projects),
-[C and C++ projects](#c-and-c-projects), [PHP projects](#php-projects) and
-[Ruby projects](#ruby-projects).
+[C and C++ projects](#c-and-c-projects), [PHP projects](#php-projects),
+[Ruby projects](#ruby-projects) and [Swift projects](#swift-projects).
 
 ```yaml
 scenarios:
@@ -80,8 +80,8 @@ Each step declares the inputs it searches over:
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`; in PHP it becomes the PHP variable `$name`, and in Ruby the bare local variable `name`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
-| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares, a PHP type name such as `int`, `float`, `string` or `bool`, or a Ruby type name such as `int`, `float`, `bool` or `string`. |
+| `name` | Identifier, referenced as `${name}` inside `call`, `observation` and `invariant`; in PHP it becomes the PHP variable `$name`, and in Ruby and Swift the bare local variable `name`. TypeScript and JavaScript use `#{name}` instead; see the TypeScript and JavaScript sections. |
+| `type` | The type of the generated variable: a Java type for Java (`java.math.BigDecimal`, `long`, `int`, `java.time.Instant`, `java.lang.String`), a Rust type such as `i64` or `String`, a Go type such as `int64`, `float64`, `bool` or `string`, a TypeScript type such as `bigint` or `number`, `bigint` for JavaScript (where `type` only selects `BigInt` wrapping and every other input is a plain value), a C# type such as `long`, `decimal`, `double`, `bool` or `string`, a Kotlin type such as `Long`, `Int`, `Double`, `Boolean`, `String` or a JVM class such as `java.math.BigDecimal`, or a C++ type such as `long long`, `int`, `double`, `bool`, `std::string` or a type the project itself declares, a PHP type name such as `int`, `float`, `string` or `bool`, a Ruby type name such as `int`, `float`, `bool` or `string`, or a Swift type name such as `int`, `double`, `bool` or `string` (the generated locals are `Int`, `Double`, `Bool` and `String`). |
 | `domain` | How values are drawn: `decimal`, `integer`, `long`, `double`, `boolean`, `string`, `instantMillis`, `null`, `raw`. Defaults from `type`. |
 | `values` | Explicit values used to build deterministic boundary cases. |
 | `range` | `{min, max, scale}` used for the seeded random search. |
@@ -119,7 +119,7 @@ shape is: a standard-library `unittest` case for Python, a Cargo integration tes
 `_test.go` file in the package under test for Go, a `node:test` module for TypeScript and JavaScript,
 an xUnit class in the tree's own test project for C#, a Kotlin JUnit 5 class in the tree's own test
 sources for Kotlin, a PHPUnit `TestCase` class in the tree's own test root for PHP, an RSpec spec in the
-tree's own test root for Ruby, and, for C and C++,
+tree's own test root for Ruby, an XCTest class in the tree's own test target for Swift, and, for C and C++,
 one self-contained program with a `main` rather than a class
 in a framework — written into the run's artefact store, never into the tree.
 
@@ -906,6 +906,106 @@ steps:
 If the implementation rejects by returning a value, the invariant handles it and no wrapper is needed;
 the Ruby fixture's `withdraw` returns a boolean and its acceptance is observed through the state it
 leaves, exactly as the PHP fixture's does.
+
+## Swift projects
+
+For a Swift package the fragments are Swift statements and expressions, and the generated test is an
+ordinary XCTest class written under `<test root>/Generated/` inside the project's own test target —
+SwiftPM compiles only the Swift files that live inside a declared target's directory, so there is
+nowhere else a generated class would be built. `${name}` is replaced textually by the local `name`, so a
+fragment writes `ledger.withdraw(${t1}, ${a1})` and the variable the call sees is `t1`:
+
+```yaml
+language:
+  adapter: swift
+
+scenarios:
+  - id: SC-ROLLING
+    requirement: R-001
+    description: Two withdrawals across midnight, one hour apart
+    mode: sequence
+    setup: |
+      let ledger = WithdrawalLedger()
+    steps:
+      - call: "ledger.withdraw(${t1}, ${a1})"
+        inputs:
+          - {name: t1, type: int, domain: integer, values: ["85800000"], range: {min: 0, max: 172800000}}
+          - {name: a1, type: int, domain: integer, values: ["70000"], range: {min: 100, max: 90000}}
+      - call: "ledger.withdraw(${t2}, ${a2})"
+        inputs:
+          - {name: t2, type: int, domain: integer, values: ["90000000"]}
+          - {name: a2, type: int, domain: integer, values: ["70000"]}
+    observation: "ledger.totalWithinLast24Hours(${t2})"
+    invariant: "observation <= 100000"
+    cases: 200
+    seed: 42
+```
+
+That scenario is the fixture's own, from `fixtures/swift-withdrawal-ledger/codewitness.yaml`, and it is
+what finds the calendar-day defect in the ledger: the boundary case is a withdrawal at 23:50 and another
+at 01:00, 70,000 cents each, checked against the rolling limit.
+
+Notes specific to Swift:
+
+- `setup` is Swift statements run once per case, before the steps, and it stays in scope for them: the
+  whole case is emitted inside one method body. A `let` declared in `setup` is therefore visible to the
+  steps and to the observation, which is why the fixture writes `let ledger = WithdrawalLedger()`;
+- `observation` is a Swift expression assigned to `let observation`, and `invariant` is a Swift boolean
+  expression over `observation` and the inputs — `observation <= 100000` in the example above. It is
+  checked after every step, exactly as it is in every other language;
+- `type` is a Swift type name the generator can produce: `int`, `double`, `bool` or `string`, generating
+  the Swift locals `Int`, `Double`, `Bool` and `String`. The generator also reads the Swift spellings
+  (`Int`, `Int64`, `Double`, `Bool`, `String`, `boolean`) when no explicit `domain` is given. Money is
+  usually integer minor units, as the Swift fixture does — cents — because Swift's `Double` is binary
+  floating point; `Decimal` is a type a project may declare and is not one this generator draws;
+- the generated file is an ordinary XCTest class named after the scenario: `CwSc<ScenarioId>Tests`,
+  where every character of the id that is not a letter or a digit becomes an underscore, so `SC-ROLLING`
+  generates `Tests/<target>/Generated/CwScSC_ROLLINGTests.swift`. It opens with `import XCTest` and
+  `@testable import <library target>`, and its methods are `testCwCase0000`, `testCwCase0001` and so on
+  for the enumerated boundary cases, `testCwSingleCase` for a scenario that declares no inputs, and
+  `testCwSearch` for the seeded search;
+- **every generated method name begins with `test`** because XCTest discovers a test method by that
+  prefix and by nothing else. A method named `cw_case0000` compiles and then runs zero cases, and
+  `swift test --filter` selects only from the discovered set, so a replay filter for such a method
+  matches nothing. This is the one place the Swift generator's names differ from the other adapters';
+- the class is written into the project's own test target and is reported under that target's module
+  (`WithdrawalLedgerTests.CwScSC_ROLLINGTests`), while it imports the package's library target
+  (`WithdrawalLedger`) — a test target cannot import itself, so the two names are different facts;
+- `mode: concurrent` is executed **sequentially**, and the generated file says so in a `LIMIT:` comment,
+  for the same reason the Ruby and PHP adapters state it: a scenario's fragments are arbitrary user code
+  the generator cannot assume is safe under Swift concurrency;
+- a failing case calls `XCTFail` with the single
+  `CODEWITNESS_COUNTEREXAMPLE|case=…|seed=…|inputs={…}|…` line. XCTest prints that message on the
+  compiler-style error line that precedes the case's closing line, which is where the console parser
+  reads it from — which is why a counterexample contains the exact inputs rather than only a stack
+  trace;
+- `CODEWITNESS_SEED` and `CODEWITNESS_CASE` in the environment pin one case for replay, because
+  `swift test` has no seed option that selects a search case. The reproduction command is a real
+  `swift test --filter <Module.Class>/<method>` invocation:
+
+```bash
+env CODEWITNESS_SEED=42 CODEWITNESS_CASE=0 swift test --filter WithdrawalLedgerTests.CwScSC_ROLLINGTests/testCwSearch
+```
+
+Swift rejection is expressed the same way, in Swift. A step that throws is a failure by default, so
+catch the error yourself when throwing is the required behaviour — and catch the specific error type,
+because a bare `catch` throws away the distinction between "rejected as required" and "crashed for
+another reason":
+
+```yaml
+steps:
+  - call: |
+      do {
+          try ledger.withdraw(0, ${amount})
+      } catch let error as LedgerError {
+          // required behaviour: the withdrawal is rejected by throwing
+      }
+    description: an amount above the limit must be rejected by throwing
+```
+
+If the implementation rejects by returning a value, the invariant handles it and no wrapper is needed;
+the Swift fixture's `withdraw` returns a boolean and its acceptance is observed through the state it
+leaves, exactly as the Ruby and PHP fixtures do.
 
 ## Practical advice
 

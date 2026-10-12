@@ -72,6 +72,16 @@ public record LanguageId(String id) {
      */
     public static final LanguageId RUBY = new LanguageId("ruby");
     /**
+     * Swift, built and tested with the Swift Package Manager the project already has.
+     *
+     * <p>The language is named for the language and not for the toolchain, exactly as {@link #CSHARP}
+     * is not called {@code dotnet}: SwiftPM resolves this language's packages, compiles the modules and
+     * runs the XCTest suite, and is reported separately as {@link BuildSystemId#SWIFTPM}. Swift has a
+     * separate compilation step, so a file the compiler rejects is a failed build - which the engine
+     * maps to BLOCKED - rather than a code defect.
+     */
+    public static final LanguageId SWIFT = new LanguageId("swift");
+    /**
      * More than one language, verified together because more than one adapter claimed part of the
      * project. Reported instead of silently naming whichever language happened to be inspected first.
      */

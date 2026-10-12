@@ -22,6 +22,7 @@ not install a `codewitness` command on `PATH`.
 | `cpp-withdrawal-ledger` | C++: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language whose build system is not a package manager: CMake detection and configure, `cmake --build`, CTest with JUnit parsing, scenario-generated self-contained C++ programs compiled with the flags the project's own build recorded, counterexamples, gcov coverage over a second instrumented build and bounded source mutation, with no package fetched at all. |
 | `php-withdrawal-ledger` | PHP: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language whose test tool is a Composer dependency rather than part of the toolchain: detection from the Composer manifest and the PHPUnit configuration, a build that is the interpreter's own parse followed by `composer install`, PHPUnit with JUnit parsing, scenario-generated PHPUnit `TestCase` classes written into the tree's own test root, counterexamples with a real PHPUnit replay command, coverage reported as not measured when no Xdebug or PCOV driver is loaded, and bounded source mutation — with nothing installed beyond the interpreter and Composer. |
 | `ruby-withdrawal-ledger` | Ruby: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a language whose test tool is a Bundler dependency rather than part of the toolchain: detection from the `Gemfile` and the RSpec conventions, a build that is the interpreter's own parse followed by `bundle install`, RSpec with JSON parsing, scenario-generated RSpec specs written into the tree's own `spec/` root, counterexamples with a real `bundle exec rspec` replay command, coverage reported as not measured because the fixture does not load SimpleCov, and bounded source mutation — with nothing installed beyond the interpreter and Bundler. |
+| `swift-withdrawal-ledger` | Swift: rolling window applied per calendar day, negative amounts accepted | `FAILED` | 2 `FAILED`, 1 `VERIFIED`, 1 `UNVERIFIED` | The same evidence chain for a compiled language whose build system and test runner both ship with the toolchain: detection from `Package.swift`, `swift build --build-tests` with swiftc diagnostics parsed from the compiler's own lines, `swift test` with XCTest results read from the runner's console, scenario-generated XCTest classes written into the tree's own test target, counterexamples with a real `swift test --filter` replay command, LLVM coverage from SwiftPM's own export, and bounded source mutation — with no package resolved and no network needed. |
 | `polyglot-service` | six languages in one directory, plus a `mix.exs` for Elixir that nothing can verify | `PARTIALLY_VERIFIED` | 1 `VERIFIED`, 5 `UNVERIFIED` | One run verifies every language a tree contains: Maven, Python, Cargo, Go, TypeScript and JavaScript each build, test and analyse their own files in a single tree, a Python scenario discharges a requirement while five other languages read the same directory, dependencies come from more than one ecosystem, and the language no adapter understands is reported as present and not verified rather than left out. |
 | `off-by-one-boundary` | boundary comparison (`>=` where `>` is required) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | Boundary enumeration finds the exact value (`amount=1000`) that the project's own tests never try. |
 | `null-handling-defect` | missing null check (`username.trim()` before validation) | `FAILED` | 1 `FAILED`, 1 `VERIFIED` | A generated case can pass `null`; the NPE is captured as the counterexample's observed result. |
@@ -522,6 +523,70 @@ first run, and the committed `Gemfile.lock` is Bundler's own resolution record f
 is plain Ruby with no runtime dependency, so everything the fixture asks about is in
 `lib/withdrawal_ledger.rb` and the only gems Bundler installs are the test tool and its dependencies.
 
+### `swift-withdrawal-ledger`
+
+The Swift counterpart of the Ruby fixture: a Swift package whose `WithdrawalLedger` applies its limit
+per calendar day instead of over a rolling 24-hour window (R-001) and which accepts a negative
+withdrawal and reduces the recorded total (R-003). Money is held in integer cents and instants are
+epoch milliseconds, so the arithmetic the requirements ask about is exact. The package's own two tests
+pass, which is the point.
+
+The fixture is a `Package.swift` (tools version 5.9), `Sources/WithdrawalLedger/WithdrawalLedger.swift`,
+`Tests/WithdrawalLedgerTests/WithdrawalLedgerTests.swift`, `requirements.md` and its own
+`codewitness.yaml`. It declares no external dependencies, and XCTest ships with the toolchain, so the
+sandbox forbids the network and the whole run — build, tests, coverage and mutation — compiles and runs
+offline with nothing installed by hand.
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  CE-001  R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}  actual: 140000
+  CE-005  R-003  inputs: {amount=-10000}                                 actual: 40000
+
+Coverage:         line 98.1% (52/53), branch 0.0% (0/0)          (llvm-cov, SwiftPM export)
+Mutation testing: 11 mutants, 3 killed, 8 survived, score 27.3%  (swift-text)
+```
+
+R-001 and R-003 fail through generated XCTest classes written into `WithdrawalLedgerTests` —
+`CwScSC_ROLLINGTests` for the midnight crossing and `CwScSC_NEGATIVETests` for the accepted negative
+amount — and R-002 is discharged by an executed generated test, which is the only path to `VERIFIED`;
+R-004 declares no scenario and stays `UNVERIFIED`. Each counterexample carries the exact inputs and a
+replay command that is an `env CODEWITNESS_SEED=… CODEWITNESS_CASE=… swift test --filter
+<Module.Class>/<method>` invocation, with the seed and the case index in the environment because
+`swift test` has no seed option that pins a search case.
+
+The generated-test shape is Swift-specific in two ways worth knowing. First, XCTest discovers a test
+method only when its name begins with `test` and selects a replay only from that discovered set, so the
+generated methods are `testCwCase0000`, `testCwSearch` and `testCwSingleCase` rather than the bare
+`cw_…` spelling the other adapters use. Second, a test target cannot import itself, so the generated
+class imports the package's library target (`@testable import WithdrawalLedger`) while the result is
+reported under the test target's module (`WithdrawalLedgerTests.CwScSC_ROLLINGTests`) — the two names
+are different facts and the detector records both.
+
+Coverage comes from SwiftPM's own LLVM export: the suite is re-run with
+`swift test --enable-code-coverage`, `swift test --show-codecov-path` names the `codecov` JSON, and the
+totals are summed over the project's own Swift files only (the ledger at 97.1% line coverage and the
+project's own test file at 100%), so a checked-out dependency, SwiftPM's generated test runner or
+XCTest itself is not counted. The toolchain instruments no branch regions for this package, so branch
+coverage is reported as not measured rather than as zero.
+
+Mutation produces eleven mutants of which three are killed; the survivors include `== -> !=` at
+`Sources/WithdrawalLedger/WithdrawalLedger.swift:36`, the calendar-day comparison that no test in the
+fixture distinguishes from its negation, and the `+ -> -` flips in the total arithmetic. Static analysis
+and the security scan report no finding, and the dependency inventory is an inventory of zero read from
+SwiftPM's resolved graph, so the advisory scan consulted no source rather than reporting a clean one.
+
+The fixture needs a Swift toolchain and nothing else: it has no packages, so it builds and tests
+offline, and coverage and mutation use the compiler and `llvm-cov` the toolchain already carries. Only
+Swift Package Manager is driven: a tree with `.swift` files but no `Package.swift` — a CocoaPods
+project, say — is recognised and reported as present and not verified rather than built by a guess at
+its commands.
+
 ### `polyglot-service`
 
 One directory holding six languages' projects and a `mix.exs`: a Maven project, a Python package with a
@@ -664,6 +729,7 @@ with the `./codewitness` launcher:
 ./codewitness verify fixtures/cpp-withdrawal-ledger --requirements fixtures/cpp-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/php-withdrawal-ledger --requirements fixtures/php-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/ruby-withdrawal-ledger --requirements fixtures/ruby-withdrawal-ledger/requirements.md
+./codewitness verify fixtures/swift-withdrawal-ledger --requirements fixtures/swift-withdrawal-ledger/requirements.md
 ./codewitness verify fixtures/security-vulnerability --requirements fixtures/security-vulnerability/requirements.yaml
 ```
 

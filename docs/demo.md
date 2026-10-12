@@ -17,12 +17,14 @@ export PATH=/path/to/apache-maven-3.x/bin:$PATH   # CodeWitness invokes the proj
 ```
 
 The Java demo needs Maven (and a JDK) on `PATH`. The Python, Rust, Go, TypeScript, JavaScript, C#, Kotlin,
-C/C++, PHP and Ruby fixtures at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for
+C/C++, PHP, Ruby and Swift fixtures at the end need Python 3, Cargo, the `go` tool, a Node runtime (22.6+ for
 TypeScript, 18.17+ for JavaScript), the .NET SDK (8+), Maven with network access the first time, CMake
-with CTest, an interpreter with Composer and an interpreter with Bundler respectively, and nothing
+with CTest, an interpreter with Composer, an interpreter with Bundler and a Swift toolchain
+respectively, and nothing
 else: the Kotlin section is a Maven build, so `kotlinc` and the standard library arrive as dependencies,
-the C and C++ section fetches no package at all, and the PHP and Ruby sections' PHPUnit and RSpec arrive
-from Packagist and RubyGems as dependencies rather than as part of the toolchain.
+the C and C++ section fetches no package at all, the PHP and Ruby sections' PHPUnit and RSpec arrive
+from Packagist and RubyGems as dependencies rather than as part of the toolchain, and the Swift section's
+XCTest ships with the toolchain and the package declares no dependencies, so it runs offline.
 
 ## 1. What is in the project?
 
@@ -648,3 +650,73 @@ project: a project that declares no RSpec and has none on the machine is reporte
 runner rather than as passing. Ruby does ship minitest as a default gem, but the adapter deliberately
 does not fall back to it — a suite is written against one runner, and running a second, weaker one
 against files it was not written for produces results that describe nothing.
+
+## 18. The same thing for Swift
+
+The Swift fixture is the same ledger once more, this time as a Swift package with XCTest. It needs only
+a Swift toolchain: XCTest is part of the distribution and the package declares no dependencies, so the
+sandbox forbids the network and the run compiles, tests, measures coverage and mutates without fetching
+anything.
+
+```bash
+./codewitness verify fixtures/swift-withdrawal-ledger \
+    --requirements fixtures/swift-withdrawal-ledger/requirements.md
+```
+
+```text
+Requirements
+  ✗ R-001    Rolling withdrawal limit     FAILED
+  ✓ R-002    Fees are applied to the rec… VERIFIED
+  ✗ R-003    Negative amounts are reject… FAILED
+  ? R-004    Rounding of computed totals  UNVERIFIED
+
+Counterexamples
+  WithdrawalLedgerTests.CwScSC_ROLLINGTests   R-001  inputs: {t1=85800000, a1=70000, t2=90000000, a2=70000}
+                                                     expected: observation <= 100000   actual: 140000
+  WithdrawalLedgerTests.CwScSC_NEGATIVETests  R-003  inputs: {amount=-10000}
+                                                     expected: observation >= 50000    actual: 40000
+
+Tests
+  2 executed, 2 passed, 0 failed, 0 skipped  (parsed from the swift test console output)
+
+Coverage
+  line 98.1% (52/53), branch 0.0% (0/0)  (llvm-cov, SwiftPM export)
+
+Mutation testing
+  11 mutants, 3 killed, 8 survived, score 27.3%
+```
+
+The scenario fragments are Swift. `${name}` becomes a local `name`, `setup` is Swift statements run once
+per case, `observation` is a Swift expression assigned to `let observation`, and `invariant` is the
+Swift boolean expression that must hold — in the fixture, `observation <= 100000`. The generated tests
+are ordinary XCTest classes written into the project's own test target as
+`<test root>/Generated/CwSc<ScenarioId>Tests.swift`, because SwiftPM compiles only the Swift files that
+live inside a declared target's directory. Each case is one `test`-prefixed method — `testCwCase0000`
+for the boundary and declared values, `testCwSingleCase` for a scenario with no inputs, `testCwSearch`
+when the generator searched under a seed — and the replay command is a real
+`swift test --filter <Module.Class>/<method>` invocation with the recorded seed and case in the
+environment, because `swift test` has no seed option that pins a search case.
+
+Two Swift details are worth knowing before writing scenarios. XCTest discovers a method only when its
+name begins with `test`, so a generated class whose methods were named `cw_…` would compile and then run
+zero cases; the generated names carry the prefix for that reason. And a test target cannot import
+itself, so the generated class imports the package's library target while the result is reported under
+the test target's module; the detector records the two names separately.
+
+Existing tests are read from XCTest's console output, because XCTest gives a command-line caller no
+structured report: each case is opened and closed by a fixed `Test Case '-[Module.Class method]'` line,
+and a failure's message is the compiler-style error line printed before the close, which is where the
+generated test's `CODEWITNESS_COUNTEREXAMPLE|…` line lands. Coverage comes from SwiftPM's own LLVM
+export — `swift test --enable-code-coverage` then `swift test --show-codecov-path` — and is summed over
+the project's own Swift files only; this toolchain instruments no branch regions for the package, so
+branch coverage is reported as not measured rather than as zero. Mutation runs through the shared
+`TextMutator` with a `SwiftLexis` that knows Swift's comments, string forms and identity operators; the
+survivors include `== -> !=` in the calendar-day comparison, which no test in the fixture distinguishes
+from its negation.
+
+The fixture's two defects are the rolling-window bug behind R-001 and the accepted negative amount
+behind R-003, its fee scenario discharges R-002 through an executed generated test, and R-004 declares no
+scenario, so it stays `UNVERIFIED`. The limit to know before pointing this at a real project is that the
+adapter drives Swift Package Manager and nothing else: a tree with `.swift` files but no `Package.swift`
+is recognised and reported as present and not verified, and a suite written with Swift Testing rather
+than XCTest is reported as having no readable case rather than quietly passing.

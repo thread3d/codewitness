@@ -55,6 +55,17 @@ public record BuildSystemId(String id) {
      * {@code .bundle/config} or ship only a binstub under {@code bin/}.
      */
     public static final BuildSystemId BUNDLER = new BuildSystemId("bundler");
+    /**
+     * Swift Package Manager, driven by {@code Package.swift} and {@code Package.resolved}, resolving
+     * Swift packages from their git or registry locations into the {@code .build} scratch tree
+     * {@code swift build} creates.
+     *
+     * <p>SwiftPM is the build system Apple ships with the compiler and the only one a Swift package can
+     * declare, so it is what every Swift tree the adapter claims is reported with. The {@code swift}
+     * executable is recorded in the project attributes rather than encoded here, because a machine may
+     * have several toolchains selected through {@code swiftly}, Xcode or {@code PATH}.
+     */
+    public static final BuildSystemId SWIFTPM = new BuildSystemId("swiftpm");
     public static final BuildSystemId NONE = new BuildSystemId("none");
     /** More than one build system, because more than one language adapter claimed part of the project. */
     public static final BuildSystemId POLYGLOT = new BuildSystemId("polyglot");

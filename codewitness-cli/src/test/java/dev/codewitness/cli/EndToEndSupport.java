@@ -164,8 +164,7 @@ abstract class EndToEndSupport {
     }
 
     /** Skips the test when no .NET SDK is available, instead of failing spuriously. */
-    static void assumeDotnetAvailable() {
-        Assumptions.assumeTrue(findDotnet() != null,
+    static void assumeDotnetAvailable() {        Assumptions.assumeTrue(findDotnet() != null,
                 "no dotnet executable on PATH, in DOTNET_ROOT or in a conventional install location: "
                         + "C# end-to-end verification cannot run");
     }
@@ -194,6 +193,45 @@ abstract class EndToEndSupport {
         String home = System.getProperty("user.home");
         if (home != null && Files.isExecutable(Path.of(home, ".dotnet", executable))) {
             return Path.of(home, ".dotnet", executable).toString();
+        }
+        return findExecutable(executable);
+    }
+
+    /**
+     * Skips the test when no Swift toolchain is available, instead of failing spuriously.
+     *
+     * <p>Swift is the one adapter whose test tool ships with the language toolchain: XCTest is part of
+     * the Swift distribution, so a package with no external dependencies needs no network to build or
+     * test. Only the driver is checked here.
+     */
+    static void assumeSwiftAvailable() {
+        Assumptions.assumeTrue(findSwift() != null,
+                "no swift executable on PATH or in SWIFT_EXECUTABLE: Swift end-to-end verification cannot run");
+    }
+
+    /**
+     * @return the {@code swift} driver, or {@code null} when none can be found.
+     *
+     * <p>The search mirrors the adapter's: {@code SWIFT_EXECUTABLE} first, then the conventional Xcode
+     * and open-source toolchain locations, and {@code PATH} last. A test that only consulted {@code PATH}
+     * would skip on a macOS machine whose Xcode toolchain is not on the test JVM's PATH but which the
+     * adapter would still have found.
+     */
+    static String findSwift() {
+        String executable = isWindows() ? "swift.exe" : "swift";
+        String configured = System.getenv("SWIFT_EXECUTABLE");
+        if (configured != null && !configured.isBlank() && Files.isExecutable(Path.of(configured))) {
+            return configured;
+        }
+        for (String directory : List.of(
+                "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+                "/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin",
+                "/usr/local/swift/usr/bin",
+                "/usr/share/swift/usr/bin")) {
+            Path candidate = Path.of(directory, executable);
+            if (Files.isExecutable(candidate)) {
+                return candidate.toString();
+            }
         }
         return findExecutable(executable);
     }

@@ -76,7 +76,8 @@ project, an image with the Rust toolchain for a Rust project, an image with the 
 module, an image with a Node runtime for a TypeScript project (22.6+) or a JavaScript project
 (18.17+), an image with the .NET SDK (8+) for a C# project, an image with CMake, a C or C++ compiler and
 `gcov` for a C or C++ project, an image with PHP 8, Composer and a coverage driver (Xdebug or PCOV) for
-a PHP project, an image with Ruby and Bundler for a Ruby project, or an image with a JVM and the
+a PHP project, an image with Ruby and Bundler for a Ruby project, an image with a Swift toolchain for a
+Swift package, or an image with a JVM and the
 project's own build tool for a Kotlin project — Kotlin
 needs no image of its own, because it is compiled by the same `kotlinc` the project's Maven or Gradle
 build already invokes. The local-process sandbox needs no image
@@ -135,6 +136,21 @@ is about the account rather than the project, and `BUNDLE_DISABLE_SHARED_GEMS=1`
 run is tested against is exactly the one this project's lock file names. The Ruby dependency phase reads
 the inventory it can read — `Gemfile.lock` — and reports a gem with no resolved version as unresolved
 rather than treating an unknown as a clean result.
+
+Swift is the one case where a nested sandbox is deliberately disabled. SwiftPM wraps manifest evaluation
+in `sandbox-exec` on macOS, so a run already inside a boundary that forbids a nested one fails at
+manifest compilation before a line of the package is read; the adapter therefore passes
+`--disable-sandbox` to every SwiftPM command, and CodeWitness's own sandbox remains the declared
+boundary, with `mode: docker` the one that is a security boundary. What the adapter does instead is give
+each run its own SwiftPM state: `--cache-path`, `--config-path` and `--security-path`, plus
+`CLANG_MODULE_CACHE_PATH` and `SWIFT_MODULECACHE_PATH`, are all pointed under the run's artefact store,
+so a run cannot read or write a developer's `~/Library/org.swift.swiftpm`, their `~/.cache/org.swift.swiftpm`
+or a shared Clang module cache, and one run's manifest compilation is not visible to the next. SwiftPM
+has no switch that forbids the network the way Cargo's `CARGO_NET_OFFLINE` does, so
+`allow_network: false` is not enforced for dependency resolution; the Swift fixture declares no
+dependencies, so it resolves nothing and builds and tests offline. The Swift dependency phase reads the
+inventory it can read — `Package.resolved` — and reports a pin with neither a version nor a revision as
+unresolved rather than treating an unknown as a clean result.
 
 ## Recommendations
 

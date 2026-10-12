@@ -118,6 +118,12 @@ or a Ruby project:
 ./codewitness verify ./my-ruby-project --requirements requirements.md
 ```
 
+or a Swift package:
+
+```bash
+./codewitness verify ./my-swift-package --requirements requirements.md
+```
+
 The language is detected, and a project may be written in several. `LanguageAdapterRegistry.selectAll`
 runs **every** adapter that claims part of the tree — a Java service with a TypeScript frontend is two
 verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
@@ -137,7 +143,7 @@ that is not there. Recognition comes from `LanguageDetector` implementations dis
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
 `language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp`, `kotlin`,
-`cpp`, `php` or `ruby`
+`cpp`, `php`, `ruby` or `swift`
 *narrows* the run
 to that one adapter instead of being merged with the automatic choice. It is not forced: the named adapter
 is used when it exists and actually claims the project, and otherwise the run falls back to
@@ -184,7 +190,15 @@ Bundler: a tree with a `Gemfile` is linted with the interpreter's own parser, it
 scenarios become ordinary RSpec spec files in the tree's own `spec/` root. RSpec is the second test tool
 here that is not part of the toolchain — it is a bundle dependency, so it exists only after the build has
 resolved it, and a project that has none is reported as having no test runner rather than quietly
-passing.
+passing. Swift support needs only the Swift toolchain: a package with a `Package.swift` is compiled with
+`swift build --build-tests`, its XCTest suite is run with `swift test` and read from the runner's own
+console, coverage comes from SwiftPM's exported LLVM coverage report, the package inventory is read from
+`Package.resolved`, and generated scenarios become ordinary XCTest classes in the tree's own test
+target. XCTest ships with the toolchain, so unlike PHP and Ruby there is no test tool to resolve, and a
+package with no external dependencies needs no network to build, test or verify. A tree with `.swift`
+files but no `Package.swift` — a CocoaPods project, say — is recognised and reported as present and not
+verified, because this adapter drives Swift Package Manager and does not guess at a build it does not
+understand.
 
 ---
 
@@ -519,7 +533,7 @@ project:
   name: payment-service
 
 language:
-  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php | ruby
+  adapter: auto          # auto | java | python | rust | go | typescript | javascript | csharp | kotlin | cpp | php | ruby | swift
 
 verification:
   timeout: 15m           # per build or test command
@@ -583,7 +597,8 @@ also indexed in `<project>/.codewitness/codewitness.db` (SQLite).
 A report is only useful if it can be reproduced, so every run records: the project identifier, the
 source revision, the CodeWitness version, the runtime version (the Java version for a Java project,
 the .NET SDK version for a C# one, the Kotlin release for a Kotlin one, the CMake version for a C and
-C++ one, the PHP version for a PHP one, the Ruby version for a Ruby one), the build tool and its version,
+C++ one, the PHP version for a PHP one, the Ruby version for a Ruby one, the Swift version for a Swift
+one), the build tool and its version,
 the verification configuration fingerprint, every tool version, the language model identifier if any,
 the requirements hash, the isolation level, timestamps and every command that was executed. Evidence
 records carry their command and inputs, and counterexamples carry a replayable command.
@@ -656,6 +671,9 @@ codewitness/
 ├── codewitness-adapter-ruby/    Ruby projects: the interpreter's own parse and bundle install,
 │                               RSpec with JSON parsing, heuristics, security, SimpleCov coverage,
 │                               bounded source mutation, Bundler/RubyGems inventory
+├── codewitness-adapter-swift/   Swift packages: swift build and swift test with XCTest results read
+│                               from the runner's console, heuristics, security, LLVM coverage,
+│                               bounded source mutation, Package.resolved inventory
 ├── codewitness-storage/       SQLite persistence
 ├── codewitness-report/        canonical JSON and human HTML reports
 ├── codewitness-cli/           command line interface
@@ -668,8 +686,9 @@ engine. Recognising a language CodeWitness has no adapter for is the same shape:
 `dev.codewitness.core.spi.LanguageDetector`, discovered the same way, and the detectors for the languages
 nothing here implements live in `codewitness-language-detectors`. A few platform defaults do remain in core
 — the `LanguageId` and `BuildSystemId` constants (`JAVA`, `PYTHON`, `RUST`, `GO`, `JAVASCRIPT`,
-`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `RUBY`, `CMAKE`, `COMPOSER`, `BUNDLER`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
-needs (`PACKAGIST` for PHP and `RUBYGEMS` for Ruby among them), and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
+`TYPESCRIPT`, `CSHARP`, `KOTLIN`, `CPP`, `PHP`, `RUBY`, `SWIFT`, `CMAKE`, `COMPOSER`, `BUNDLER`,
+`SWIFTPM`, `POLYGLOT` and the rest), the typed `PackageCoordinate` an advisory lookup
+needs (`PACKAGIST` for PHP, `RUBYGEMS` for Ruby and `SWIFT_URL` for Swift among them), and the excluded-directory and build-wrapper names in `WorkspaceManager` — but they are
 vocabulary and platform defaults, not language logic, and the engine never switches on a language.
 Nothing in core names a language it cannot already verify.
 
@@ -685,8 +704,10 @@ mvn -pl codewitness-core test   # one module
 ```
 
 `mvn -Pe2e test` requires a Maven executable on `PATH` (`MAVEN_HOME` and `M2_HOME` are honoured),
-plus Python 3, Cargo, Go, Node, the .NET SDK, CMake with CTest, PHP with Composer and Ruby with Bundler
-for the Python, Rust, Go, TypeScript, JavaScript, C#, C/C++, PHP and Ruby fixtures, and network access the
+plus Python 3, Cargo, Go, Node, the .NET SDK, CMake with CTest, PHP with Composer, Ruby with Bundler and
+a Swift toolchain
+for the Python, Rust, Go, TypeScript, JavaScript, C#, C/C++, PHP, Ruby and Swift fixtures, and network
+access the
 first time, because it builds real projects. The Kotlin fixture
 needs no toolchain of its own beyond Maven: it is a Maven build with `kotlin-maven-plugin`, so the
 compiler, the standard library and Surefire are resolved from a repository the way a dependency is. The C# fixture
@@ -698,7 +719,10 @@ and Composer and nothing else installed: PHPUnit is a Composer dependency rather
 toolchain, so the first run resolves it from Packagist and the fixture allows network access for that
 reason, exactly as a real project's `composer install` needs it. The Ruby fixture is the same story with
 a different package manager: RSpec arrives from RubyGems as a bundle dependency, so the first run needs
-network access for `bundle install` and nothing else is installed by hand. An end-to-end test is skipped
+network access for `bundle install` and nothing else is installed by hand. The Swift fixture is the
+opposite case: XCTest ships with the toolchain and the package declares no dependencies, so the sandbox
+config sets `allow_network: false` and the run compiles and tests offline with nothing installed by
+hand. An end-to-end test is skipped
 rather than failed when its toolchain is absent.
 
 ---
@@ -1387,6 +1411,92 @@ The honest limits of Ruby support are:
   below `vendor/bundle`;
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
+The Swift adapter is implemented and exercised end to end as well (`fixtures/swift-withdrawal-ledger`):
+
+- detection of Swift packages by their `Package.swift`, which is the one file every SwiftPM package must
+  have, with the conventional `Sources/<Target>` and `Tests/<Target>` layout and the package root as the
+  last resort. `Package.swift` is Swift source, so it is read as text with a few line patterns and never
+  evaluated: evaluating it would run project code before the run has decided to. The declared test
+  target's name is recorded as the module XCTest reports cases under, which is what lets a generated
+  test name its result the same way the runner will. `.build`, `.swiftpm`, `DerivedData` and `Pods` are
+  excluded from the source walk, because a checked-out dependency, a compiled product and an Xcode index
+  are not the project's code. A tree with `.swift` files but no `Package.swift` is recognised by
+  `SwiftLanguageDetector` and reported as present and not verified, because this adapter drives SwiftPM
+  and does not guess at a build it does not understand;
+- a build through `swift build --build-tests`, whose swiftc diagnostics are parsed from two shapes: the
+  canonical `path:line:column: severity: message` line, and the module-level `error: message` line a
+  manifest or linker failure produces. Compiling the test targets is deliberate, so a test that does not
+  compile is a failed **build** — which the engine reports as `BLOCKED` — and never a code defect or a
+  test failure;
+- existing tests through `swift test`, with results read from XCTest's own console. XCTest gives a
+  command-line caller no structured report: SwiftPM's `--xunit-output` writes only Swift Testing results
+  on the toolchains this adapter drives, and a pass over an XCTest suite produces no file at all. The
+  console protocol is fixed, though — every case opens with `Test Case '-[Module.Class method]' started.`
+  and closes with the same line ending in `passed`, `failed` or `skipped` and a duration, and a failure's
+  message is the compiler-style error line XCTest prints before the close, which is where a generated
+  test's `CODEWITNESS_COUNTEREXAMPLE|…` line lands. A summary that counts more cases than the console
+  named records the missing one as an error rather than shrinking the suite, a run that produced no case
+  is "not executed" rather than a pass, a Swift Testing suite is reported as unreadable rather than
+  passing, and a timeout is checked before the output is parsed at all;
+- static analysis over a Swift rule table (`swift-heuristics`, ids `CW-SWIFT-SEC-*`, `CW-SWIFT-CORRECT-*`,
+  `CW-SWIFT-BUG-*`, `CW-SWIFT-REL-*`, `CW-SWIFT-STYLE-001`, `CW-SWIFT-MAIN-*` and `CW-SWIFT-TEST-001`)
+  read through one literal-aware `SwiftSourceScan` that knows `//` line comments, `/* … */` block
+  comments (which nest in Swift), `"…"` strings with backslash escapes and `\(…)` interpolation,
+  `"""…"""` multi-line strings and `#"…"#` raw strings with matching hash counts, so a rule sees the code
+  and not a literal that happens to look like it. A separate security analyzer (`swift-security`) filters
+  the same table to the `CW-SWIFT-SEC-*` rules, so a rule is defined once and reported under one id, and
+  each finding carries its file, its line and its rule id;
+- coverage from SwiftPM's exported LLVM coverage report. The suite is re-run with
+  `swift test --enable-code-coverage`, `swift test --show-codecov-path` names the exported `codecov`
+  JSON (with a scan of `.build` as a fallback), and the line and branch totals are summed over the
+  project's own files only, so a line in a dependency checkout or in the generated test runner is not
+  counted. A missing report is reported as not measured with the reason, never as zero, and branch
+  coverage is reported only when the report carries it;
+- a dependency inventory (`swiftpm`) read from `Package.resolved`, in either of the two schemas SwiftPM
+  writes, with every pin carrying `PackageCoordinate.swiftPackage(location, version)` and so queryable in
+  the SwiftURL ecosystem — a Swift package is identified by its location, because it has no
+  registry-assigned name. The lock file is read directly rather than through a command. A package with no
+  `Package.resolved` is an inventory of zero, which is a measurement; a pin with neither a version nor a
+  revision is reported unresolved rather than guessed at;
+- mutation testing through the shared `TextMutator` and a `SwiftLexis` (provider id `swift-mutation`,
+  report tool `swift-text`) that knows what a text mutator gets wrong in Swift: `//` and nestable
+  `/* */` comments, `"…"` strings with escapes and interpolation, `"""…"""` multi-line strings, `#"…"#`
+  raw strings with matching hash counts, and the identity operators `===`/`!==` beside `==`/`!=`. Each
+  mutant is compiled and run by `swift test`, because running the tests is also what compiles the mutant;
+  a mutant whose build fails is excluded from the score rather than counted as a kill the suite never
+  made. The run is bounded — at most sixteen mutants over at most twenty files, within the configured
+  mutation budget — and every file is restored in a `finally`;
+- generated adversarial tests from declared scenarios: the fragments are Swift, `${name}` becomes the
+  local `name`, and the generated test is an ordinary XCTest class named `CwSc<ScenarioId>Tests` — every
+  character of the id that is not a letter or a digit becomes an underscore, so `SC-ROLLING` generates
+  `CwScSC_ROLLINGTests` — written into the project's own test target under `Generated/`, because SwiftPM
+  compiles only the Swift files that live inside a declared target's directory. A failing case calls
+  `XCTFail` with the single `CODEWITNESS_COUNTEREXAMPLE|…` line, which is where XCTest's console error
+  line carries it; `CODEWITNESS_SEED` and `CODEWITNESS_CASE` travel in the environment, and the
+  reproduction command is a real `swift test --filter <Module.Class>/<method>` invocation.
+
+The honest limits of Swift support are:
+
+- the adapter drives Swift Package Manager and nothing else: a tree with `.swift` files but no
+  `Package.swift` — a CocoaPods project, say — is recognised and reported as present and not verified
+  rather than built by a guess at its commands;
+- XCTest gives no machine-readable report on the SwiftPM command line, so results are read from the
+  runner's console. A package whose suite is written with Swift Testing rather than XCTest is reported as
+  having no readable case, and its requirements stay `UNVERIFIED` rather than quietly passing;
+- `--disable-sandbox` is passed to every SwiftPM command, because SwiftPM's nested macOS sandbox is not
+  permitted inside CodeWitness's own process boundary and a manifest that cannot be evaluated would fail
+  before a line of the package was read. The declared boundary is CodeWitness's own sandbox, and
+  `mode: docker` is the one that is a security boundary;
+- SwiftPM has no switch that forbids the network the way Cargo's `CARGO_NET_OFFLINE` does, so
+  `allow_network: false` is not enforced for dependency resolution. The fixture declares no dependencies,
+  so it resolves nothing and builds and tests offline;
+- coverage is a measurement only when SwiftPM exports the LLVM report; a missing report is an unknown
+  figure rather than a zero, and branch coverage is absent when the report carries no branch data;
+- mutation uses a deliberately small operator set rather than a dedicated Swift mutation framework the
+  project would have to add to its manifest, and only binary operators surrounded by whitespace are
+  considered, so an unformatted expression may be skipped. A surviving mutant never changes a verdict;
+- the heuristic rule table is intentionally small and has a known false-positive profile.
+
 Implemented but limited, and reported as such:
 
 - **Dependency advisories** are checked only when you turn the scan on. It covers every ecosystem the
@@ -1396,7 +1506,8 @@ Implemented but limited, and reported as such:
   `PackageReference` versions and central `PackageVersion` entries when there is no lock file),
   ConanCenter (from `conan.lock`), Packagist (from `composer.lock`, or from the declared `require`
   and `require-dev` ranges when there is no lock file, where a range is left unresolved) and RubyGems
-  (from `Gemfile.lock`). A
+  (from `Gemfile.lock`), and SwiftURL (from `Package.resolved`, where a package is identified by its
+  location rather than by a registry name). A
   dependency an inventory reports without a resolved version cannot be asked about, so the report says
   the scan could not query it rather than implying it is clean. When the scan is on, CodeWitness asks
   OSV which of the resolved dependencies are
