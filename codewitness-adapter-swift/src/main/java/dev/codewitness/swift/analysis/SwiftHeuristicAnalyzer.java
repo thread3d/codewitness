@@ -109,6 +109,10 @@ public final class SwiftHeuristicAnalyzer implements VerificationTools.StaticAna
                             + "able to recover, the process stops at the exact line where the error was "
                             + "already a known possibility. Use try and handle the error, or make the call "
                             + "non-throwing."),
+            new Rule("CW-SWIFT-SEC-007", Severity.HIGH, FindingCategory.SECURITY, Projection.LITERALS,
+                    Pattern.compile("(?i)\\b(select|insert|update|delete|drop)\\b[^\\n]*(\\+|\\\\\\()"),
+                    "SQL statement built by interpolation or concatenation: user input can change the query. "
+                            + "Use a parameterised statement."),
             new Rule("CW-SWIFT-SEC-003", Severity.HIGH, FindingCategory.SECURITY, Projection.CODE,
                     Pattern.compile("(?<![\\w.])as!(?!=)"),
                     "as! forced downcast: when the value is not the expected type the process traps rather "

@@ -36,6 +36,14 @@ public final class SqlSecurityAnalyzer implements VerificationTools.SecurityAnal
     public static final String ID = "sql-security-heuristics";
 
     private static final Pattern EXECUTE_IMMEDIATE = Pattern.compile("(?is)\\bexecute\\s+immediate\\b");
+    /**
+     * Dynamic SQL whose text is assembled from a value: a concatenation, a format call, or a T-SQL style
+     * {@code EXEC @sql + ...}. It is the SQL side of the same rule every language adapter carries for a
+     * query built by concatenation - the difference is that here the assembled statement is visible in
+     * the SQL itself rather than in the code that sends it.
+     */
+    private static final Pattern DYNAMIC_SQL_FROM_STRING = Pattern.compile(
+            "(?is)\\b(?:execute|exec|sp_executesql|prepare)\\b[^;\\n]*(?:\\|\\||\\+\\s*[\\w$@]|\\bformat\\s*\\()");
     private static final Pattern XP_CMDSHELL = Pattern.compile("(?is)\\bxp_cmdshell\\b");
     private static final Pattern GRANT_TO_PUBLIC = Pattern.compile("(?is)\\bgrant\\b[^;]*\\bto\\s+public\\b");
     private static final Pattern LOAD_EXTENSION = Pattern.compile("(?is)\\bload_extension\\b");
@@ -65,6 +73,10 @@ public final class SqlSecurityAnalyzer implements VerificationTools.SecurityAnal
             findings.addAll(matches(EXECUTE_IMMEDIATE, scan, relative, "sql-execute-immediate", Severity.HIGH,
                     "dynamic SQL executed from a string; if any part of that string comes from outside the "
                             + "database it is an injection point"));
+            findings.addAll(matches(DYNAMIC_SQL_FROM_STRING, scan, relative, "sql-dynamic-sql-concatenation",
+                    Severity.HIGH,
+                    "dynamic SQL assembled from a value; pass the value as a statement parameter instead of "
+                            + "building the statement text around it"));
             findings.addAll(matches(XP_CMDSHELL, scan, relative, "sql-os-command", Severity.CRITICAL,
                     "xp_cmdshell runs operating-system commands from SQL and is disabled by default for a "
                             + "reason"));

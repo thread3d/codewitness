@@ -61,6 +61,10 @@ public final class KotlinHeuristicAnalyzer implements VerificationTools.StaticAn
             new Rule("CW-KT-SEC-003", Severity.HIGH, FindingCategory.SECURITY, Projection.CODE,
                     Pattern.compile("Runtime\\.getRuntime\\(\\)\\.exec\\s*\\(|ProcessBuilder\\s*\\(\\s*[A-Za-z_]"),
                     "External process execution with a computed command: input reaching this call allows arbitrary command execution."),
+            new Rule("CW-KT-SEC-004", Severity.HIGH, FindingCategory.SECURITY, Projection.LITERALS,
+                    Pattern.compile("(?i)\\b(select|insert|update|delete|drop)\\b[^\\n]*(\\+|\\$\\{|\\$[A-Za-z_])"),
+                    "SQL statement built by interpolation or concatenation: user input can change the query. Use a "
+                            + "parameterised statement."),
             new Rule("CW-KT-NUM-002", Severity.HIGH, FindingCategory.CORRECTNESS, Projection.CODE,
                     Pattern.compile("\\b(?:val|var)\\s+\\w*(?i:(amount|balance|price|money|total|fee|rate))\\w*\\s*:[^=\\n]*\\b(?:Double|Float)\\b"),
                     "Binary floating point used for a monetary value: use BigDecimal to avoid rounding errors."),

@@ -689,6 +689,19 @@ CodeWitness executes project code, so it treats the project as hostile:
 - the local-process sandbox is a **resource-safety** boundary, not a security boundary, and every
   report says so instead of overstating it.
 
+One security rule is deliberately cross-language, because the defect is: **a database query assembled
+from a value** rather than sent with parameters. Every adapter whose language builds queries carries
+its own version of it — `CW-SEC-002` (Java), `CW-KT-SEC-004` (Kotlin), `CW-PY-SEC-008` (Python),
+`CW-GO-SEC-006` (Go), `CW-RS-SEC-007` (Rust), `CW-JS-SEC-004` (JavaScript), `CW-TS-SEC-004`
+(TypeScript), `CW-CS-SEC-003` (C#), `CW-CPP-SEC-012` (C and C++), `CW-PHP-SEC-009` (PHP),
+`CW-RB-SEC-004` (Ruby) and `CW-SWIFT-SEC-007` (Swift) — and the SQL adapter contributes the SQL-side
+rule, `sql-dynamic-sql-concatenation`, for a statement assembled inside the database itself. Each rule
+reads a literal-aware view of the source, so it sees the concatenation or interpolation in a string and
+not the same words in a comment. Every one of them is advisory: a regular expression recognises the
+shape of a query built from a value, not an exploitable one, so a match is recorded as a hint and a
+requirement is never failed on the rule's word alone. Verilog has no such rule because an HDL design
+does not build queries.
+
 See [`docs/security.md`](docs/security.md).
 
 ---

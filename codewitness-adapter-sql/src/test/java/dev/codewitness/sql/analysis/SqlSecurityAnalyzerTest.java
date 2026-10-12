@@ -69,6 +69,19 @@ class SqlSecurityAnalyzerTest {
     }
 
     @Test
+    @DisplayName("dynamic SQL assembled from a value is reported")
+    void dynamicSqlFromConcatenation() throws IOException {
+        // The SQL side of the rule every language adapter carries for a query built by concatenation: the
+        // assembled statement is visible in the SQL itself rather than in the code that sends it.
+        assertEquals(1, withRule(findings("EXECUTE 'SELECT * FROM ' || table_name;\n"),
+                "sql-dynamic-sql-concatenation").size());
+        assertEquals(1, withRule(findings("EXECUTE format('SELECT * FROM %I', tbl);\n"),
+                "sql-dynamic-sql-concatenation").size());
+        assertTrue(withRule(findings("EXECUTE 'SELECT 1';\n"), "sql-dynamic-sql-concatenation").isEmpty(),
+                "a literal statement with nothing assembled into it is not dynamic SQL");
+    }
+
+    @Test
     @DisplayName("security findings are advisory, because a regular expression is not a demonstration")
     void findingsAreAdvisory() throws IOException {
         List<Finding> findings = findings("EXECUTE IMMEDIATE 'DROP TABLE ledger';\n");

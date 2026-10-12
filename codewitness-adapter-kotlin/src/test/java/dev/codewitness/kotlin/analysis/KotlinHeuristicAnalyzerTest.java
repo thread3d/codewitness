@@ -120,6 +120,26 @@ class KotlinHeuristicAnalyzerTest {
     }
 
     @Test
+    @DisplayName("a SQL statement built by interpolation or concatenation is reported")
+    void findsSqlBuiltByInterpolation() throws IOException {
+        List<Finding> findings = analyze("""
+                package example
+
+                import java.sql.Connection
+
+                class Ledger {
+                    fun find(connection: Connection, id: String) {
+                        connection.createStatement().executeQuery("SELECT * FROM ledger WHERE id = $id")
+                        connection.createStatement().executeQuery("SELECT * FROM ledger WHERE id = " + id)
+                    }
+                }
+                """);
+
+        assertEquals(2, ruleIds(findings, "CW-KT-SEC-004").size(), findings.toString());
+        assertEquals(Severity.HIGH, finding(findings, "CW-KT-SEC-004").severity());
+    }
+
+    @Test
     @DisplayName("a discarded BigDecimal result is HIGH: the bug is silent")
     void findsDiscardedImmutableResult() throws IOException {
         List<Finding> findings = analyze("""
@@ -319,8 +339,8 @@ class KotlinHeuristicAnalyzerTest {
                 .language(dev.codewitness.core.model.LanguageId.JAVA)
                 .build()));
         assertEquals("kotlin-heuristics", analyzer.id());
-        assertEquals(12, KotlinHeuristicAnalyzer.ruleIds().size(), KotlinHeuristicAnalyzer.ruleIds().toString());
-        assertEquals(12, KotlinHeuristicAnalyzer.ruleIds().stream().distinct().count(),
+        assertEquals(13, KotlinHeuristicAnalyzer.ruleIds().size(), KotlinHeuristicAnalyzer.ruleIds().toString());
+        assertEquals(13, KotlinHeuristicAnalyzer.ruleIds().stream().distinct().count(),
                 "every rule id is distinct: " + KotlinHeuristicAnalyzer.ruleIds());
     }
 

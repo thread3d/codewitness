@@ -35,7 +35,7 @@ class SwiftHeuristicAnalyzerTest {
     /** The rule ids the hazards in {@link #hazardousContext} are written to trigger. */
     private static final Set<String> EXPECTED_RULES = Set.of(
             "CW-SWIFT-SEC-001", "CW-SWIFT-SEC-002", "CW-SWIFT-SEC-003", "CW-SWIFT-SEC-004",
-            "CW-SWIFT-SEC-005", "CW-SWIFT-SEC-006",
+            "CW-SWIFT-SEC-005", "CW-SWIFT-SEC-006", "CW-SWIFT-SEC-007",
             "CW-SWIFT-CORRECT-001", "CW-SWIFT-REL-001", "CW-SWIFT-REL-002", "CW-SWIFT-STYLE-001",
             "CW-SWIFT-BUG-001", "CW-SWIFT-BUG-002", "CW-SWIFT-MAIN-001", "CW-SWIFT-TEST-001");
 
@@ -140,7 +140,7 @@ class SwiftHeuristicAnalyzerTest {
     void theRuleTableIsDocumented() {
         List<String> ids = SwiftHeuristicAnalyzer.ruleIds();
 
-        assertEquals(14, ids.size(), "the fourteen documented rules: " + ids);
+        assertEquals(15, ids.size(), "the fifteen documented rules: " + ids);
         assertTrue(ids.containsAll(EXPECTED_RULES), ids.toString());
         assertEquals(Severity.HIGH, SwiftHeuristicAnalyzer.severityOf("CW-SWIFT-SEC-001"));
         assertEquals(Severity.MEDIUM, SwiftHeuristicAnalyzer.severityOf("CW-SWIFT-BUG-001"));
@@ -196,6 +196,8 @@ class SwiftHeuristicAnalyzerTest {
                         do { try save() } catch {}
                         fatalError("boom")
                         print(text)
+                        let query = "SELECT * FROM ledger WHERE amount = \\(amount)"
+                        _ = query
                         return text
                     }
                 }
