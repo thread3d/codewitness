@@ -112,6 +112,18 @@ jobs:
           php-version: '8.3'
           coverage: xdebug
 
+      # Ruby and Bundler are what the Ruby fixture drives. The runner image alone is not enough: its
+      # Ruby comes from Ubuntu's ruby-full package, and on Ubuntu 24.04 that installs the versioned
+      # /usr/bin/bundle3.2 but no unversioned `bundle` - the ruby-bundler package that provides it is
+      # not a dependency - so a bare `bundle install` fails on a command the image does not have.
+      # 4.0 is the interpreter the fixture's committed Gemfile.lock was resolved with: its BUNDLED
+      # WITH is 4.0.20, the Bundler that ships as a default gem with Ruby 4.0, so setup-ruby installs
+      # the Bundler the lock names rather than whichever one the image happens to carry.
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
+        with:
+          ruby-version: '4.0'
+
       # CMake and the CTest that ships with it are what the C and C++ fixture drives, and they come from
       # the runner image rather than from an action. The version is therefore asserted in the step below
       # instead of trusted: the test phase reads the JUnit report `ctest --output-junit` writes, and that
@@ -135,10 +147,10 @@ jobs:
         run: composer install --no-interaction --no-progress --working-dir=fixtures/php-withdrawal-ledger
 
       # Warm the Ruby fixture's bundle for the same reason, and with the same caveat: the fixture commits
-      # its Gemfile.lock, so this resolves the exact tree the end-to-end run will resolve. Ruby and
-      # Bundler come from the runner image rather than from a pinned action, because the image's Ruby is
-      # simply the interpreter the fixture is tested against; the version floor is asserted below instead
-      # of trusted, so a substituted interpreter is visible rather than silent.
+      # its Gemfile.lock, so this resolves the exact tree the end-to-end run will resolve. Bundler is the
+      # one the Set up Ruby step installed, which the lock's BUNDLED WITH names; the version floor is
+      # still asserted below instead of trusted, so a substituted interpreter is visible rather than
+      # silent.
       - name: Warm the Ruby fixture's dependencies
         env:
           BUNDLE_GEMFILE: fixtures/ruby-withdrawal-ledger/Gemfile
@@ -171,9 +183,10 @@ jobs:
           php -m | grep -qi xdebug
           ruby --version
           bundle --version
-          # 3.1 is the floor the adapter assumes: both RSpec 3.13 and the Bundler the fixture locks to
-          # run on it.
-          ruby -e 'exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new("3.1") ? 0 : 1)'
+          # 4.0 is the interpreter the Set up Ruby step pins, which is what the fixture's lock was
+          # resolved with; the adapter itself assumes only a 3.1 floor, but a substituted interpreter
+          # here would mean the fixture ran against a Bundler the lock does not name.
+          ruby -e 'exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new("4.0") ? 0 : 1)'
 
       # Unit and integration tests. Surefire excludes the `e2e` group by default (pom.xml:
       # excluded.groups), so this is the fast suite.

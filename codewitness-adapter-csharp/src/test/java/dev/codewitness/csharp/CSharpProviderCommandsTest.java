@@ -151,7 +151,13 @@ class CSharpProviderCommandsTest {
 
         assertEquals(dotnet.toAbsolutePath().toString(),
                 DotnetTool.resolve(project, Map.of("DOTNET_ROOT", install.toString())));
-        assertEquals("dotnet", DotnetTool.resolve(project, Map.of("PATH", "/nonexistent")),
+        assertEquals(dotnet.toAbsolutePath().toString(),
+                DotnetTool.resolve(project, Map.of(), List.of(install)),
+                "a machine-wide install is used even when DOTNET_ROOT and PATH name nothing");
+        assertEquals(dotnet.toAbsolutePath().toString(),
+                DotnetTool.resolve(project, Map.of("PATH", install.toString()), List.of()),
+                "an executable on PATH is used when no earlier source named one");
+        assertEquals("dotnet", DotnetTool.resolve(project, Map.of("PATH", "/nonexistent"), List.of()),
                 "nothing found means a bare command name, which the sandbox resolves through PATH");
     }
 

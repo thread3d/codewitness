@@ -69,7 +69,25 @@ public final class DotnetTool {
      *     resolves through {@code PATH}
      */
     public static String resolve(Path projectRoot, Map<String, String> hostEnvironment) {
-        for (Path candidate : candidates(projectRoot, hostEnvironment)) {
+        return resolve(projectRoot, hostEnvironment, conventionalInstallRoots());
+    }
+
+    /**
+     * Resolves a {@code dotnet} executable against an explicit list of machine-wide install roots.
+     *
+     * <p>The conventional locations are a fact about the host, and a test cannot remove them from the
+     * machine it runs on. Taking them as an argument is what lets a test state the whole search space -
+     * including that there is none - so the fallback is exercised both on a machine with no .NET SDK
+     * and on a build agent that has one installed at a conventional location.
+     *
+     * @param projectRoot     project directory, used to find a project-local toolchain
+     * @param hostEnvironment environment to read {@code DOTNET_ROOT}, {@code HOME} and {@code PATH} from
+     * @param installRoots    machine-wide install directories to probe, before {@code PATH}
+     * @return an absolute path when one can be found, otherwise a bare command name the sandbox
+     *     resolves through {@code PATH}
+     */
+    static String resolve(Path projectRoot, Map<String, String> hostEnvironment, List<Path> installRoots) {
+        for (Path candidate : candidates(projectRoot, hostEnvironment, installRoots)) {
             if (Files.isExecutable(candidate)) {
                 return candidate.toAbsolutePath().normalize().toString();
             }
@@ -77,7 +95,16 @@ public final class DotnetTool {
         return executableName();
     }
 
-    private static List<Path> candidates(Path projectRoot, Map<String, String> hostEnvironment) {
+    /** @return the machine-wide install locations the SDK's installer and the package managers use. */
+    static List<Path> conventionalInstallRoots() {
+        return List.of(
+                Path.of("/usr/local/share/dotnet"),
+                Path.of("/usr/share/dotnet"),
+                Path.of("/opt/homebrew/opt/dotnet/libexec"));
+    }
+
+    private static List<Path> candidates(Path projectRoot, Map<String, String> hostEnvironment,
+            List<Path> installRoots) {
         List<Path> candidates = new ArrayList<>();
         String dotnetRoot = hostEnvironment == null ? null : hostEnvironment.get("DOTNET_ROOT");
         if (dotnetRoot != null && !dotnetRoot.isBlank()) {
@@ -90,9 +117,9 @@ public final class DotnetTool {
         }
         // The conventional install locations, checked before PATH so a project is verified with the
         // toolchain the developer actually uses rather than with whichever one a login shell exported.
-        candidates.add(Path.of("/usr/local/share/dotnet", executableName()));
-        candidates.add(Path.of("/usr/share/dotnet", executableName()));
-        candidates.add(Path.of("/opt/homebrew/opt/dotnet/libexec", executableName()));
+        for (Path root : installRoots) {
+            candidates.add(root.resolve(executableName()));
+        }
         String home = hostEnvironment == null ? null : hostEnvironment.get("HOME");
         if (home != null && !home.isBlank()) {
             candidates.add(Path.of(home, ".dotnet", executableName()));
