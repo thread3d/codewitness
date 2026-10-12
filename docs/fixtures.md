@@ -627,7 +627,8 @@ scenario and stays `UNVERIFIED`.
 The generated-test shape is Verilog-specific in three ways worth knowing. First, Verilog has no
 case-level test protocol, so the run reports **one test case per testbench**, under the testbench file's
 own name, rather than one case per generated input combination. Second, the generated module declares
-the scenario's inputs at the design's own port widths — or `reg [63:0]` when a name is not a port —
+the scenario's inputs at the design's own port widths — or, when a name is not a port, the scenario's
+declared Verilog type, falling back to `reg [63:0]` —
 assigns `observation` to a 64-bit register after a `#1` delay so a combinational design has settled,
 and checks `invariant` as a plain Verilog boolean expression. Third, a failing case prints the shared
 `CODEWITNESS_COUNTEREXAMPLE|…` line and the testbench calls `$fatal` once at the end, so the simulation

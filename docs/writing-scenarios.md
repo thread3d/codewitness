@@ -1067,11 +1067,12 @@ Notes specific to Verilog:
   amount` in the example above — and it is checked after every step, exactly as it is in every other
   language;
 - inputs are declared at the design's own port widths: the generator reads the design under test's ports
-  and declares each input as a `reg` of the same width, or `reg [63:0]` when a name is not a port.
-  `type` is a Verilog type name the generator can produce for the input — `integer`, `reg`, `logic` or
-  `bit` (with an optional width such as `reg [31:0]`), `real` or `time` — but a name that is a port
-  keeps the port's own width, so a value wider than the design can hold is truncated by Verilog's own
-  rules rather than by a guess at the generator's;
+  and declares each input as a `reg` of the same width. An input whose name is not one of the design's
+  ports takes the scenario's own `type` when that is a type the generator can write — `integer`, `time`,
+  or `reg`/`logic`/`bit` with an optional width such as `reg [31:0]` — and a 64-bit register otherwise.
+  `real` falls into that fallback deliberately, because the counterexample line formats every input with
+  `%0d`. A name that is a port keeps the port's own width, so a value wider than the design can hold is
+  truncated by Verilog's own rules rather than by a guess at the generator's;
 - boundary values come from each input's `values` list plus `range.min` and `range.max`, enumerated as up
   to twelve combinations, exactly as in the other languages. `mode: sequence` and `mode: concurrent` add
   a seeded `$urandom_range(min, max)` search when the scenario declares a non-negative `range`, so a

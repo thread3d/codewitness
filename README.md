@@ -1599,7 +1599,8 @@ The Verilog adapter is implemented and exercised end to end as well (`fixtures/v
 - generated adversarial tests from declared scenarios: the fragments are Verilog, `${name}` becomes the
   signal `name`, and the generated test is an ordinary testbench module named
   `cw_sc_<scenario>_<obligation>` that instantiates the design under test as `dut`, declares the
-  scenario's inputs at the design's own port widths (or `reg [63:0]` when a name is not a port),
+  scenario's inputs at the design's own port widths (or the scenario's declared Verilog type, falling
+  back to `reg [63:0]`, when a name is not a port),
   enumerates up to twelve boundary value combinations — the cartesian product of the declared `values`
   plus `min` and `max` — and, for a `sequence` or `concurrent` mode with a declared range, adds a seeded
   `$urandom_range` search. It waits `#1` before sampling the observation, because a combinational design
