@@ -37,7 +37,7 @@ jobs:
       # The project targets release 25 (pom.xml: maven.compiler.release=25), so the JDK must be 25.
       # cache: maven caches ~/.m2/repository keyed on the poms and the wrapper properties.
       - name: Set up Temurin JDK 25
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '25'
@@ -136,7 +136,7 @@ jobs:
       # WITH is 4.0.20, the Bundler that ships as a default gem with Ruby 4.0, so setup-ruby installs
       # the Bundler the lock names rather than whichever one the image happens to carry.
       - name: Set up Ruby
-        uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
+        uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
         with:
           ruby-version: '4.0'
 
