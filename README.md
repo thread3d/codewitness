@@ -311,6 +311,8 @@ exits non-zero: the requirements it did reach keep their own verdicts, the ones 
 ./codewitness reproduce <run-id>    # print (or with --run, execute) the command that replays a counterexample
 ./codewitness clean <project>       # delete stored run data
 ./codewitness init <project>        # write starter codewitness.yaml and requirements.md
+./codewitness issues [--project .]  # list, or mark resolved, faults CodeWitness recorded in itself
+./codewitness mcp                  # serve the tools over the Model Context Protocol on stdio
 ./codewitness version
 ```
 
@@ -325,8 +327,105 @@ Exit codes are part of the interface:
 | --- | --- |
 | `0` | The run completed and no requirement is `FAILED` or `BLOCKED`. By default an `UNVERIFIED` requirement does not change this: exit `0` means "nothing failed", not "everything passed". |
 | `1` | At least one requirement is `FAILED`, or `--fail-on-unverified` was given and some requirement is not `VERIFIED`. |
-| `2` | Verification was `BLOCKED` (failed build, missing build tool, exhausted budget). `inspect` and `test` also use `2` when no adapter or build tool can be found, and `report`/`reproduce` when a stored run is unknown. |
+| `2` | Verification was `BLOCKED` (failed build, missing build tool, exhausted budget). `inspect` and `test` also use `2` when no adapter or build tool can be found, and `report`/`reproduce` when a stored run is unknown. `issues` uses `2` when `--resolve` names an id that was never recorded. |
 | `3` | The command could not be used, or failed before it could report: a command-line or configuration error, an unhandled internal failure, a `--requirements` file that does not exist, a `clean` that could not delete, or a `reproduce --run` that could not start its command. The `./codewitness` launcher also exits `3` when no built jar is found. |
+
+---
+
+## Self-issue log
+
+CodeWitness records faults it finds in **itself** — an unexpected exception, a phase or adapter that
+crashed, a report artefact it could not write, a language it detected but cannot verify — in a durable
+journal next to the project's run data:
+
+```text
+<project>/.codewitness/self-issues/
+  SELF-ISSUES.md   # grouped digest: stable id, source frame, command, run and stack trace
+  issues.jsonl     # one row per occurrence, machine-readable and append-only
+  resolved.jsonl   # resolutions, with timestamps
+```
+
+This is not a list of findings about the project. A failing test, a surviving mutant, a compiler
+error or a dependency advisory is the product working, and it is reported in the run, never here. A
+self-issue never changes a requirement verdict or the exit code. Only the CLI's unhandled-exception
+path and the engine's own catch blocks write to the journal.
+
+Review it, or tell a future agent to fix an entry:
+
+```bash
+./codewitness issues --project .                       # open issues
+./codewitness issues --project . --json                # the same for scripts
+./codewitness issues --project . --all                 # include resolved issues
+./codewitness issues --project . \
+    --resolve CWI-1A2B3C4D --note "fixed by ..."       # keep the history, close the issue
+```
+
+The id is stable across runs: it is derived from the category, exception type and source frame. A
+message is used only when there is no source frame to identify the fault, because messages often carry
+a run directory or a temporary path that changes every run. Repeating a fault updates one entry instead
+of creating a new one. A fault that recurs after its resolution is open again automatically. `verify`
+prints a one-line pointer when a run records something new, and `SELF-ISSUES.md` contains a
+ready-to-use request for a future agent.
+
+The location defaults to the project being verified. It stays with the project even when `--output`
+moves the run data, so a temporary output directory cannot take the journal with it. Set
+`CODEWITNESS_SELF_ISSUES_DIR` to keep one central journal, or `CODEWITNESS_SELF_ISSUES=off` to disable
+recording. The equivalent system properties are `codewitness.selfIssues.dir` and
+`codewitness.selfIssues.enabled`.
+
+---
+
+## MCP server
+
+`./codewitness mcp` serves the same engine over the Model Context Protocol on standard input and
+standard output. It is a normal stdio MCP server: one JSON-RPC message per line, standard output
+reserved for protocol frames, and progress/errors on standard error.
+
+```bash
+./codewitness mcp
+```
+
+Tools:
+
+| Tool | What it does |
+| --- | --- |
+| `version` | Version, Java runtime and MCP protocol revision. |
+| `inspect` | Detection only: language, build system, modules, sources, tests, capabilities. |
+| `test` | Compile and run the existing test suite only. |
+| `verify` | Full verification. Returns verdicts, counterexamples, report paths and an exit code. |
+| `report` | Read a stored run, or list recent runs. |
+| `issues` | List the self-issue journal, or mark entries resolved. |
+| `reproduce` | Show the command(s) that replay a recorded counterexample. |
+
+Verification exit codes stay verification results, not MCP errors: `0` = nothing failed, `1` = a
+requirement failed, `2` = the run was blocked, `3` = the tool could not run. A full `verify` can take
+minutes, so a client should allow a correspondingly long tool-call timeout.
+
+For DSH, one entry in the MCP client configuration is enough; the server is the normal launcher with
+the `mcp` argument:
+
+```yaml
+- insert:
+    - id: codewitness-mcp
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: codewitness
+        transport: stdio
+        command: /path/to/CodeWitness/codewitness/codewitness
+        args: [mcp]
+        cwd: /path/to/CodeWitness
+        env:
+          JAVA_HOME: /path/to/CodeWitness/.tools/jdk-25
+          PATH: "/path/to/CodeWitness/.tools/jdk-25/bin:/path/to/CodeWitness/.tools/maven/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          HOME: /path/to/CodeWitness/.tools/selfcheck-home
+          JAVA_TOOL_OPTIONS: "-Dmaven.repo.local=/path/to/CodeWitness/.m2/repository"
+        toolCallTimeoutMs: 1800000
+```
+
+The stdio client scrubs ambient credentials, so `JAVA_HOME`, `PATH` (including Maven), `HOME` and the
+Maven repository property must be declared explicitly. Its tools appear to the model as
+`mcp__codewitness__verify`, `mcp__codewitness__issues`, and so on. The server itself is a local process
+running with your permissions; it is not a security sandbox for untrusted projects.
 
 ---
 

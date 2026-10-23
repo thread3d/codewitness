@@ -32,6 +32,7 @@ public final class InitCommand implements Callable<Integer> {
             System.err.println("not a directory: " + root);
             return 2;
         }
+        SelfIssues.install(root);
         int written = 0;
         written += write(root.resolve("codewitness.yaml"), CONFIG_TEMPLATE, force);
         written += write(root.resolve("requirements.md"), REQUIREMENTS_TEMPLATE, force);

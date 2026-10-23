@@ -1,5 +1,7 @@
 package dev.codewitness.cli;
 
+import dev.codewitness.core.diagnostics.SelfIssueJournal;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -32,6 +34,7 @@ class MainCommandTest {
         assertEquals(0, result.exitCode());
         assertTrue(result.mentions("codewitness"), result.stdout() + result.stderr());
         assertTrue(result.mentions("verify"), "the help must list the subcommands");
+        assertTrue(result.mentions("mcp"), "the help must list the MCP server");
     }
 
     @Test
@@ -95,5 +98,23 @@ class MainCommandTest {
                 "the message must name the offending key: " + result.stderr());
         assertFalse(result.stderr().contains("\tat dev.codewitness"),
                 "a configuration mistake is not a stack trace: " + result.stderr());
+    }
+
+    @Test
+    void anUnexpectedFailureIsWrittenToTheProjectsSelfIssueLog(@TempDir Path project) throws IOException {
+        // A corrupt index is a failure of the tool's own input handling, not a verification result. The
+        // command must still exit 3, but it must also leave a durable, readable record behind.
+        Files.createDirectories(project.resolve(".codewitness"));
+        Files.writeString(project.resolve(".codewitness/codewitness.db"), "not a sqlite database",
+                StandardCharsets.UTF_8);
+
+        CliTestSupport.Result result = CliTestSupport.run("report", "--project", project.toString());
+
+        assertEquals(3, result.exitCode(), result.stdout() + result.stderr());
+        Path digest = SelfIssueJournal.defaultDirectory(project).resolve(SelfIssueJournal.MARKDOWN_FILE);
+        assertTrue(Files.isRegularFile(digest), "no self-issue digest was written next to " + project);
+        String markdown = Files.readString(digest, StandardCharsets.UTF_8);
+        assertTrue(markdown.contains("INTERNAL_ERROR"), markdown);
+        assertTrue(result.stderr().contains("self-issue log"), result.stderr());
     }
 }

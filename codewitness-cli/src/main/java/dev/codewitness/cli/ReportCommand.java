@@ -38,6 +38,7 @@ public final class ReportCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         Path root = Path.of(project).toAbsolutePath().normalize();
+        SelfIssues.install(root);
         Path base = root.resolve(".codewitness");
         Path database = base.resolve("codewitness.db");
 

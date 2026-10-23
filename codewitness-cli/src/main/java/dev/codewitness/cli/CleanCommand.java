@@ -26,6 +26,7 @@ public final class CleanCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         Path root = Path.of(project).toAbsolutePath().normalize();
+        SelfIssues.install(root);
         Path base = outputDirectory != null ? outputDirectory : root.resolve(".codewitness");
         System.out.println("CodeWitness run data: " + base);
         return ReportCommand.deleteRuns(base, keep, all);

@@ -44,6 +44,7 @@ public final class ReproduceCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         Path root = Path.of(project).toAbsolutePath().normalize();
+        SelfIssues.install(root);
         Path base = outputDirectory != null ? outputDirectory : root.resolve(".codewitness");
         Path jsonFile = base.resolve("runs").resolve(runId).resolve("report.json");
         String json = null;

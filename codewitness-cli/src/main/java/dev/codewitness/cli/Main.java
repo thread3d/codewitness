@@ -18,6 +18,8 @@ import picocli.CommandLine.Command;
  * codewitness reproduce &lt;run-id&gt; [--counterexample CE-001]
  * codewitness clean    &lt;project&gt;
  * codewitness init     &lt;project&gt;
+ * codewitness issues   [--project dir]
+ * codewitness mcp      (Model Context Protocol server on stdio)
  * codewitness version
  * </pre>
  */
@@ -34,6 +36,8 @@ import picocli.CommandLine.Command;
                 ReproduceCommand.class,
                 CleanCommand.class,
                 InitCommand.class,
+                IssuesCommand.class,
+                McpCommand.class,
                 VersionCommand.class
         })
 public final class Main implements Runnable {
@@ -57,6 +61,7 @@ public final class Main implements Runnable {
      * about how the tool was invoked, not a bug in it, and it must read as one.
      */
     public static int execute(String... args) {
+        SelfIssues.begin(args);
         CommandLine commandLine = new CommandLine(new Main()).setCaseInsensitiveEnumValuesAllowed(true);
         commandLine.setParameterExceptionHandler((exception, commandArgs) -> {
             System.err.println("codewitness: " + exception.getMessage());
@@ -65,11 +70,22 @@ public final class Main implements Runnable {
         });
         commandLine.setExecutionExceptionHandler((exception, command, parseResult) -> {
             Throwable cause = exception.getCause() == null ? exception : exception.getCause();
-            if (cause instanceof IllegalArgumentException) {
+            // A bad command line, a bad configuration file and an unreadable input file are statements about
+            // how the tool was invoked or what it was pointed at, not defects in the tool. They must not be
+            // recorded as self-issues, or the journal would fill with things no code change can fix.
+            if (cause instanceof IllegalArgumentException || cause instanceof java.io.UncheckedIOException) {
                 System.err.println("codewitness: " + cause.getMessage());
                 return 3;
             }
+            // An unexpected exception is a defect in CodeWitness, not a statement about the project. Keep
+            // the failure visible on stderr and write it to the durable self-issue journal so it can be
+            // fixed later, instead of vanishing with this terminal.
+            SelfIssues.recordInternalFailure("command execution", cause);
             System.err.println("codewitness: internal failure: " + cause);
+            String pointer = SelfIssues.pointer();
+            if (pointer != null) {
+                System.err.println(pointer);
+            }
             cause.printStackTrace(System.err);
             return 3;
         });

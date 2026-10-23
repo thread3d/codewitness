@@ -256,6 +256,9 @@ registered, so a bare embedder still gets verification rather than an empty repo
       `./codewitness verify fixtures/pascal-withdrawal-ledger` reports R-001 and R-003 as `FAILED`,
       R-002 as `VERIFIED` and R-004 as `UNVERIFIED`.
 - [ ] No `.codewitness` run data, build output or generated test sources are committed.
+- [ ] A fix for an entry in `.codewitness/self-issues/SELF-ISSUES.md` has a regression test and the
+      entry is closed with `./codewitness issues --project . --resolve <id> --note "..."`. Do not
+      delete the journal to make the list green.
 - [ ] The README's "honest status" section still describes what the tool actually does.
 - [ ] Any new limitation is stated in the README and, where it affects a run, in the report's
       `limitations` list.

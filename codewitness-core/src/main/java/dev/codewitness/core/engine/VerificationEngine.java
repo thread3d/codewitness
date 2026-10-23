@@ -1,6 +1,10 @@
 package dev.codewitness.core.engine;
 
 import dev.codewitness.core.config.VerificationConfig;
+import dev.codewitness.core.diagnostics.SelfIssueCategory;
+import dev.codewitness.core.diagnostics.SelfIssueRecord;
+import dev.codewitness.core.diagnostics.SelfIssueRecorder;
+import dev.codewitness.core.diagnostics.SelfIssueSeverity;
 import dev.codewitness.core.engine.strategy.DefaultStrategies;
 import dev.codewitness.core.evidence.Evidence;
 import dev.codewitness.core.evidence.EvidenceConfidence;
@@ -103,6 +107,7 @@ public final class VerificationEngine {
     private final VerificationProviderRegistry providers;
     private final LanguageDetectorRegistry detectors;
     private final ProcessRunner hostRunner;
+    private final SelfIssueRecorder selfIssues;
 
     public VerificationEngine(LanguageAdapterRegistry languages, VerificationProviderRegistry providers) {
         this(languages, providers, LanguageDetectorRegistry.of(), new dev.codewitness.core.exec
@@ -123,10 +128,25 @@ public final class VerificationEngine {
             VerificationProviderRegistry providers,
             LanguageDetectorRegistry detectors,
             ProcessRunner hostRunner) {
+        this(languages, providers, detectors, hostRunner, SelfIssueRecorder.NOOP);
+    }
+
+    /**
+     * @param selfIssues sink for faults the engine observes in itself. A phase or strategy that throws is
+     *     recorded here as well as turned into an honest report outcome, so the defect can be fixed later
+     *     instead of being rediscovered by every user.
+     */
+    public VerificationEngine(
+            LanguageAdapterRegistry languages,
+            VerificationProviderRegistry providers,
+            LanguageDetectorRegistry detectors,
+            ProcessRunner hostRunner,
+            SelfIssueRecorder selfIssues) {
         this.languages = languages;
         this.providers = providers;
         this.detectors = detectors;
         this.hostRunner = hostRunner;
+        this.selfIssues = selfIssues == null ? SelfIssueRecorder.NOOP : selfIssues;
     }
 
     /** Runs the pipeline with an isolated workspace copy. */
@@ -183,8 +203,24 @@ public final class VerificationEngine {
             limitations.add("No language adapter supports this project. Registered adapters: " + languages.ids());
             // With no adapter at all the run says nothing about any language, so naming the ones it can see
             // is the most useful thing it can still do.
-            limitations.addAll(UncoveredLanguages.limitations(detectors, workspace.root(), Set.of(),
-                    List.of()));
+            List<LanguageDetectorRegistry.Detection> detected = detectors.detect(workspace.root(), Set.of());
+            limitations.addAll(UncoveredLanguages.limitations(detected, List.of()));
+            // A language nobody can verify is a limitation of the tool, not a finding about the code. It is
+            // recorded as a capability gap so that the next request to make CodeWitness more useful has
+            // the concrete languages to start from.
+            String detectedNames = detected.stream()
+                    .map(LanguageDetectorRegistry.Detection::displayName)
+                    .distinct()
+                    .collect(java.util.stream.Collectors.joining(", "));
+            selfIssues.record(SelfIssueCategory.CAPABILITY_GAP, SelfIssueSeverity.LOW,
+                    "No language adapter supports this project (detected: "
+                            + (detectedNames.isEmpty() ? "unknown" : detectedNames)
+                            + "; registered adapters: " + languages.ids() + ")",
+                    null,
+                    Map.of(SelfIssueRecord.RUN_ID, runId.value(),
+                            SelfIssueRecord.PROJECT, project.root().toString(),
+                            SelfIssueRecord.PHASE, "inspect",
+                            SelfIssueRecord.VERSION, VERSION));
             listener.onEvent("inspect", "no language adapter matched");
             Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.PROJECT_INSPECTION)
                     .description("No language adapter supports " + project.root())
@@ -200,7 +236,8 @@ public final class VerificationEngine {
         // environment every process of the run starts with, and it is prepared before any phase so that a
         // test runner or a generated test can use it. A fixture that cannot prepare one reports why, and
         // the run says the database was unavailable instead of proceeding as though it had been used.
-        PreparedDatabase database = prepareDatabase(config, workspace.root(), runDirectory, artifacts, listener);
+        PreparedDatabase database = prepareDatabase(config, workspace.root(), runDirectory, artifacts, listener,
+                runId, project);
         ExecutionSandbox sandbox = SandboxFactory.create(config, workspace.root(), runDirectory, hostRunner,
                 database.environment());
         limitations.add("Execution isolation: " + sandbox.isolationLevel() + " via " + sandbox.id() + ". "
@@ -218,6 +255,9 @@ public final class VerificationEngine {
         } catch (RuntimeException e) {
             phases.add(new PhaseRecord("inspect", true, false, Duration.between(inspectStart, Instant.now()),
                     "inspection failed: " + e, List.of(), e.toString()));
+            recordIssue(SelfIssueCategory.INTERNAL_ERROR, SelfIssueSeverity.CRITICAL,
+                    "Project inspection failed: " + e, e, runId, project,
+                    Map.of(SelfIssueRecord.PHASE, "inspect"));
             return failedReport(runId, project, requirements, config, workspace, state, ledger, phases, budget,
                     limitations, startedAt, "Project inspection failed: " + e);
         }
@@ -282,7 +322,7 @@ public final class VerificationEngine {
             phases.add(new PhaseRecord("build", false, true, Duration.ZERO,
                     "the run budget was already exhausted, so no build was attempted", List.of(), "skipped"));
         } else {
-            phases.add(runPhase("build", listener, () -> {
+            phases.add(runPhase("build", runId, project, listener, () -> {
                 List<String> evidenceIds = new ArrayList<>();
                 List<BuildResult> results = new ArrayList<>();
                 for (Inspection inspection : builders) {
@@ -340,7 +380,7 @@ public final class VerificationEngine {
             List<Inspection> testable = capable(inspections, Capability.TEST).stream()
                     .filter(inspection -> builtSuccessfully(builds.get(inspection.adapter().id())))
                     .toList();
-            phases.add(runPhase("tests", listener, () -> {
+            phases.add(runPhase("tests", runId, project, listener, () -> {
                 List<String> evidenceIds = new ArrayList<>();
                 List<TestResult> results = new ArrayList<>();
                 for (Inspection inspection : testable) {
@@ -390,7 +430,7 @@ public final class VerificationEngine {
         // ---------------------------------------------------------------- static analysis
         if (config.staticAnalysis().enabled() && withinBudget(budget)) {
             List<Inspection> analysable = analysable(inspections, builds);
-            phases.add(runPhase("static-analysis", listener, () -> {
+            phases.add(runPhase("static-analysis", runId, project, listener, () -> {
                 List<String> evidenceIds = new ArrayList<>();
                 List<Finding> findings = new ArrayList<>();
                 for (Inspection inspection : analysable) {
@@ -440,7 +480,7 @@ public final class VerificationEngine {
 
         if (config.security().enabled() && withinBudget(budget)) {
             List<Inspection> analysable = analysable(inspections, builds);
-            phases.add(runPhase("security", listener, () -> {
+            phases.add(runPhase("security", runId, project, listener, () -> {
                 List<String> evidenceIds = new ArrayList<>();
                 List<Finding> findings = new ArrayList<>();
                 for (Inspection inspection : analysable) {
@@ -472,7 +512,7 @@ public final class VerificationEngine {
         }
 
         if (withinBudget(budget)) {
-            phases.add(runPhase("dependencies", listener, () -> {
+            phases.add(runPhase("dependencies", runId, project, listener, () -> {
                 List<String> evidenceIds = new ArrayList<>();
                 List<LanguageInventory> inventories = new ArrayList<>();
                 for (Inspection inspection : analysable(inspections, builds)) {
@@ -533,7 +573,7 @@ public final class VerificationEngine {
             List<Inspection> coverable = capable(inspections, Capability.COVERAGE).stream()
                     .filter(inspection -> builtSuccessfully(builds.get(inspection.adapter().id())))
                     .toList();
-            phases.add(runPhase("coverage", listener, () -> {
+            phases.add(runPhase("coverage", runId, project, listener, () -> {
                 List<String> evidenceIds = new ArrayList<>();
                 List<CoverageReport> results = new ArrayList<>();
                 for (Inspection inspection : coverable) {
@@ -579,7 +619,7 @@ public final class VerificationEngine {
                         return tests != null && tests.executed();
                     })
                     .toList();
-            phases.add(runPhase("mutation", listener, () -> {
+            phases.add(runPhase("mutation", runId, project, listener, () -> {
                 List<String> evidenceIds = new ArrayList<>();
                 List<MutationReport> results = new ArrayList<>();
                 for (Inspection inspection : mutable) {
@@ -693,6 +733,14 @@ public final class VerificationEngine {
                     notes.add("Strategy " + strategy.id() + " failed while verifying " + requirement.id()
                             + ": " + e);
                     state.note("strategy " + strategy.id() + " failed: " + e);
+                    recordIssue(SelfIssueCategory.STRATEGY_FAILURE, SelfIssueSeverity.HIGH,
+                            "Strategy \"" + strategy.id() + "\" failed while verifying "
+                                    + requirement.id() + ": " + e,
+                            e, runId, project,
+                            Map.of(SelfIssueRecord.PHASE, "requirements",
+                                    SelfIssueRecord.STRATEGY, strategy.id(),
+                                    SelfIssueRecord.REQUIREMENT, requirement.id(),
+                                    SelfIssueRecord.ADAPTER, running.adapter().id()));
                 }
             }
             // Defensive: an obligation with no outcome at all would let a report renderer invent a
@@ -1221,7 +1269,12 @@ public final class VerificationEngine {
         return true;
     }
 
-    private PhaseRecord runPhase(String name, ProgressListener listener, java.util.function.Supplier<PhaseOutcome> body) {
+    private PhaseRecord runPhase(
+            String name,
+            RunId runId,
+            ProjectRef project,
+            ProgressListener listener,
+            java.util.function.Supplier<PhaseOutcome> body) {
         Instant start = Instant.now();
         listener.onEvent(name, "started");
         try {
@@ -1231,10 +1284,37 @@ public final class VerificationEngine {
             listener.onEvent(name, outcome.summary());
             return record;
         } catch (RuntimeException e) {
+            // A phase that throws is a fault in the phase implementation, not a finding about the project.
+            // It still becomes an honest record below, but it also belongs in the self-issue journal: the
+            // next run should not have to rediscover it.
+            recordIssue(SelfIssueCategory.PHASE_FAILURE, SelfIssueSeverity.HIGH,
+                    "Phase \"" + name + "\" failed: " + e, e, runId, project,
+                    Map.of(SelfIssueRecord.PHASE, name));
             listener.onEvent(name, "failed: " + e);
             return new PhaseRecord(name, true, false, Duration.between(start, Instant.now()),
                     "phase failed: " + e.getMessage(), List.of(), e.toString());
         }
+    }
+
+    /**
+     * Records a fault the engine found in itself.
+     *
+     * <p>The common context (run, project, version) is filled here so that every engine-originated
+     * issue can be traced to the run that exposed it without each call site repeating it.
+     */
+    private void recordIssue(
+            SelfIssueCategory category,
+            SelfIssueSeverity severity,
+            String message,
+            Throwable error,
+            RunId runId,
+            ProjectRef project,
+            Map<String, String> context) {
+        Map<String, String> values = new LinkedHashMap<>(context == null ? Map.of() : context);
+        values.putIfAbsent(SelfIssueRecord.RUN_ID, runId.value());
+        values.putIfAbsent(SelfIssueRecord.PROJECT, project.root().toString());
+        values.putIfAbsent(SelfIssueRecord.VERSION, VERSION);
+        selfIssues.record(category, severity, message, error, values);
     }
 
     /**
@@ -1250,7 +1330,9 @@ public final class VerificationEngine {
             Path projectRoot,
             Path runDirectory,
             ArtifactStore artifacts,
-            ProgressListener listener) {
+            ProgressListener listener,
+            RunId runId,
+            ProjectRef project) {
         if (!config.database().enabled()) {
             return PreparedDatabase.none("no database was requested (set database.enabled to prepare one)");
         }
@@ -1269,6 +1351,10 @@ public final class VerificationEngine {
             } catch (RuntimeException e) {
                 // A throwing fixture is a bug in the fixture, but a run must not die on it: the database is
                 // reported as unavailable and everything that needed one stays unverified.
+                recordIssue(SelfIssueCategory.ADAPTER_FAILURE, SelfIssueSeverity.HIGH,
+                        "Database fixture \"" + fixture.id() + "\" failed: " + e, e, runId, project,
+                        Map.of(SelfIssueRecord.PHASE, "database",
+                                SelfIssueRecord.ADAPTER, fixture.id()));
                 return PreparedDatabase.notPrepared(fixture.id(),
                         "the fixture failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
             }

@@ -715,3 +715,49 @@ reports live in the artifact store on disk, not in the database.
 - **Fixtures** are projects with known defects — off-by-one boundaries, null handling, concurrency,
   security, weak tests, and a requirement that cannot be verified at all — used to prove that
   CodeWitness distinguishes them, in more than one language.
+
+## 11. Self-diagnosis
+
+A verification tool has two kinds of bad news, and confusing them is the failure mode this section
+exists to prevent. A failing test, a compiler error, a surviving mutant or a dependency advisory is a
+finding about the **project**; it belongs in the run report and may change a verdict. An unexpected
+exception, a phase that crashed, a strategy that threw, a report artefact that could not be written,
+or a language that no adapter can verify is a finding about the **tool**; it belongs in a journal and
+never changes a verdict.
+
+The journal lives at `<project>/.codewitness/self-issues/` and holds `issues.jsonl` (one row per
+occurrence, the source of truth), `SELF-ISSUES.md` (a regenerated digest grouped by issue id) and
+`resolved.jsonl` (timestamped resolutions). It is deliberately outside the run directory: a tool
+defect outlives the run that exposed it, and the user's workflow is to come back later and ask for the
+entries to be fixed. Keeping it next to the project means it survives `codewitness clean`, which only
+deletes runs.
+
+`SelfIssueRecord` derives a stable id (`CWI-…`) from the category, exception type and first application
+frame, so the same fault across runs is one entry rather than a stream of duplicates. The message is
+part of the hash only when no application frame exists, because messages often carry a run directory or
+a temporary path that changes every run. A resolution is an event, not a deletion: if the issue recurs
+after the resolution timestamp it is open again, which is what a regression should look like. Recording
+is best effort by contract — the journal never throws, because a failure to log a tool defect must not
+replace the original failure or change how the run ended.
+
+The recorder is passed to `VerificationEngine` explicitly through its constructor (defaulting to a
+no-op), so the tests can assert exactly which engine catch blocks write to it. The CLI installs a
+project-scoped journal before it starts work, which also gives picocli's execution-exception handler a
+place to put an exception that escaped a command. `codewitness issues` reads the journal, prints it in
+human or JSON form, and records resolutions.
+
+## 12. MCP server
+
+`codewitness mcp` is a thin protocol adapter over the same engine and the same domain model, not a
+second implementation. It reads newline-delimited JSON-RPC 2.0 on standard input, advertises the tools
+in `McpTools`, and writes one compact response per request. Standard output belongs to the protocol:
+the command captures it before redirecting the JVM's ordinary `System.out` to standard error, so a
+progress line or an accidental `println` cannot corrupt a frame. The engine's progress listener writes
+to standard error explicitly for the same reason.
+
+A verification result is not an MCP error. Exit code `1` (a requirement failed) and `2` (the run was
+blocked) are ordinary tool results, with the code in the text and in `structuredContent`; only invalid
+input and internal faults set `isError`. An unexpected exception inside a tool is also recorded in the
+self-issue journal before the model sees it, so the tool's own failures keep the same durable trail as
+CLI failures. The server supports stdio only; that is what the harness's MCP client launches, and an
+HTTP transport would need its own authentication and lifecycle design rather than a flag.

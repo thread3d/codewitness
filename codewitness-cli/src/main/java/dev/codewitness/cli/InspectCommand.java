@@ -64,6 +64,7 @@ public final class InspectCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         ProjectRef projectRef = CliSupport.projectRef(project);
+        SelfIssues.install(projectRef.root());
         ConfigLoader.Loaded loaded = CliSupport.loadConfig(projectRef.root(), configFile);
         VerificationConfig config = loaded.config();
 

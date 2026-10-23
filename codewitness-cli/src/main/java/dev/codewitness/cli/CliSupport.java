@@ -43,12 +43,22 @@ final class CliSupport {
      * <p>This is the composition root: everything else in the codebase depends on interfaces.
      */
     static VerificationEngine engine() {
+        return engine(dev.codewitness.core.diagnostics.SelfIssueRecorder.NOOP);
+    }
+
+    /**
+     * Builds the verification engine with a sink for faults it finds in itself.
+     *
+     * @param selfIssues journal that should receive engine faults
+     */
+    static VerificationEngine engine(dev.codewitness.core.diagnostics.SelfIssueRecorder selfIssues) {
         Wiring wiring = wiring();
         // Recognition for the languages no adapter below can verify. Without this a repository is reported
         // as though the code in those languages were not there.
         LanguageDetectorRegistry detectors = new LanguageDetectorRegistry().discover();
         return new VerificationEngine(wiring.languages(), wiring.providers(), detectors,
-                new dev.codewitness.core.exec.LocalProcessSandbox(List.of(Path.of("."))).runner());
+                new dev.codewitness.core.exec.LocalProcessSandbox(List.of(Path.of("."))).runner(),
+                selfIssues);
     }
 
     /**

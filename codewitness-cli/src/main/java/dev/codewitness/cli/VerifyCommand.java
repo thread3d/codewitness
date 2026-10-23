@@ -2,6 +2,10 @@ package dev.codewitness.cli;
 
 import dev.codewitness.core.config.ConfigLoader;
 import dev.codewitness.core.config.VerificationConfig;
+import dev.codewitness.core.diagnostics.SelfIssueCategory;
+import dev.codewitness.core.diagnostics.SelfIssueJournal;
+import dev.codewitness.core.diagnostics.SelfIssueRecord;
+import dev.codewitness.core.diagnostics.SelfIssueSeverity;
 import dev.codewitness.core.engine.VerificationEngine;
 import dev.codewitness.core.io.WorkspaceManager;
 import dev.codewitness.core.model.ProjectRef;
@@ -21,7 +25,10 @@ import picocli.CommandLine.Parameters;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 
 /**
@@ -94,6 +101,9 @@ public final class VerifyCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         ProjectRef projectRef = CliSupport.projectRef(project);
+        SelfIssues.install(projectRef.root());
+        SelfIssueJournal journal = SelfIssues.journal();
+        Set<String> issuesBefore = journal.openIssueIds();
         ConfigLoader.Loaded loaded = CliSupport.loadConfig(projectRef.root(), configFile);
         VerificationConfig config = loaded.config();
 
@@ -122,7 +132,8 @@ public final class VerifyCommand implements Callable<Integer> {
             System.err.println("configuration warning: " + warning);
         }
 
-        VerificationEngine engine = CliSupport.engine();
+        VerificationEngine engine = CliSupport.engine(
+                issue -> journal.record(issue.withCommand(SelfIssues.command())));
         Path base = CliSupport.runBase(projectRef.root(), outputDirectory, config);
         if (!quiet) {
             System.out.println("CodeWitness " + VerificationEngine.VERSION + " verifying " + projectRef.name());
@@ -133,7 +144,17 @@ public final class VerifyCommand implements Callable<Integer> {
             report = engine.verify(projectRef, requirements, config, CliSupport.consoleProgress(quiet),
                     base, inPlace ? WorkspaceManager.Mode.IN_PLACE : WorkspaceManager.Mode.COPY);
         } catch (RuntimeException e) {
+            // The pipeline normally converts a phase failure into a report. Reaching this catch means the
+            // failure escaped the pipeline itself, which is exactly the kind of defect that should not be
+            // lost with the terminal.
+            journal.record(SelfIssueCategory.INTERNAL_ERROR, SelfIssueSeverity.CRITICAL,
+                    "Verification pipeline failed: " + e, e,
+                    Map.of(SelfIssueRecord.PHASE, "verify",
+                            SelfIssueRecord.PROJECT, projectRef.root().toString(),
+                            SelfIssueRecord.COMMAND, SelfIssues.command(),
+                            SelfIssueRecord.VERSION, VerificationEngine.VERSION));
             System.err.println("verification failed: " + e);
+            System.err.println("codewitness: self-issue log: " + journal.markdownPath());
             return 3;
         }
 
@@ -155,6 +176,13 @@ public final class VerifyCommand implements Callable<Integer> {
                 store.save(report, jsonText);
             }
         } catch (RuntimeException e) {
+            journal.record(SelfIssueCategory.REPORT_FAILURE, SelfIssueSeverity.MEDIUM,
+                    "Report artefacts could not be written completely: " + e, e,
+                    Map.of(SelfIssueRecord.PHASE, "report",
+                            SelfIssueRecord.RUN_ID, report.runId(),
+                            SelfIssueRecord.PROJECT, projectRef.root().toString(),
+                            SelfIssueRecord.COMMAND, SelfIssues.command(),
+                            SelfIssueRecord.VERSION, VerificationEngine.VERSION));
             System.err.println("warning: report could not be written completely: " + e);
         }
 
@@ -169,6 +197,18 @@ public final class VerifyCommand implements Callable<Integer> {
         }
         if (htmlPath != null) {
             System.out.println("HTML report: " + htmlPath);
+        }
+
+        // Only new issues are announced. Repeating the whole backlog on every run would train the reader
+        // to ignore the line that matters; an issue that is already open is still in `codewitness issues`.
+        Set<String> newIssues = new LinkedHashSet<>(journal.openIssueIds());
+        newIssues.removeAll(issuesBefore);
+        if (!newIssues.isEmpty()) {
+            System.err.println();
+            System.err.println("codewitness: recorded " + newIssues.size() + " new self-issue(s): "
+                    + String.join(", ", newIssues));
+            System.err.println("codewitness: review with: codewitness issues --project "
+                    + projectRef.root());
         }
 
         return exitCode(report.verdicts().stream().map(v -> v.status()).toList(), report.run().status(),
