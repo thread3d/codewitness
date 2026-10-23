@@ -1,0 +1,76 @@
+name: CodeQL
+
+# The `main` ruleset ("Standard", id 25618222) carries a `code_scanning` rule that requires a
+# CodeQL result before a pull request can merge. Nothing produced one: default setup was
+# "not-configured" and ci.yml was the only workflow, so the rule was unsatisfiable and every pull
+# request reported BLOCKED - the Dependabot bump in #2 needed an administrator bypass to land.
+# This workflow is what makes that rule satisfiable, so ordinary merges go through the policy
+# rather than around it.
+#
+# Advanced setup (a workflow like this one) is used instead of GitHub's one-click default setup for
+# a concrete reason: default setup compiles the project with the runner image's stock JDK, and this
+# project targets release 25 (pom.xml: maven.compiler.release=25), so CodeQL's autobuild would fail
+# to compile and upload no analysis at all - leaving the rule unsatisfiable exactly as before. The
+# JDK is installed explicitly below, as in ci.yml.
+#
+# The scan is deliberately kept out of ci.yml. That job already spends its 60-minute budget on the
+# multi-language end-to-end suite; folding a Java analysis into it would push it past the limit, and
+# a CodeQL failure would then turn a green test run red. A separate workflow fails on its own.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# `security-events: write` is what the analyze step's upload requires; nothing here writes code.
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze Java
+    runs-on: ubuntu-latest
+    # A cold Maven reactor build plus database creation and the query run. Generous for a project
+    # this size, but it must never be tight enough to cancel and leave a pull request unanalyzed.
+    timeout-minutes: 45
+
+    steps:
+      # Pinned to a full-length commit SHA for the supply-chain reason described in ci.yml, with the
+      # trailing release comment Dependabot reads. .github/dependabot.yml's github-actions group
+      # covers this file too, so these pins do not rot.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Temurin JDK 25
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # Only java-kotlin is analyzed. The fixtures/ tree is not part of the Maven reactor, so the
+      # build below never compiles it: those are deliberately varied sample projects that CodeWitness
+      # exists to inspect, and alerts about them would say nothing about the code this repository
+      # ships - while still counting against the ruleset's alert thresholds.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: java-kotlin
+          build-mode: manual
+
+      # Manual build mode: CodeQL traces the compiler, so the reactor has to genuinely run. This is
+      # the same command build.sh runs with -DskipTests; tests are compiled but not executed, since
+      # the analysis needs the produced classes, not test results.
+      - name: Build for analysis
+        run: ./mvnw -B -DskipTests package
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:java-kotlin
