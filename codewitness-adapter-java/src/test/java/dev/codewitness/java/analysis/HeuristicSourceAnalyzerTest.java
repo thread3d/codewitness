@@ -93,6 +93,51 @@ class HeuristicSourceAnalyzerTest {
         assertNoRule(context, "CW-NUM-001");
     }
 
+    @Test
+    void addingToACollectionNamedValuesIsNotADiscardedBigDecimal() throws IOException {
+        // The self-check reported these lines in SwiftScenarioTestGenerator: the file imports BigDecimal
+        // for another expression and "values" reads like a quantity, so the receiver was assumed to be a
+        // BigDecimal even though it is a list.
+        VerificationContext context = contextWithSource("SwiftScenarioTestGenerator.java", """
+                package com.example;
+
+                import java.math.BigDecimal;
+                import java.util.List;
+
+                public class SwiftScenarioTestGenerator {
+                    List<String> boundaryValuesFor(List<String> values, String input, String min) {
+                        if (values.isEmpty()) {
+                            values.add(defaultLiteral(input));
+                        }
+                        BigDecimal moved = new BigDecimal(min).add(BigDecimal.ONE);
+                        return values;
+                    }
+                }
+                """, false);
+
+        assertNoRule(context, "CW-NUM-001");
+    }
+
+    @Test
+    void aDiscardedCallOnADeclaredBigDecimalFieldIsStillReported() throws IOException {
+        VerificationContext context = contextWithSource("Ledger.java", """
+                package com.example;
+
+                import java.math.BigDecimal;
+
+                public class Ledger {
+                    private BigDecimal total;
+
+                    public void apply(BigDecimal amount) {
+                        this.total.add(amount);
+                    }
+                }
+                """, false);
+
+        Finding finding = finding(context, "CW-NUM-001");
+        assertEquals(9, finding.line(), "the finding points at the discarded call");
+    }
+
     // ------------------------------------------------------------------ CW-NUM-002
 
     @Test
@@ -447,7 +492,7 @@ class HeuristicSourceAnalyzerTest {
         Finding finding = findings.stream().filter(f -> f.ruleId().equals("CW-TEST-001")).findFirst().orElseThrow();
         assertEquals(Severity.MEDIUM, finding.severity());
         assertEquals(FindingCategory.MAINTAINABILITY, finding.category());
-        assertEquals(6, finding.line());
+        assertEquals(7, finding.line(), "the finding points at the test method, not at its annotation");
         assertTrue(finding.file().endsWith("LedgerTest.java"), finding.file());
     }
 
@@ -470,6 +515,91 @@ class HeuristicSourceAnalyzerTest {
 
         assertTrue(new HeuristicSourceAnalyzer().analyzeTests(context).stream()
                 .noneMatch(f -> f.ruleId().equals("CW-TEST-001")));
+    }
+
+    @Test
+    void aTestWhoseAssertionsFollowAnEmbeddedFixtureIsNotReported() throws IOException {
+        // The self-check reported 31 of these: the body was delimited by the first `}` on its own line,
+        // which sits inside the fixture text block, so every assertion after it was invisible.
+        VerificationContext context = contextWithSource("NodeLockFileTest.java", """
+                package com.example;
+
+                import org.junit.jupiter.api.Test;
+
+                import static org.junit.jupiter.api.Assertions.assertEquals;
+
+                class NodeLockFileTest {
+                    @Test
+                    void readsTheFlatPackagesMap() {
+                        String lock = \"\"\"
+                                {
+                                  "packages": {
+                                    "": { "name": "sample-app" },
+                                    "node_modules/left-pad": { "version": "1.3.0" }
+                                  }
+                                }
+                                \"\"\";
+                        assertEquals(List.of("left-pad@1.3.0"), NodeLockFile.parse(lock));
+                    }
+                }
+                """, true);
+
+        assertTrue(new HeuristicSourceAnalyzer().analyzeTests(context).stream()
+                        .noneMatch(f -> f.ruleId().equals("CW-TEST-001")),
+                "assertions after an embedded fixture are still assertions");
+    }
+
+    @Test
+    void anAssertionInsideAnEmbeddedFixtureDoesNotCount() throws IOException {
+        VerificationContext context = contextWithSource("GeneratorTest.java", """
+                package com.example;
+
+                import org.junit.jupiter.api.Test;
+
+                class GeneratorTest {
+                    @Test
+                    void writesATestThatAsserts() {
+                        String generated = \"\"\"
+                                @Test
+                                void generated() {
+                                    assertEquals(1, 1);
+                                }
+                                \"\"\";
+                        write(generated);
+                    }
+                }
+                """, true);
+
+        List<Finding> findings = new HeuristicSourceAnalyzer().analyzeTests(context);
+        assertEquals(1, findings.size(), "only the outer test lacks an assertion: " + findings);
+        assertEquals(7, findings.getFirst().line(), "the fixture's @Test must not be analysed as a test");
+    }
+
+    @Test
+    void aTestWhoseOracleIsAThrownAssertionErrorIsNotReported() throws IOException {
+        // ScenarioTestGeneratorTest invokes the compiled generated test reflectively and turns a
+        // reflective failure into an AssertionError. That test can fail, so it is not an assertion-free
+        // test even though it contains no assertion call.
+        VerificationContext context = contextWithSource("GeneratorTest.java", """
+                package com.example;
+
+                import org.junit.jupiter.api.Test;
+
+                class GeneratorTest {
+                    @Test
+                    void generatedCaseRuns() {
+                        try {
+                            invokeGeneratedCase();
+                        } catch (ReflectiveOperationException e) {
+                            throw new AssertionError("the generated case did not run", e);
+                        }
+                    }
+                }
+                """, true);
+
+        assertTrue(new HeuristicSourceAnalyzer().analyzeTests(context).stream()
+                        .noneMatch(f -> f.ruleId().equals("CW-TEST-001")),
+                "a thrown AssertionError is a failure oracle");
     }
 
     // ------------------------------------------------------------------ analyzer split

@@ -12,8 +12,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -34,10 +36,6 @@ import java.util.stream.Stream;
  * available and whose rules are auditable in one file.
  */
 public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAnalyzer, VerificationTools.SecurityAnalyzer {
-
-    /** Names that suggest a monetary or quantity value rather than a counter or index. */
-    private static final Pattern VALUEISH = Pattern.compile(
-            "(?i)(bigdecimal|amount|balance|total|price|sum|limit|money|withdrawn|fee|credit|debit|value)");
 
     private static final List<Rule> LINE_RULES = List.of(
             new Rule("CW-SEC-001", Severity.CRITICAL, FindingCategory.SECURITY, true,
@@ -65,15 +63,20 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
                     Pattern.compile("ChronoUnit\\.DAYS|toLocalDate\\(\\)\\s*;|LocalDate\\.now\\(\\)"),
                     "Calendar-based date arithmetic: a limit expressed over a rolling window is not the same as a limit "
                             + "per calendar day. Check this against the requirement."));
+    /** A declaration that gives a name the immutable {@code BigDecimal} type. */
+    private static final Pattern BIGDECIMAL_NAME = Pattern.compile(
+            "\\bBigDecimal\\s+([A-Za-z_$][\\w$]*)\\s*[=;,)]");
     private static final Pattern DISCARDED_RESULT = Pattern.compile(
             "^\\s*((?:[A-Za-z_$][\\w$]*\\.)*[A-Za-z_$][\\w$]*|new\\s+[\\w.$]+)\\s*\\.\\s*(add|subtract|multiply|divide|setScale|negate|abs|stripTrailingZeros)\\s*\\(.*\\)\\s*;\\s*$");
-    private static final Pattern COLLECTION_RECEIVER = Pattern.compile(
-            "(?i)(list|set|map|queue|deque|collection|arraylist|hashmap|hashset|builder|buffer|stack|tasks|results|findings|names|items)$");
     private static final Pattern EMPTY_CATCH = Pattern.compile("catch\\s*\\([^)]*\\)\\s*\\{\\s*\\}");
-    private static final Pattern TEST_METHOD = Pattern.compile(
-            "@(?:org\\.junit\\.jupiter\\.api\\.)?Test\\b[\\s\\S]{0,400}?\\b(?:void|public|private|protected)\\s+\\w+\\s*\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\s*\\}", Pattern.MULTILINE);
+    /** A {@code @Test} method, capturing the name of the method the annotation applies to. */
+    private static final Pattern TEST_METHOD_HEADER = Pattern.compile(
+            "@(?:org\\.junit\\.jupiter\\.api\\.)?Test\\b[\\s\\S]{0,1000}?\\bvoid\\s+([A-Za-z_$][\\w$]*)\\s*\\(");
+    /** What may stand between a parameter list and the method body: an optional {@code throws} clause. */
+    private static final Pattern METHOD_BODY_OPENER = Pattern.compile(
+            "^\\s*(?:throws\\s+[\\w.$]+(?:\\s*,\\s+[\\w.$]+)*\\s*)?\\{");
     private static final Pattern ASSERTION = Pattern.compile(
-            "assert\\w*\\s*\\(|Assertions\\.|Assert\\.|fail\\s*\\(|assertThat\\s*\\(|verify\\s*\\(|expect\\s*\\(|assertThrows|assertAll");
+            "assert\\w*\\s*\\(|Assertions\\.|Assert\\.|fail\\s*\\(|assertThat\\s*\\(|verify\\s*\\(|expect\\s*\\(|assertThrows|assertAll|AssertionError\\b");
     private static final Pattern PRIVATE_FIELD = Pattern.compile(
             "(?m)^\\s*private\\s+(?!static\\s+final|final)\\w[\\w.<>\\[\\]]*\\s+(\\w+)\\s*(?:=[^;]*)?;");
     private static final Pattern IF_STATEMENT = Pattern.compile("(?m)^\\s*if\\s*\\(");
@@ -154,7 +157,7 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
             return;
         }
         String relative = relativePath(context, file);
-        boolean mentionsBigDecimal = content.contains("BigDecimal");
+        Set<String> bigDecimalNames = declaredBigDecimals(content);
         String[] lines = content.split("\\R", -1);
 
         for (int i = 0; i < lines.length; i++) {
@@ -170,19 +173,12 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
                 }
             }
             Matcher discarded = DISCARDED_RESULT.matcher(line);
-            if (discarded.matches() && mentionsBigDecimal) {
-                String receiver = discarded.group(1);
-                String simple = receiver.contains(".")
-                        ? receiver.substring(receiver.lastIndexOf('.') + 1) : receiver;
-                boolean looksLikeCollection = COLLECTION_RECEIVER.matcher(simple).find();
-                boolean looksLikeValue = VALUEISH.matcher(receiver).find();
-                if (!looksLikeCollection && looksLikeValue) {
-                    findings.add(new Finding("heuristics", "CW-NUM-001", Severity.HIGH, FindingCategory.BUG,
-                            "The result of BigDecimal." + discarded.group(2) + "(...) is discarded. BigDecimal is "
-                                    + "immutable, so this call changes nothing; the bug is silent and the compiler "
-                                    + "does not report it.",
-                            relative, i + 1, null, Map.of("snippet", line.strip())));
-                }
+            if (discarded.matches() && isBigDecimalReceiver(discarded.group(1), bigDecimalNames)) {
+                findings.add(new Finding("heuristics", "CW-NUM-001", Severity.HIGH, FindingCategory.BUG,
+                        "The result of BigDecimal." + discarded.group(2) + "(...) is discarded. BigDecimal is "
+                                + "immutable, so this call changes nothing; the bug is silent and the compiler "
+                                + "does not report it.",
+                        relative, i + 1, null, Map.of("snippet", line.strip())));
             }
         }
 
@@ -211,7 +207,16 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
         }
     }
 
-    /** Analyses test sources for tests that cannot fail, which is a real verification hazard. */
+    /**
+     * Analyses test sources for tests that cannot fail, which is a real verification hazard.
+     *
+     * <p>The body is delimited by matching braces rather than by a regex. A test that embeds a fixture
+     * source as a text block contains braces on their own line, and a lazy body capture stopped at the
+     * first of them, so every assertion after an embedded brace was invisible: that reported 31
+     * assertion-free tests on this project's own suite, all of which assert. The scan runs on a view
+     * with comments and literal contents blanked out, so an {@code assert} inside a fixture string is
+     * not mistaken for an assertion of the test around it.
+     */
     public List<Finding> analyzeTests(VerificationContext context) {
         List<Finding> findings = new ArrayList<>();
         for (Path file : javaFiles(context, true)) {
@@ -222,19 +227,173 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
                 continue;
             }
             String relative = relativePath(context, file);
-            Matcher matcher = TEST_METHOD.matcher(content);
+            String code = codeOnly(content);
+            Matcher matcher = TEST_METHOD_HEADER.matcher(code);
             while (matcher.find()) {
-                String body = matcher.group(1);
-                if (!ASSERTION.matcher(body).find() && body.strip().length() > 0) {
+                int openParen = matcher.end() - 1;
+                int closeParen = matchingDelimiter(code, openParen, '(', ')');
+                if (closeParen < 0) {
+                    continue;
+                }
+                Matcher opener = METHOD_BODY_OPENER.matcher(code.substring(closeParen + 1));
+                if (!opener.find()) {
+                    continue;
+                }
+                int openBrace = closeParen + opener.end();
+                int closeBrace = matchingDelimiter(code, openBrace, '{', '}');
+                if (closeBrace < 0) {
+                    continue;
+                }
+                String body = code.substring(openBrace + 1, closeBrace);
+                if (!body.isBlank() && !ASSERTION.matcher(body).find()) {
                     findings.add(new Finding("heuristics", "CW-TEST-001", Severity.MEDIUM,
                             FindingCategory.MAINTAINABILITY,
                             "This test has no assertion, so it passes whatever the code does. A passing test that "
                                     + "cannot fail is worse than no test: it looks like evidence.",
-                            relative, lineOf(content, matcher.start()), null, Map.of()));
+                            relative, lineOf(content, matcher.start(1)), null, Map.of()));
                 }
             }
         }
         return findings;
+    }
+
+    /**
+     * @return the names this file declares as a {@code BigDecimal}: parameters, fields and locals.
+     *
+     * <p>A name is only evidence that a value is immutable when the file declares it that way. Guessing
+     * from the name alone reported {@code values.add(defaultLiteral(input))} on an {@code ArrayList} as
+     * a discarded {@code BigDecimal.add}, because the file imports {@code BigDecimal} for a different
+     * expression and "values" reads like a quantity.
+     */
+    private static Set<String> declaredBigDecimals(String content) {
+        if (!content.contains("BigDecimal")) {
+            return Set.of();
+        }
+        Set<String> names = new HashSet<>();
+        Matcher matcher = BIGDECIMAL_NAME.matcher(codeOnly(content));
+        while (matcher.find()) {
+            names.add(matcher.group(1));
+        }
+        return names;
+    }
+
+    /** @return {@code true} when {@code receiver} is a value the file declares as a {@code BigDecimal}. */
+    private static boolean isBigDecimalReceiver(String receiver, Set<String> declared) {
+        String trimmed = receiver.strip();
+        if (trimmed.startsWith("new ")) {
+            return trimmed.endsWith("BigDecimal");
+        }
+        if (trimmed.startsWith("BigDecimal.") || trimmed.startsWith("java.math.BigDecimal.")) {
+            return true; // a static constant, such as BigDecimal.ZERO
+        }
+        String simple = trimmed.contains(".")
+                ? trimmed.substring(trimmed.lastIndexOf('.') + 1) : trimmed;
+        return declared.contains(simple);
+    }
+
+    /**
+     * Skips the comment or literal that starts at {@code index}, so callers can count braces and
+     * parentheses without being fooled by text that is not code.
+     *
+     * @return the index just past the skipped construct, or {@code -1} when code starts there
+     */
+    private static int skipNonCode(String source, int index) {
+        char first = source.charAt(index);
+        if (first == '/' && index + 1 < source.length()) {
+            char second = source.charAt(index + 1);
+            if (second == '/') {
+                int end = source.indexOf('\n', index);
+                return end < 0 ? source.length() : end;
+            }
+            if (second == '*') {
+                int end = source.indexOf("*/", index + 2);
+                return end < 0 ? source.length() : end + 2;
+            }
+        }
+        if (source.startsWith("\"\"\"", index)) {
+            return endOfTextBlock(source, index + 3);
+        }
+        if (first == '"') {
+            return endOfQuoted(source, index + 1, '"');
+        }
+        if (first == '\'') {
+            return endOfQuoted(source, index + 1, '\'');
+        }
+        return -1;
+    }
+
+    private static int endOfTextBlock(String source, int from) {
+        int index = from;
+        while (index < source.length()) {
+            char c = source.charAt(index);
+            if (c == '\\') {
+                index += 2;
+                continue;
+            }
+            if (source.startsWith("\"\"\"", index)) {
+                return index + 3;
+            }
+            index++;
+        }
+        return source.length();
+    }
+
+    private static int endOfQuoted(String source, int from, char quote) {
+        int index = from;
+        while (index < source.length()) {
+            char c = source.charAt(index);
+            if (c == '\\') {
+                index += 2;
+                continue;
+            }
+            if (c == quote) {
+                return index + 1;
+            }
+            if (c == '\n') {
+                return index; // an unterminated literal must not swallow the rest of the file
+            }
+            index++;
+        }
+        return source.length();
+    }
+
+    /**
+     * @return the index of the delimiter closing the one at {@code openIndex}, or {@code -1} when the
+     *     text does not balance. Expects the literal-blanked view, so plain counting is enough.
+     */
+    private static int matchingDelimiter(String code, int openIndex, char open, char close) {
+        int depth = 0;
+        for (int index = openIndex; index < code.length(); index++) {
+            char c = code.charAt(index);
+            if (c == open) {
+                depth++;
+            } else if (c == close) {
+                depth--;
+                if (depth == 0) {
+                    return index;
+                }
+            }
+        }
+        return -1;
+    }
+
+    /** @return {@code source} with comments and literal contents blanked out, at the same length. */
+    private static String codeOnly(String source) {
+        StringBuilder code = new StringBuilder(source.length());
+        int index = 0;
+        while (index < source.length()) {
+            int skipped = skipNonCode(source, index);
+            if (skipped < 0) {
+                code.append(source.charAt(index));
+                index++;
+                continue;
+            }
+            for (int blank = index; blank < skipped; blank++) {
+                code.append(source.charAt(blank) == '\n' ? '\n' : ' ');
+            }
+            index = skipped;
+        }
+        return code.toString();
     }
 
     private static String relativePath(VerificationContext context, Path file) {

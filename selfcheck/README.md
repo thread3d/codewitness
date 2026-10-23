@@ -120,15 +120,28 @@ count.
 
 ## Known false positives in the report
 
-The static-analysis section reports 25 findings (1 high, 24 medium). They are heuristic and cannot
+The static-analysis section reports 10 findings (1 high, 9 medium). They are heuristic and cannot
 change any verdict: a finding only refutes a requirement when a deterministic tool produced it
 (`Finding.fromDeterministicTool`), and every rule in the heuristic table identifies itself as
 `*-heuristics`. A rule match is recorded as advisory evidence with a note instead.
 
 - the `HIGH` finding is `ProcessBuilder` use in `LocalProcessSandbox` — that class *is* the sandbox
   boundary, and the README documents this rule's false-positive profile;
-- the `CW-CONC-001` medium findings fire on immutable value types/builder fields that are never
-  shared, which the README calls out as advisory by design;
-- the `CW-TEST-001` medium findings fire on test methods whose assertions live in a helper method the
-  source heuristic cannot follow; a method that calls `assertFindings(...)` looks assertion-free to a
-  regex, and the rule is advisory for the same reason as the others.
+- the `CW-CONC-001` medium findings fire on value types and per-run accumulators whose fields are
+  never shared: the rule sees a private mutable field, an `if` and an assignment in the same class
+  and calls it a check-then-act race, without asking whether two threads can reach it. The README
+  calls this out as advisory by design.
+
+Two rules that used to dominate this list report nothing here now. Both were fixed rather than
+suppressed, and each has regression tests in `HeuristicSourceAnalyzerTest`:
+
+- `CW-TEST-001` reported 31 tests as assertion-free, and all 31 assert. The method body was delimited
+  by the first `}` on its own line, which sits inside the fixture text block those tests embed, so
+  every assertion after it was invisible. Bodies are now delimited by matching braces on a
+  literal-blanked view — the same technique the C++ and C# analyzers already used — and the finding
+  points at the method rather than at its `@Test` annotation. An `assert` inside a fixture string no
+  longer counts as an assertion of the test around it, while a thrown `AssertionError` does.
+- `CW-NUM-001` reported two discarded `BigDecimal.add` calls that were `List.add` on an
+  `ArrayList<String>` named `values`. A receiver now has to be declared `BigDecimal` in the same
+  file (or be `new BigDecimal` / `BigDecimal.ZERO`) instead of merely reading like a quantity.
+

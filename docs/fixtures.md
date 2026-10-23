@@ -950,7 +950,7 @@ test and asserts nothing, and another asserts that a string has a non-negative l
 ```text
 R-001  Letter grades follow the documented boundaries   VERIFIED
 R-002  The boundaries match the institution's policy    UNVERIFIED  (no scenario can express it)
-findings: CW-TEST-001 MEDIUM src/test/java/com/example/grade/GradeCalculatorTest.java:27
+findings: CW-TEST-001 MEDIUM src/test/java/com/example/grade/GradeCalculatorTest.java:28
 ```
 
 A test that cannot fail is worse than no test, because it looks like evidence — so CodeWitness
