@@ -67,7 +67,7 @@ CodeWitness thinks it is looking at, before anything is executed.
 
 ```text
 Loaded 5 requirement(s) from fixtures/withdrawal-ledger/requirements.md
-CodeWitness 0.1.0 verifying withdrawal-ledger
+CodeWitness 0.1.1 verifying withdrawal-ledger
 
 CODEWITNESS  verification report
 run          CW-2026-10-06-CWZBF

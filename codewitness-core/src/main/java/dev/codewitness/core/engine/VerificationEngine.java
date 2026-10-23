@@ -101,7 +101,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "0.1.0";
+    public static final String VERSION = "0.1.1";
 
     private final LanguageAdapterRegistry languages;
     private final VerificationProviderRegistry providers;
