@@ -73,10 +73,19 @@ public final class VerdictCalculator {
         boolean deterministic = requirementEvidence.stream().anyMatch(Evidence::qualifiesAsDeterministicProof);
 
         if (buildBlocked) {
+            // The ordering is deliberate and documented: a project that does not build cannot be verified,
+            // so BLOCKED outranks FAILED. What must not happen is that a counterexample the run actually
+            // observed disappears from the report because a sibling language failed to build, so the reason
+            // names what was found even though it does not decide the verdict.
+            String observed = counterexamples.isEmpty() ? ""
+                    : " An executed experiment did record " + counterexamples.size()
+                            + " counterexample(s) for this requirement (see "
+                            + String.join(", ", counterexampleIds) + "); they are reported but do not decide "
+                            + "this verdict, because a project that does not build cannot be verified.";
             return new RequirementVerdict(requirement.id(), RequirementStatus.BLOCKED,
                     "The project could not be built, so no verification could be attempted. "
                             + "A failed build is not evidence that the code is incorrect. Reason: "
-                            + buildBlockReason,
+                            + buildBlockReason + observed,
                     evidenceIds, outcomes, unknownAspects, counterexampleIds, deterministic);
         }
 

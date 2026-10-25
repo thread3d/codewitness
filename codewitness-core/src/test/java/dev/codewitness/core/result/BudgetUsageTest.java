@@ -192,6 +192,39 @@ class BudgetUsageTest {
         assertEquals(Budget.defaults().maxGeneratedTests(), budget.maxGeneratedTests());
     }
 
+
+    @Test
+    @DisplayName("reaching max_generated_tests marks the run truncated and names the limit")
+    void reachingTheGeneratedTestCapIsRecorded() {
+        // The cap used to stop the work without saying so: exhausted stayed false and the reason null, which
+        // reads exactly like a run that finished. The report promises to say which limit stopped it.
+        Budget budget = Budget.defaults().withMaxGeneratedTests(2);
+        BudgetUsage.Tracker tracker = new BudgetUsage.Tracker(budget);
+
+        tracker.recordGeneratedTests(1);
+        assertFalse(tracker.isExhausted(), "one generated test does not reach a cap of two");
+
+        tracker.recordGeneratedTests(1);
+        BudgetUsage usage = tracker.snapshot();
+
+        assertTrue(usage.exhausted(), "hitting the cap must mark the run exhausted");
+        assertTrue(usage.exhaustedReason().contains("max_generated_tests"), usage.exhaustedReason());
+        assertFalse(tracker.canGenerateTests(), "no further test may be generated");
+    }
+
+    @Test
+    @DisplayName("reaching max_llm_calls marks the run truncated and names the limit")
+    void reachingTheLlmCapIsRecorded() {
+        Budget budget = Budget.defaults().withMaxLlmCalls(1);
+        BudgetUsage.Tracker tracker = new BudgetUsage.Tracker(budget);
+
+        tracker.recordLlmCall();
+        BudgetUsage usage = tracker.snapshot();
+
+        assertTrue(usage.exhausted());
+        assertTrue(usage.exhaustedReason().contains("max_llm_calls"), usage.exhaustedReason());
+    }
+
     @Test
     @DisplayName("BudgetUsage.empty() is a clean snapshot")
     void budgetUsageEmpty() {

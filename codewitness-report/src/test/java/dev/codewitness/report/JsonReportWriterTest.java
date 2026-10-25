@@ -29,10 +29,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class JsonReportWriterTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    // "runStatus" is the pipeline outcome and "build" the build phase; they are top level because a run can
+    // be BLOCKED while every verdict it reached is VERIFIED, and because a failed build is invisible
+    // otherwise. See HtmlReportWriter and the report audit that put them there.
     private static final List<String> REQUIRED_TOP_LEVEL = List.of(
-            "runId", "project", "status", "statusExplanation", "generatedAt", "requirements",
-            "counterexamples", "evidence", "tests", "mutation", "coverage", "findings", "security",
-            "dependencies", "environment", "phases", "budget", "limitations");
+            "runId", "project", "status", "runStatus", "statusExplanation", "generatedAt", "build",
+            "requirements", "counterexamples", "evidence", "tests", "mutation", "coverage", "findings",
+            "security", "dependencies", "environment", "phases", "budget", "limitations");
 
     private static VerificationReport report;
     private static JsonNode json;

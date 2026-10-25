@@ -94,12 +94,56 @@ public final class PythonGeneratedTestRunner implements VerificationTools.Genera
 
         Map<String, String> environment =
                 PythonInterpreter.environment(project, context.projectRoot(), List.of(generatedDirectory));
+        if (pytest) {
+            // The generated tests are plain unittest cases; nothing about them needs a pytest plugin. But
+            // pytest auto-loads every plugin installed in the interpreter, and a third-party plugin that
+            // fails at import time - an incompatible mark on a fixture, for instance - aborts collection
+            // before a single generated case runs. That turns a test that would have found a counterexample
+            // into "no evidence", so the plugins are switched off for this run: they are code CodeWitness
+            // does not control, running inside the measurement.
+            environment.put("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1");
+        }
         ProcessSpec spec = ProcessSpec.builder(command, context.projectRoot())
                 .environment(environment)
                 .timeout(context.config().limits().timeout())
                 .maxOutputBytes(1_000_000)
                 .build();
         ProcessResult result = context.runner().run(spec);
+
+        if (pytest && !Files.isRegularFile(report)) {
+            // pytest still could not produce a report - a broken project conftest, a pytest version that
+            // rejects the file, an interpreter whose site-packages is unusable. The generated test needs
+            // nothing but the standard library, so the stdlib runner is tried before the evidence is
+            // written off: the difference between "no counterexample" and "the runner would not start" is
+            // the difference between UNVERIFIED and a finding.
+            PythonTestReportParser.deleteIfExists(report);
+            List<String> fallback = new ArrayList<>();
+            fallback.add(interpreter);
+            fallback.add(scripts.unittestRunner().toString());
+            fallback.add("--xml");
+            fallback.add(report.toString());
+            fallback.add("--root");
+            fallback.add(generatedDirectory.toString());
+            for (Path file : generatedFiles) {
+                fallback.add("--file");
+                fallback.add(file.toString());
+            }
+            ProcessResult fallbackResult = context.runner().run(ProcessSpec.builder(fallback, context.projectRoot())
+                    .environment(environment)
+                    .timeout(context.config().limits().timeout())
+                    .maxOutputBytes(1_000_000)
+                    .build());
+            if (Files.isRegularFile(report)) {
+                TestResult parsed = PythonTestReportParser.parse(List.of(report), generatedDirectory,
+                        "generated test run through the stdlib runner after pytest produced no report ("
+                                + result.describeOutcome() + "; fallback " + fallbackResult.describeOutcome()
+                                + ")");
+                if (!parsed.cases().isEmpty()) {
+                    return new GeneratedTestExecution(tests, parsed, artifacts, parsed.describe());
+                }
+            }
+            result = fallbackResult;
+        }
 
         if (!Files.isRegularFile(report)) {
             String note = "the Python runner produced no report for the generated tests ("
@@ -148,6 +192,12 @@ public final class PythonGeneratedTestRunner implements VerificationTools.Genera
         }
         if (caseIndex != null) {
             command.add("CODEWITNESS_CASE=" + caseIndex);
+        }
+        // The run disables pytest's plugin auto-loading for generated tests, so the replay has to as well: a
+        // command that differs from what produced the counterexample is not a reproduction. The project's own
+        // suite is left alone, because a project may legitimately depend on its plugins.
+        if (pytest) {
+            command.add("PYTEST_DISABLE_PLUGIN_AUTOLOAD=1");
         }
         command.add(interpreter);
         if (pytest) {

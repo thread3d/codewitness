@@ -163,8 +163,13 @@ public final class JsonReportWriter {
         root.put("runId", report.runId());
         root.set("project", projectNode(report));
         root.put("status", report.overallStatus().name());
+        // The pipeline's own outcome, kept separate from the verdicts: a run can be BLOCKED while every
+        // requirement it reached is VERIFIED, and a machine consumer has to be able to tell them apart.
+        root.put("runStatus", report.run() != null && report.run().status() != null
+                ? report.run().status().name() : null);
         root.put("statusExplanation", statusExplanation(report));
         root.put("generatedAt", generatedAt(report).toString());
+        root.set("build", buildNode(report));
         root.set("requirements", requirementsNode(report));
         root.set("counterexamples", counterexamplesNode(report.counterexamples()));
         root.set("evidence", evidenceNode(report.evidence()));
@@ -205,6 +210,36 @@ public final class JsonReportWriter {
             }
         }
         return Instant.now();
+    }
+
+    /**
+     * Renders the build phase, which the JSON report otherwise only exposes as an evidence tail.
+     *
+     * <p>{@link VerificationReport#build()} carries the command, the exit status and the compiler's error
+     * and warning counts; a report without them cannot distinguish a clean compile from one that emitted
+     * thousands of warnings, and cannot show why a run was {@code BLOCKED}.
+     *
+     * @param report report being rendered
+     * @return build node, never {@code null}
+     */
+    private ObjectNode buildNode(VerificationReport report) {
+        ObjectNode node = mapper.createObjectNode();
+        VerificationReport.BuildSummary build = report.build();
+        if (build == null) {
+            node.put("attempted", false);
+            node.put("success", false);
+            node.put("note", "no build summary was recorded");
+            node.set("command", mapper.createArrayNode());
+            return node;
+        }
+        node.put("attempted", build.attempted());
+        node.put("success", build.success());
+        node.set("command", strings(build.command()));
+        node.put("durationMillis", build.durationMillis());
+        node.put("errors", build.errorCount());
+        node.put("warnings", build.warningCount());
+        node.put("note", build.note());
+        return node;
     }
 
     private ObjectNode projectNode(VerificationReport report) {
@@ -258,7 +293,13 @@ public final class JsonReportWriter {
     private ArrayNode requirementsNode(VerificationReport report) {
         Map<String, RequirementVerdict> verdictsById = new LinkedHashMap<>();
         for (RequirementVerdict verdict : report.verdicts()) {
-            verdictsById.put(verdict.requirementId(), verdict);
+            RequirementVerdict previous = verdictsById.get(verdict.requirementId());
+            // Two verdicts for one requirement id used to collapse by last-write-wins, which could drop a
+            // FAILED verdict behind a later VERIFIED one. The worse verdict survives: a report may not
+            // quietly discard the least favourable thing it knows.
+            verdictsById.put(verdict.requirementId(),
+                    previous == null || StatusSeverity.moreSevere(previous, verdict) == verdict
+                            ? verdict : previous);
         }
         ArrayNode array = mapper.createArrayNode();
         for (Requirement requirement : report.requirements().requirements()) {

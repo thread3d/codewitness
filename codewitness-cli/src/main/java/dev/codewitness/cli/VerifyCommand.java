@@ -176,14 +176,23 @@ public final class VerifyCommand implements Callable<Integer> {
                 store.save(report, jsonText);
             }
         } catch (RuntimeException e) {
-            journal.record(SelfIssueCategory.REPORT_FAILURE, SelfIssueSeverity.MEDIUM,
+            journal.record(SelfIssueCategory.REPORT_FAILURE, SelfIssueSeverity.HIGH,
                     "Report artefacts could not be written completely: " + e, e,
                     Map.of(SelfIssueRecord.PHASE, "report",
                             SelfIssueRecord.RUN_ID, report.runId(),
                             SelfIssueRecord.PROJECT, projectRef.root().toString(),
                             SelfIssueRecord.COMMAND, SelfIssues.command(),
                             SelfIssueRecord.VERSION, VerificationEngine.VERSION));
-            System.err.println("warning: report could not be written completely: " + e);
+            // A verification whose result cannot be read back is not evidence, so this is a command failure
+            // and not a warning. It used to be a single yellow line while the exit code was computed from the
+            // verdicts alone, which meant a full disk or an unreadable index lost the run and still exited 0.
+            System.err.println("codewitness: the run completed but its result could not be stored: " + e);
+            System.err.println("codewitness: the verdicts above were observed, but nothing was recorded, so "
+                    + "`codewitness report` will not show this run.");
+            System.err.println("codewitness: self-issue log: " + journal.markdownPath());
+            System.out.println();
+            System.out.println(ConsoleReporter.render(report));
+            return 3;
         }
 
         if (printJson) {

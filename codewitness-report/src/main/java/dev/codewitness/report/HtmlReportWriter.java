@@ -23,6 +23,7 @@ import dev.codewitness.core.result.EnvironmentSnapshot;
 import dev.codewitness.core.result.ObligationOutcome;
 import dev.codewitness.core.result.PhaseRecord;
 import dev.codewitness.core.result.RequirementVerdict;
+import dev.codewitness.core.result.RunStatus;
 import dev.codewitness.core.result.VerificationReport;
 import dev.codewitness.core.result.VerificationRun;
 
@@ -32,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -132,7 +134,9 @@ public final class HtmlReportWriter {
                 .append("</title>\n<style>\n").append(CSS).append("</style>\n</head>\n<body>\n");
         appendHeader(html, report);
         html.append("<main>\n");
+        appendRunStatusWarning(html, report);
         appendExecutiveSummary(html, report);
+        appendBuild(html, report);
         appendRequirements(html, report);
         appendCounterexamples(html, report);
         appendTests(html, report);
@@ -191,7 +195,12 @@ public final class HtmlReportWriter {
                 .append("<dt>Revision</dt><dd>").append(esc(revision(report))).append("</dd>\n")
                 .append("<dt>Generated</dt><dd>").append(esc(generatedAt(report).toString())).append("</dd>\n")
                 .append("<dt>Overall status</dt><dd>").append(badge(report.overallStatus())).append(" ")
-                .append(esc(report.describe())).append("</dd>\n");
+                .append(esc(countsOnly(report))).append("</dd>\n")
+                // The verdicts say what was established about the requirements; the run status says what
+                // the pipeline itself achieved. They are different questions, and a report that shows only
+                // the first can read as a pass for a run that never finished.
+                .append("<dt>Run status</dt><dd><code>").append(esc(runStatusName(report)))
+                .append("</code></dd>\n");
         // Which languages were verified. A reader of a polyglot report has to be able to tell, at a glance,
         // what the verdicts below are actually about.
         for (VerificationReport.LanguageSummary language : report.languages()) {
@@ -202,6 +211,74 @@ public final class HtmlReportWriter {
                 .append(esc(environment != null ? environment.isolationLevel() : "unknown"))
                 .append(" isolation</dd>\n")
                 .append("</dl>\n</header>\n");
+    }
+
+    /**
+     * Renders a banner when the pipeline did not complete, because the verdict table alone cannot say so.
+     *
+     * <p>A run can reach {@link RunStatus#BLOCKED} while every requirement it managed to evaluate is
+     * {@code VERIFIED} — the polyglot case where one language fails to build and another is fully
+     * evaluated. Reporting only the verdicts would render that run as a green page, which is the one thing
+     * an evidence report must not do.
+     *
+     * @param html   document under construction
+     * @param report report being rendered
+     */
+    private void appendRunStatusWarning(StringBuilder html, VerificationReport report) {
+        RunStatus status = runStatus(report);
+        if (status == null || status == RunStatus.COMPLETED) {
+            return;
+        }
+        html.append("<section id=\"run-status\">\n<p class=\"warn\">")
+                .append("<strong>This run did not complete.</strong> The verification pipeline ended with run "
+                        + "status <code>").append(esc(status.name()))
+                .append("</code>, so the verdicts below cover only the work that was reached. A verdict of "
+                        + "VERIFIED means the obligations that ran for it were discharged; it is not a "
+                        + "statement that the whole project was verified.</p>\n")
+                .append("<p class=\"muted\">The build section below records what the build phase attempted "
+                        + "and observed.</p>\n")
+                .append("</section>\n");
+    }
+
+    /**
+     * Renders the build phase, which no other section of this report covers.
+     *
+     * <p>Without it a reader cannot tell a project that compiled cleanly from one whose compiler emitted
+     * thousands of warnings, and a failed build — the reason a run is {@code BLOCKED} — is invisible
+     * outside the evidence appendix.
+     *
+     * @param html   document under construction
+     * @param report report being rendered
+     */
+    private void appendBuild(StringBuilder html, VerificationReport report) {
+        VerificationReport.BuildSummary build = report.build();
+        html.append("<section id=\"build\">\n<h2>Build</h2>\n");
+        if (build == null) {
+            html.append("<p class=\"warn\">No build summary was recorded for this run.</p>\n</section>\n");
+            return;
+        }
+        String sentence = !build.attempted()
+                ? "A build was not attempted."
+                : build.success() ? "The project built successfully." : "The build FAILED.";
+        html.append("<p class=\"").append(build.success() ? "ok" : "warn").append("\">")
+                .append(esc(sentence)).append("</p>\n")
+                .append("<table>\n<thead><tr><th>Attempted</th><th>Result</th><th class=\"num\">Errors</th>"
+                        + "<th class=\"num\">Warnings</th><th class=\"num\">Duration (ms)</th></tr></thead>\n"
+                        + "<tbody>\n<tr><td>")
+                .append(build.attempted() ? "yes" : "no")
+                .append("</td><td>").append(build.success() ? "succeeded" : "failed")
+                .append("</td><td class=\"num\">").append(build.errorCount())
+                .append("</td><td class=\"num\">").append(build.warningCount())
+                .append("</td><td class=\"num\">").append(build.durationMillis())
+                .append("</td></tr>\n</tbody>\n</table>\n");
+        if (!build.command().isEmpty()) {
+            html.append("<p class=\"muted\">Command:</p>\n<pre><code>")
+                    .append(esc(build.displayCommand())).append("</code></pre>\n");
+        }
+        if (hasNote(build.note())) {
+            html.append("<p class=\"muted\">Note: ").append(esc(build.note())).append("</p>\n");
+        }
+        html.append("</section>\n");
     }
 
     private void appendExecutiveSummary(StringBuilder html, VerificationReport report) {
@@ -233,9 +310,22 @@ public final class HtmlReportWriter {
         if (report.requirements().isEmpty()) {
             html.append("<p class=\"warn\">No requirements were supplied, so nothing could be verified.</p>\n");
         }
+        // Two verdicts for one requirement id - which a requirements document with a repeated heading
+        // produces - used to be collapsed by last-write-wins, so the card could read VERIFIED while the
+        // headline counted a FAILED one. The most severe verdict wins instead, and the collision is said
+        // out loud: a disagreement between verdicts is information, not something to hide.
         Map<String, RequirementVerdict> verdicts = new LinkedHashMap<>();
+        List<String> conflicting = new ArrayList<>();
         for (RequirementVerdict verdict : report.verdicts()) {
-            verdicts.put(verdict.requirementId(), verdict);
+            RequirementVerdict previous = verdicts.get(verdict.requirementId());
+            if (previous == null) {
+                verdicts.put(verdict.requirementId(), verdict);
+                continue;
+            }
+            if (!conflicting.contains(verdict.requirementId())) {
+                conflicting.add(verdict.requirementId());
+            }
+            verdicts.put(verdict.requirementId(), StatusSeverity.moreSevere(previous, verdict));
         }
         for (Requirement requirement : report.requirements().requirements()) {
             RequirementVerdict verdict = verdicts.remove(requirement.id());
@@ -243,6 +333,13 @@ public final class HtmlReportWriter {
         }
         for (RequirementVerdict verdict : verdicts.values()) {
             appendRequirement(html, null, verdict);
+        }
+        if (!conflicting.isEmpty()) {
+            html.append("<p class=\"warn\">More than one verdict was recorded for ")
+                    .append(conflicting.size()).append(" requirement id(s): ")
+                    .append(list(conflicting, true))
+                    .append(". The most severe verdict is shown, and the others remain in the JSON report. "
+                            + "Repeated requirement headings are the usual cause.</p>\n");
         }
         if (!report.requirements().isEmpty() && report.verdicts().isEmpty()) {
             html.append("<p class=\"warn\">No verdicts were recorded for these requirements; "
@@ -942,6 +1039,34 @@ public final class HtmlReportWriter {
      * treats {@code null} as no note - so the renderer has to treat it the same way. Calling
      * {@code isBlank()} on it instead aborted the whole HTML report for any adapter whose runner had
      * nothing extra to say.
+     */
+    /**
+     * @return the run status of a report, or {@code null} when the report carries no run record
+     */
+    private static RunStatus runStatus(VerificationReport report) {
+        return report.run() != null ? report.run().status() : null;
+    }
+
+    private static String runStatusName(VerificationReport report) {
+        RunStatus status = runStatus(report);
+        return status != null ? status.name() : "unknown";
+    }
+
+    /**
+     * Drops the status name that {@link VerificationReport#describe()} leads with, because the badge
+     * beside it already renders it; without this the hero reads "✗ FAILED FAILED (0 verified, ...)".
+     *
+     * @param report report being rendered
+     * @return the counts half of {@code describe()}, never {@code null}
+     */
+    private static String countsOnly(VerificationReport report) {
+        String description = report.describe();
+        String status = report.overallStatus().name();
+        return description.startsWith(status) ? description.substring(status.length()).trim() : description;
+    }
+
+    /**
+     * @return rank of a status where a larger number is a worse outcome
      */
     private static boolean hasNote(String note) {
         return note != null && !note.isBlank();

@@ -11,6 +11,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -72,6 +73,16 @@ public final class WorkspaceManager {
             // each one it creates, so no other exclusion is needed for the toolchain this adapter drives.
             "obj_dir");
 
+    /**
+     * @param paths paths to mention in a report line
+     * @return at most three of them, comma separated, with a count of the rest
+     */
+    private static String preview(List<Path> paths) {
+        List<String> names = paths.stream().limit(3).map(Path::toString).toList();
+        String joined = String.join(", ", names);
+        return paths.size() > names.size() ? joined + ", and " + (paths.size() - names.size()) + " more" : joined;
+    }
+
     private static boolean isExcludedDirectory(String name) {
         return EXCLUDED_DIRECTORIES.contains(name) || name.endsWith(".egg-info");
     }
@@ -99,17 +110,42 @@ public final class WorkspaceManager {
             return new Workspace(project.root(), Mode.IN_PLACE,
                     "operating in place on " + project.root() + "; generated tests are written into the project "
                             + "test sources and are not always removed afterwards, because an adapter whose "
-                            + "replay command needs the generated test to stay runnable leaves it there");
+                            + "replay command needs the generated test to stay runnable leaves it there",
+                    List.of());
         }
         Path root = runDirectory.resolve("workspace").toAbsolutePath().normalize();
-        copyTree(project.root(), root);
+        List<Path> notCopied = new ArrayList<>();
+        copyTree(project.root(), root, notCopied);
+        String linkNote = notCopied.isEmpty() ? ""
+                : "; " + notCopied.size() + " symbolic link(s) were not copied (" + preview(notCopied) + ")";
         return new Workspace(root, Mode.COPY,
                 "isolated copy of " + project.root() + " at " + root
-                        + " (build output, VCS metadata and previous run data excluded)");
+                        + " (build output, VCS metadata and previous run data excluded)" + linkNote,
+                List.copyOf(notCopied));
     }
 
     /** Recursively copies {@code source} to {@code target}, skipping excluded directories. */
     public static void copyTree(Path source, Path target) {
+        copyTree(source, target, null);
+    }
+
+    /**
+     * Recursively copies {@code source} to {@code target}, skipping excluded directories and links.
+     *
+     * <p>Symbolic links are not copied and are not followed. Following one would materialise data from
+     * outside the project into a run directory that is kept on disk and travels with a bug report, so a
+     * repository containing {@code .env -> ~/.aws/credentials} would cause CodeWitness to copy the user's
+     * credentials into {@code .codewitness/runs/<id>/workspace/}. Copying the link itself instead would
+     * leave the isolated workspace able to read outside itself, which is the property it exists to have.
+     * A link stays where it is, and every link skipped is reported, so a project that needs one fails
+     * visibly rather than silently verifying a different tree.
+     *
+     * @param source directory to copy
+     * @param target destination directory
+     * @param notCopied collects the project-relative paths of links that were skipped, may be {@code null}
+     * @throws UncheckedIOException when the copy fails
+     */
+    public static void copyTree(Path source, Path target, List<Path> notCopied) {
         if (!Files.isDirectory(source)) {
             throw new IllegalArgumentException("not a directory: " + source);
         }
@@ -127,6 +163,12 @@ public final class WorkspaceManager {
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    if (attrs.isSymbolicLink()) {
+                        if (notCopied != null) {
+                            notCopied.add(source.relativize(file));
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
                     Path destination = target.resolve(source.relativize(file).toString());
                     Files.createDirectories(destination.getParent());
                     try {
@@ -204,11 +246,24 @@ public final class WorkspaceManager {
      * @param root project root to run everything against
      * @param mode how the workspace was prepared
      * @param description human readable description included in reports
+     * @param notCopied project-relative paths of symbolic links that were not copied into the workspace
      */
-    public record Workspace(Path root, Mode mode, String description) {
+    public record Workspace(Path root, Mode mode, String description, List<Path> notCopied) {
 
         public Workspace {
             root = root.toAbsolutePath().normalize();
+            notCopied = List.copyOf(notCopied == null ? List.of() : notCopied);
+        }
+
+        /**
+         * Creates a workspace whose copy skipped nothing.
+         *
+         * @param root        project root to run everything against
+         * @param mode        how the workspace was prepared
+         * @param description human readable description included in reports
+         */
+        public Workspace(Path root, Mode mode, String description) {
+            this(root, mode, description, List.of());
         }
 
         public boolean isIsolated() {

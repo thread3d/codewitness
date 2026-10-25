@@ -1,5 +1,8 @@
 package dev.codewitness.core.engine;
 
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.codewitness.core.config.Scenario;
 import dev.codewitness.core.config.VerificationConfig;
 import dev.codewitness.core.diagnostics.SelfIssueCategory;
 import dev.codewitness.core.diagnostics.SelfIssueRecord;
@@ -101,7 +104,11 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "0.1.4";
+    public static final String VERSION = "0.1.5";
+
+    /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
+    private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     private final LanguageAdapterRegistry languages;
     private final VerificationProviderRegistry providers;
@@ -196,6 +203,18 @@ public final class VerificationEngine {
         WorkspaceManager.Workspace workspace = WorkspaceManager.prepare(project, runDirectory, workspaceMode);
         if (!workspace.isIsolated()) {
             limitations.add("The run operated in place: " + workspace.description());
+        }
+        // A link that points outside the project is not copied into the workspace, so a project that needs
+        // one is verified against a tree that does not have it. That has to be stated, because it changes
+        // what the verdicts are about; and it is the only place the user is told why the copy differs.
+        if (!workspace.notCopied().isEmpty()) {
+            limitations.add(workspace.notCopied().size() + " symbolic link(s) in the project were not copied "
+                    + "into the isolated workspace, so the tree the run verified does not contain them: "
+                    + workspace.notCopied().stream().limit(5).map(Path::toString)
+                            .collect(java.util.stream.Collectors.joining(", "))
+                    + (workspace.notCopied().size() > 5 ? ", and " + (workspace.notCopied().size() - 5) + " more" : "")
+                    + ". A link is not followed because following one would copy data from outside the project "
+                    + "into a run directory that is kept on disk.");
         }
 
         List<LanguageAdapter> adapters = languages.selectAll(project, config.language().adapter());
@@ -692,6 +711,7 @@ public final class VerificationEngine {
             recordMutationWeaknesses(requirement, state.mutation(), mapper, info, limitations);
         }
         RequirementSet plannedSet = new RequirementSet(planned);
+        recordDeclarationProblems(requirements, config, limitations, listener);
 
         // ---------------------------------------------------------------- requirement strategies
         // Strategies are providers, exactly like compilers and test runners: the composition root
@@ -1505,6 +1525,62 @@ public final class VerificationEngine {
     }
 
     /**
+     * Records declarations that cannot take effect, because silence about them is indistinguishable from
+     * a project that declared nothing.
+     *
+     * <p>Two mistakes are cheap to make and were previously invisible. A requirements document with a
+     * repeated heading produces two requirements that share an id, and every verdict, table and index keyed
+     * by that id then has to guess which one is meant. A scenario whose {@code requirement} names an id that
+     * is not declared is never visited - the planner matches scenarios by walking the requirements - so a
+     * typo silently disables the only executable evidence for that requirement, and the run reports
+     * {@code UNVERIFIED} as though no scenario had been written at all.
+     *
+     * <p>Neither is fatal: a repeated id is still verifiable and an orphan scenario simply does nothing. Both
+     * are stated, in the report and on the console, because a verification tool must not let a declaration
+     * quietly fail to apply.
+     *
+     * @param requirements the declarations the run is verifying
+     * @param config      run configuration, holding the declared scenarios
+     * @param limitations receives one entry per problem found
+     * @param listener    receives the same problems as live progress events
+     */
+    private static void recordDeclarationProblems(
+            RequirementSet requirements,
+            VerificationConfig config,
+            List<String> limitations,
+            ProgressListener listener) {
+        Map<String, Integer> occurrences = new LinkedHashMap<>();
+        for (Requirement requirement : requirements.requirements()) {
+            occurrences.merge(requirement.id(), 1, Integer::sum);
+        }
+        List<String> duplicates = occurrences.entrySet().stream()
+                .filter(entry -> entry.getValue() > 1)
+                .map(Map.Entry::getKey)
+                .toList();
+        if (!duplicates.isEmpty()) {
+            String message = "Some requirement ids are declared more than once: " + String.join(", ", duplicates)
+                    + ". Each occurrence is verified separately, and a report keyed by id can only show one "
+                    + "verdict per id - the most severe - so give each requirement its own id to remove the "
+                    + "ambiguity.";
+            limitations.add(message);
+            listener.onEvent("plan", message);
+        }
+        Set<String> declared = Set.copyOf(occurrences.keySet());
+        List<String> orphans = config.scenarios().stream()
+                .map(Scenario::requirement)
+                .filter(id -> id != null && !declared.contains(id))
+                .distinct()
+                .toList();
+        if (!orphans.isEmpty()) {
+            String message = "Scenario(s) name requirement id(s) that the requirements document does not "
+                    + "declare: " + String.join(", ", orphans) + ". Those scenarios did not run, so the "
+                    + "requirements they were written for have no executable evidence. Check the ids in ";
+            limitations.add(message + "codewitness.yaml against the requirements file.");
+            listener.onEvent("plan", message + "the configuration.");
+        }
+    }
+
+    /**
      * Records surviving mutants as a limitation rather than as an unmet obligation.
      *
      * <p>A surviving mutant says the test suite cannot tell the mutated behaviour from the original. It
@@ -1654,25 +1730,36 @@ public final class VerificationEngine {
         return sb.toString();
     }
 
+    /**
+     * Renders the static-analysis findings artifact.
+     *
+     * <p>This used to build JSON by hand, escaping only backslash, quote, newline and carriage return. A tab,
+     * a form feed or any other control character in a compiler or analyzer message - both produced by code
+     * CodeWitness does not control - then made the artifact invalid JSON, which is worse than losing it,
+     * because a consumer reads a parse error as a corrupt run. Jackson cannot get a string wrong, and the
+     * report module already serialises its own JSON the same way.
+     *
+     * @param findings findings to render
+     * @return JSON array of findings, pretty printed
+     */
     private static String renderFindings(List<Finding> findings) {
-        StringBuilder sb = new StringBuilder("[\n");
-        for (int i = 0; i < findings.size(); i++) {
-            Finding finding = findings.get(i);
-            sb.append("  {\"analyzer\":\"").append(escape(finding.analyzer()))
-                    .append("\",\"rule\":\"").append(escape(finding.ruleId()))
-                    .append("\",\"severity\":\"").append(finding.severity())
-                    .append("\",\"category\":\"").append(finding.category())
-                    .append("\",\"file\":\"").append(escape(finding.file()))
-                    .append("\",\"line\":").append(finding.line() == null ? "null" : finding.line())
-                    .append(",\"message\":\"").append(escape(finding.message())).append("\"}");
-            sb.append(i == findings.size() - 1 ? "\n" : ",\n");
+        ArrayNode array = FINDINGS_MAPPER.createArrayNode();
+        for (Finding finding : findings) {
+            ObjectNode node = array.addObject();
+            node.put("analyzer", finding.analyzer());
+            node.put("rule", finding.ruleId());
+            node.put("severity", finding.severity() == null ? null : finding.severity().name());
+            node.put("category", finding.category() == null ? null : finding.category().name());
+            node.put("file", finding.file());
+            node.put("line", finding.line());
+            node.put("message", finding.message());
         }
-        return sb.append("]\n").toString();
-    }
-
-    private static String escape(String text) {
-        return text == null ? "" : text.replace("\\", "\\\\").replace("\"", "\\\"")
-                .replace("\n", " ").replace("\r", " ");
+        try {
+            return FINDINGS_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(array)
+                    + System.lineSeparator();
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("failed to render the static analysis findings artifact", e);
+        }
     }
 
     private static String summariseFindings(List<Finding> findings) {

@@ -87,10 +87,56 @@ public final class SqliteVerificationStore implements VerificationStore {
 
     private static final String JDBC_URL_PREFIX = "jdbc:sqlite:";
 
+    /** Version of the schema this build writes; see {@link #migrate}. */
+    private static final int SCHEMA_VERSION = 2;
+
+
+
     /**
-     * DDL executed on open. Every statement uses {@code IF NOT EXISTS} so that opening an existing
-     * database is a no-op and so that a partially created schema is completed on the next open.
+     * Schema version this build writes and understands.
+     *
+     * <p>{@code PRAGMA user_version} records it. The DDL below is only ever created, never upgraded: every
+     * statement uses {@code IF NOT EXISTS}, which is a no-op when the table already exists with an older
+     * column set. That is fine for creating a database and wrong for evolving one, because an added column
+     * then makes every later insert fail against an existing file - and because the failure was reported as
+     * a warning, history would silently stop being written while {@code verify} still exited as though it
+     * had recorded the run. A version is the smallest thing that turns "this file is from another release"
+     * into a stated fact.
+     *
+     * <p>When the stored version is older than this one, {@link #migrate} upgrades it in place before the
+     * schema is completed. When it is newer, the store refuses to open: an older binary must not write rows
+     * a newer one cannot read.
      */
+    /**
+     * DDL for the requirements table.
+     *
+     * <p>The primary key is the row's ordinal within the run, not the requirement id. A requirements
+     * document with a repeated heading yields two requirements that share an id, and keying on the id made
+     * the whole run unstorable: the second insert violated the primary key, so a run that verified two
+     * requirements recorded neither. The ordinal is what identifies a row; the id is what a reader uses.
+     */
+    private static final String REQUIREMENTS_DDL = """
+            CREATE TABLE IF NOT EXISTS requirements (
+                run_id                  TEXT NOT NULL REFERENCES verification_runs(run_id) ON DELETE CASCADE,
+                requirement_id          TEXT NOT NULL,
+                ordinal                 INTEGER NOT NULL,
+                title                   TEXT,
+                description             TEXT NOT NULL,
+                source_file             TEXT,
+                source_line             INTEGER,
+                content_hash            TEXT,
+                attributes_json         TEXT NOT NULL DEFAULT '{}',
+                properties_json         TEXT NOT NULL DEFAULT '[]',
+                status                  TEXT,
+                rationale               TEXT,
+                evidence_ids_json       TEXT NOT NULL DEFAULT '[]',
+                unknown_aspects_json    TEXT NOT NULL DEFAULT '[]',
+                counterexample_ids_json TEXT NOT NULL DEFAULT '[]',
+                deterministic_evidence  INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (run_id, ordinal)
+            )
+            """;
+
     private static final List<String> SCHEMA = List.of(
             """
             CREATE TABLE IF NOT EXISTS projects (
@@ -157,27 +203,7 @@ public final class SqliteVerificationStore implements VerificationStore {
                 updated_at                             TEXT NOT NULL
             )
             """,
-            """
-            CREATE TABLE IF NOT EXISTS requirements (
-                run_id                  TEXT NOT NULL REFERENCES verification_runs(run_id) ON DELETE CASCADE,
-                requirement_id          TEXT NOT NULL,
-                ordinal                 INTEGER NOT NULL,
-                title                   TEXT,
-                description             TEXT NOT NULL,
-                source_file             TEXT,
-                source_line             INTEGER,
-                content_hash            TEXT,
-                attributes_json         TEXT NOT NULL DEFAULT '{}',
-                properties_json         TEXT NOT NULL DEFAULT '[]',
-                status                  TEXT,
-                rationale               TEXT,
-                evidence_ids_json       TEXT NOT NULL DEFAULT '[]',
-                unknown_aspects_json    TEXT NOT NULL DEFAULT '[]',
-                counterexample_ids_json TEXT NOT NULL DEFAULT '[]',
-                deterministic_evidence  INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (run_id, requirement_id)
-            )
-            """,
+            REQUIREMENTS_DDL,
             """
             CREATE TABLE IF NOT EXISTS obligations (
                 run_id                  TEXT NOT NULL REFERENCES verification_runs(run_id) ON DELETE CASCADE,
@@ -333,11 +359,16 @@ public final class SqliteVerificationStore implements VerificationStore {
             }
             opened = DriverManager.getConnection(JDBC_URL_PREFIX + this.databaseFile);
             configure(opened);
+            migrate(opened);
             createSchema(opened);
             this.connection = opened;
         } catch (SQLException | IOException e) {
             closeQuietly(opened);
-            throw new StorageException("failed to open verification database " + this.databaseFile, e);
+            // The cause is repeated in the message because this is the line a user sees: "could not open"
+            // without the reason leaves them with a path and no next step, and the reasons here are
+            // actionable (a schema written by a newer build, a read-only directory, a corrupt file).
+            throw new StorageException("failed to open verification database " + this.databaseFile
+                    + (e.getMessage() == null ? "" : ": " + e.getMessage()), e);
         }
     }
 
@@ -476,6 +507,97 @@ public final class SqliteVerificationStore implements VerificationStore {
         }
     }
 
+    /**
+     * Upgrades a database written by an older build, and stamps a new one with the current version.
+     *
+     * <p>Each step runs in its own transaction and is idempotent, so an interrupted upgrade leaves the file
+     * at the version it reached rather than half-way through a step. Steps are added here as the schema
+     * changes; a build that has no steps yet is version 1, and a fresh file is simply stamped.
+     *
+     * @param connection open connection, before the schema is completed
+     * @throws SQLException when the version cannot be read, is newer than this build, or a step fails
+     */
+    private static void migrate(Connection connection) throws SQLException {
+        int stored = userVersion(connection);
+        if (stored > SCHEMA_VERSION) {
+            throw new SQLException("verification database " + "schema version " + stored
+                    + " is newer than this CodeWitness build understands (" + SCHEMA_VERSION
+                    + "); upgrade CodeWitness rather than writing rows this build cannot read");
+        }
+        int version = stored;
+        for (Migration migration : migrationsFor(connection)) {
+            if (migration.from() == version) {
+                migration.body().run();
+                version = migration.to();
+                stamp(connection, version);
+            }
+        }
+        if (version < SCHEMA_VERSION) {
+            // A fresh file, or one written before versioning existed: the DDL below creates everything this
+            // build needs, so the file is current once it has been completed.
+            stamp(connection, SCHEMA_VERSION);
+        }
+    }
+
+    /**
+     * Upgrade steps that apply to a database at the given connection.
+     *
+     * <p>Built per connection so a step can hold it: {@link SqlWork} takes no arguments, and a step needs the
+     * connection of the store being opened. Version 1 keyed {@code requirements} by
+     * {@code (run_id, requirement_id)}, which made a run with a repeated requirement heading impossible to
+     * store; version 2 keys it by {@code (run_id, ordinal)}. SQLite cannot alter a primary key in place, so
+     * the table is rebuilt and its rows copied.
+     *
+     * @param connection open connection to migrate
+     * @return ordered steps, empty when the schema has never changed
+     */
+    private static List<Migration> migrationsFor(Connection connection) {
+        return List.of(new Migration(1, 2, () -> {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("ALTER TABLE requirements RENAME TO requirements_v1");
+                statement.execute(REQUIREMENTS_DDL);
+                statement.execute("""
+                        INSERT INTO requirements (
+                            run_id, requirement_id, ordinal, title, description, source_file, source_line,
+                            content_hash, attributes_json, properties_json, status, rationale,
+                            evidence_ids_json, unknown_aspects_json, counterexample_ids_json,
+                            deterministic_evidence)
+                        SELECT run_id, requirement_id, ordinal, title, description, source_file, source_line,
+                            content_hash, attributes_json, properties_json, status, rationale,
+                            evidence_ids_json, unknown_aspects_json, counterexample_ids_json,
+                            deterministic_evidence
+                        FROM requirements_v1
+                        """);
+                statement.execute("DROP TABLE requirements_v1");
+            }
+        }));
+    }
+
+    private static int userVersion(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+                java.sql.ResultSet rows = statement.executeQuery("PRAGMA user_version")) {
+            return rows.next() ? rows.getInt(1) : 0;
+        }
+    }
+
+    private static void stamp(Connection connection, int version) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            // A PRAGMA takes no bind parameters, and the value is a compile-time constant of this build,
+            // never anything a project or a user supplies.
+            statement.execute("PRAGMA user_version = " + version);
+        }
+    }
+
+    /**
+     * One upgrade step.
+     *
+     * @param from version the step upgrades from
+     * @param to   version the step upgrades to
+     * @param body work to perform; the connection is captured by the step that defines it
+     */
+    private record Migration(int from, int to, SqlWork body) {
+    }
+
     private static void createSchema(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
             for (String ddl : SCHEMA) {
@@ -531,6 +653,35 @@ public final class SqliteVerificationStore implements VerificationStore {
         List<Map<String, Object>> rows = query(
                 "SELECT created_at FROM verification_runs WHERE run_id = ?", runId);
         return rows.isEmpty() ? null : Json.string(rows.getFirst(), "created_at");
+    }
+
+    /**
+     * Deletes stored runs, so that {@code clean} removes the index entry as well as the directory.
+     *
+     * <p>The history is two stores - rows in this database and directories under
+     * {@code .codewitness/runs/} - and only one of them was ever cleaned. A cleaned run therefore stayed
+     * listed, and {@code report <id>} then presented the paths of a directory that no longer existed as
+     * though the report were there. Deleting both is the fix; the dependent rows go with the run through
+     * {@code ON DELETE CASCADE}.
+     *
+     * @param runIds runs to delete
+     * @return number of run rows actually removed
+     */
+    public int deleteRuns(java.util.Collection<String> runIds) {
+        if (runIds == null || runIds.isEmpty()) {
+            return 0;
+        }
+        synchronized (lock) {
+            requireOpen();
+            int[] removed = new int[1];
+            inTransaction("failed to delete verification runs " + runIds, () -> {
+                for (String runId : runIds) {
+                    deleteRun(runId);
+                    removed[0] += 1;
+                }
+            });
+            return removed[0];
+        }
     }
 
     private void deleteRun(String runId) throws SQLException {

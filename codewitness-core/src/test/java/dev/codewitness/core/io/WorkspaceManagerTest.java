@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.EnumSet;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -30,6 +31,31 @@ class WorkspaceManagerTest {
         Files.createDirectories(file.getParent());
         Files.writeString(file, content, StandardCharsets.UTF_8);
         return file;
+    }
+
+
+    @Test
+    @DisplayName("a symbolic link is not copied and is not followed")
+    void symbolicLinksAreNotCopied(@TempDir Path root) throws IOException {
+        // Following a link materialises data from outside the project into a run directory that is kept on
+        // disk and travels with a bug report: `.env -> ~/.aws/credentials` copied the user's credentials into
+        // .codewitness/runs/<id>/workspace/. Copying the link instead would leave the "isolated" copy able to
+        // read outside itself. So a link is neither followed nor copied, and it is reported.
+        Path project = Files.createDirectories(root.resolve("project"));
+        Files.writeString(project.resolve("App.java"), "class App {}", StandardCharsets.UTF_8);
+        Path secret = Files.writeString(root.resolve("secret.txt"), "TOP-SECRET", StandardCharsets.UTF_8);
+        Files.createSymbolicLink(project.resolve("leak.txt"), secret);
+
+        Workspace workspace = WorkspaceManager.prepare(
+                new ProjectRef(project, "example", "example@1"), root.resolve("run"), Mode.COPY);
+        Path copied = workspace.root().resolve("leak.txt");
+
+        assertFalse(Files.exists(copied), "the link must not appear in the copy in any form");
+        assertFalse(workspace.notCopied().isEmpty(), "a skipped link must be reported, not swallowed");
+        assertTrue(workspace.notCopied().getFirst().toString().contains("leak.txt"),
+                workspace.notCopied().toString());
+        assertTrue(workspace.description().contains("symbolic link"),
+                "the workspace description must mention the skipped link: " + workspace.description());
     }
 
     @Test
@@ -185,7 +211,7 @@ class WorkspaceManagerTest {
     @Test
     @DisplayName("a Workspace normalises its root to an absolute path")
     void workspaceNormalisesRoot(@TempDir Path root) {
-        Workspace workspace = new Workspace(root.resolve("a/../b"), Mode.COPY, "description");
+        Workspace workspace = new Workspace(root.resolve("a/../b"), Mode.COPY, "description", List.of());
 
         assertEquals(root.resolve("b").toAbsolutePath().normalize(), workspace.root());
     }

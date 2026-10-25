@@ -39,10 +39,19 @@ public record BudgetUsage(
 
         public void recordGeneratedTests(int count) {
             generatedTests += count;
+            // Consumption is where the cap is actually reached, so it is where the run has to say so.
+            // Without this a run stopped by max_generated_tests reported exhausted=false and no reason,
+            // which reads exactly like a run that had nothing left to do.
+            if (generatedTests >= budget.maxGeneratedTests()) {
+                markExhausted("max_generated_tests " + budget.maxGeneratedTests() + " reached");
+            }
         }
 
         public void recordLlmCall() {
             llmCalls++;
+            if (llmCalls >= budget.maxLlmCalls()) {
+                markExhausted("max_llm_calls " + budget.maxLlmCalls() + " reached");
+            }
         }
 
         public void markExhausted(String reason) {

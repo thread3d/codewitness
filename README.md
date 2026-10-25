@@ -297,7 +297,15 @@ An overall run status is derived from the individual verdicts, and it is deliber
 single counterexample makes the whole run `FAILED`; blocked verification never becomes a pass. If the
 budget runs out before every requirement is discharged, the run as a whole is reported `BLOCKED` and
 exits non-zero: the requirements it did reach keep their own verdicts, the ones it never reached stay
-`UNVERIFIED`, and a truncated run never reports zero failures as success.
+`UNVERIFIED`, and a truncated run never reports zero failures as success. A budget that stops the work
+says so: `budget.exhausted` is set and `budget.exhaustedReason` names the limit that was reached
+(`max_duration`, `max_generated_tests` or `max_llm_calls`), so a run that ran out of room cannot be read
+as one that had nothing left to do.
+
+A `BLOCKED` verdict outranks a counterexample, because a project that does not build cannot be verified
+as a whole. That precedence does not discard what was observed: when an executed experiment did record a
+counterexample for a requirement whose build failed, the verdict's reason names the counterexample and it
+stays in the report.
 
 ---
 
@@ -328,7 +336,7 @@ Exit codes are part of the interface:
 | `0` | The run completed and no requirement is `FAILED` or `BLOCKED`. By default an `UNVERIFIED` requirement does not change this: exit `0` means "nothing failed", not "everything passed". |
 | `1` | At least one requirement is `FAILED`, or `--fail-on-unverified` was given and some requirement is not `VERIFIED`. |
 | `2` | Verification was `BLOCKED` (failed build, missing build tool, exhausted budget). `inspect` and `test` also use `2` when no adapter or build tool can be found, and `report`/`reproduce` when a stored run is unknown. `issues` uses `2` when `--resolve` names an id that was never recorded. |
-| `3` | The command could not be used, or failed before it could report: a command-line or configuration error, an unhandled internal failure, a `--requirements` file that does not exist, a `clean` that could not delete, or a `reproduce --run` that could not start its command. The `./codewitness` launcher also exits `3` when no built jar is found. |
+| `3` | The command could not be used, or could not finish its job: a command-line or configuration error, an unhandled internal failure, a `--requirements` file that does not exist, a `clean` that could not delete, or a `reproduce --run` that could not start its command. Also used when a run completed but its result could not be stored — a verification whose evidence cannot be read back is not evidence, so this is a failure rather than a warning. The `./codewitness` launcher also exits `3` when no built jar is found. |
 
 ---
 
@@ -460,6 +468,13 @@ requirements:
 
 The natural language text is authoritative. Anything structured that CodeWitness derives from it —
 by heuristic or by language model — is labelled as an *interpretation* in every report.
+
+Two declaration mistakes are reported rather than assumed away, because either one silently removes
+evidence: a requirements document that names the same id twice (the repeated heading is verified twice,
+but a report keyed by id can only show one verdict per id, so the ids are named on the console and in the
+limitations), and a scenario whose `requirement` names an id the requirements document does not declare
+(the planner matches scenarios by walking the requirements, so an orphan scenario was simply never
+visited — a typo silently disabled the only executable evidence for that requirement).
 
 ---
 
@@ -864,9 +879,16 @@ Every run produces both:
 
 - `report.json` — the canonical machine-readable representation, with run id, environment, status,
   per-requirement verdicts, obligations, evidence, counterexamples, test/mutation/coverage/
-  static-analysis summaries, phases, budget usage and limitations;
+  static-analysis summaries, phases, budget usage and limitations. `status` is the verdict aggregate and
+  `runStatus` the pipeline's own outcome, and they are separate keys because a run can be `BLOCKED` while
+  every requirement it reached is `VERIFIED`. `build` records what the build phase attempted, ran and
+  observed: the command, the exit status and the compiler's error and warning counts;
 - `report.html` — a self-contained human report that starts with an executive summary and then shows
   the evidence, including an appendix listing every evidence record with the command that produced it.
+  Both the overall status and the run status appear in the header, a run that did not complete says so in
+  a banner, and the build phase has its own section — a report that showed only the verdicts rendered a
+  blocked run as a green page. When two verdicts are recorded for one requirement id (a repeated heading
+  in the requirements document), the most severe is shown and the collision is stated.
 
 Run data lives in `<project>/.codewitness/runs/<run-id>/`: the report files, the raw artifacts
 (generated test sources, test and coverage reports) and an isolated copy of the project. Metadata is
@@ -898,7 +920,11 @@ CodeWitness executes project code, so it treats the project as hostile:
   carries proxy settings such as `-Dhttps.proxyHost`, so a proxy variable can still reach the build.
   There is also an isolated working directory, capped output and hard timeouts;
 - the project is copied into the run workspace by default, so generated tests and build output never
-  touch your working tree;
+  touch your working tree. Symbolic links are neither followed nor copied: following one would copy data
+  from outside the project into a run directory that is kept on disk and travels with a bug report, so a
+  repository containing `.env -> ~/.aws/credentials` would have had the user's credentials copied into
+  `.codewitness/runs/<id>/workspace/`. Every link that is skipped is listed in the run's limitations, so a
+  project that needs one fails visibly instead of being verified against a different tree;
 - `sandbox.mode: docker` runs everything in a container with no network and dropped capabilities;
 - the local-process sandbox is a **resource-safety** boundary, not a security boundary, and every
   report says so instead of overstating it.

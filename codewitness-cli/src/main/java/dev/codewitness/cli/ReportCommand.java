@@ -66,6 +66,7 @@ public final class ReportCommand implements Callable<Integer> {
         Path runDirectory = base.resolve("runs").resolve(runId);
         Path jsonFile = runDirectory.resolve("report.json");
         String json = null;
+        boolean fromIndex = false;
         if (Files.isRegularFile(jsonFile)) {
             try {
                 json = Files.readString(jsonFile);
@@ -76,6 +77,7 @@ public final class ReportCommand implements Callable<Integer> {
         if (json == null && Files.isRegularFile(database)) {
             try (SqliteVerificationStore store = new SqliteVerificationStore(database)) {
                 json = store.findReportJson(runId).orElse(null);
+                fromIndex = json != null;
             }
         }
         if (json == null) {
@@ -83,14 +85,28 @@ public final class ReportCommand implements Callable<Integer> {
                     + database + ")");
             return 2;
         }
-        System.out.println(printJson ? json : summarise(json, runDirectory, runId));
+        System.out.println(printJson ? json : summarise(json, runDirectory, runId, fromIndex));
         return 0;
     }
 
-    /** Prints a short summary of a stored JSON report without a full parse. */
-    private static String summarise(String json, Path runDirectory, String runId) {
+    /**
+     * Prints a short summary of a stored JSON report without a full parse.
+     *
+     * <p>The source of the report is stated, because a run whose directory was deleted still has an index
+     * row and a reader is entitled to know which of the two stores answered.
+     *
+     * @param json         stored report text
+     * @param runDirectory directory the run belongs to
+     * @param runId        run id
+     * @param fromIndex    whether the text came from the index rather than from the report file
+     * @return the summary
+     */
+    private static String summarise(String json, Path runDirectory, String runId, boolean fromIndex) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Stored report ").append(runDirectory.resolve("report.json")).append('\n');
+        sb.append(fromIndex
+                        ? "Stored report (from the index; the run directory " + runDirectory + " is missing)"
+                        : "Stored report " + runDirectory.resolve("report.json"))
+                .append('\n');
         for (String key : List.of("runId", "status", "statusExplanation")) {
             String value = firstString(json, key);
             if (value != null) {
@@ -98,9 +114,22 @@ public final class ReportCommand implements Callable<Integer> {
             }
         }
         sb.append('\n');
-        sb.append("Open the full report:\n");
-        sb.append("  HTML: ").append(runDirectory.resolve("report.html")).append('\n');
-        sb.append("  JSON: ").append(runDirectory.resolve("report.json")).append('\n');
+        // The paths are only worth printing when the files are there. A run whose directory was deleted keeps
+        // its index row, and printing the paths of files that do not exist presented a missing report as one
+        // that could be opened.
+        Path htmlFile = runDirectory.resolve("report.html");
+        Path jsonFile = runDirectory.resolve("report.json");
+        if (Files.isRegularFile(htmlFile) || Files.isRegularFile(jsonFile)) {
+            sb.append("Open the full report:\n");
+            if (Files.isRegularFile(htmlFile)) {
+                sb.append("  HTML: ").append(htmlFile).append('\n');
+            }
+            if (Files.isRegularFile(jsonFile)) {
+                sb.append("  JSON: ").append(jsonFile).append('\n');
+            }
+        } else {
+            sb.append("The report files for this run no longer exist; only the summary above was kept.\n");
+        }
         sb.append("Re-print the canonical JSON with: codewitness report ").append(runId).append(" --json\n");
         return sb.toString();
     }
@@ -119,7 +148,21 @@ public final class ReportCommand implements Callable<Integer> {
         return end < 0 ? null : json.substring(quote + 1, end);
     }
 
-    /** Deletes old run directories, used by {@code clean}. */
+    /**
+     * Deletes old runs, used by {@code clean}.
+     *
+     * <p>Two things here are deliberate. Runs are ordered by the modification time of their directory, not
+     * by name: a run id is a date plus five random characters, so naming order inside one day is arbitrary.
+     * Sorting by name made {@code --keep 3} delete the newest run and keep the oldest, which destroys the
+     * evidence a user asked to preserve. And the index is cleaned with the directories: deleting only one of
+     * the two stores left rows pointing at directories that no longer existed, which {@code report} then
+     * printed as though the reports were still there.
+     *
+     * @param base      project directory holding {@code .codewitness}
+     * @param keep      number of most recent runs to keep when {@code deleteAll} is {@code false}
+     * @param deleteAll whether to delete every run instead
+     * @return exit code: {@code 0} on success, {@code 3} when something could not be deleted
+     */
     static int deleteRuns(Path base, int keep, boolean deleteAll) {
         Path runsDirectory = base.resolve("runs");
         if (!Files.isDirectory(runsDirectory)) {
@@ -128,20 +171,65 @@ public final class ReportCommand implements Callable<Integer> {
         }
         try (var stream = Files.list(runsDirectory)) {
             List<Path> directories = stream.filter(Files::isDirectory)
-                    .sorted(Comparator.comparing((Path p) -> p.getFileName().toString()).reversed())
+                    .sorted(Comparator.comparing(ReportCommand::lastModified).reversed())
                     .toList();
+            List<String> deletedIds = new java.util.ArrayList<>();
             int deleted = 0;
             for (int i = 0; i < directories.size(); i++) {
                 if (deleteAll || i >= keep) {
-                    deleteRecursively(directories.get(i));
+                    Path directory = directories.get(i);
+                    deletedIds.add(directory.getFileName().toString());
+                    deleteRecursively(directory);
                     deleted++;
                 }
             }
-            System.out.println("Deleted " + deleted + " run director(ies), kept " + (deleteAll ? 0 : keep));
+            int rows = deleteIndexRows(base, deletedIds);
+            System.out.println("Deleted " + deleted + " run director(ies), kept " + (deleteAll ? 0 : keep)
+                    + (rows > 0 ? ", and " + rows + " index entr(ies)" : ""));
             return 0;
         } catch (Exception e) {
             System.err.println("clean failed: " + e.getMessage());
             return 3;
+        }
+    }
+
+    /**
+     * Removes the index rows of the runs whose directories were deleted.
+     *
+     * <p>Best effort by design: a missing or unreadable index must not stop the directories from being
+     * removed, but it is reported rather than assumed, because a row left behind is a run that
+     * {@code report} will still claim to have.
+     *
+     * @param base project directory holding {@code .codewitness}
+     * @param runIds runs that were deleted
+     * @return number of rows removed, {@code 0} when there was no index to update
+     */
+    private static int deleteIndexRows(Path base, List<String> runIds) {
+        if (runIds.isEmpty()) {
+            return 0;
+        }
+        Path database = base.resolve("codewitness.db");
+        if (!Files.isRegularFile(database)) {
+            return 0;
+        }
+        try (SqliteVerificationStore store = new SqliteVerificationStore(database)) {
+            return store.deleteRuns(runIds);
+        } catch (RuntimeException e) {
+            System.err.println("warning: the run index could not be updated, so "
+                    + "`report` may still list the deleted runs: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * @param directory run directory
+     * @return last modification time in milliseconds, or {@code 0} when it cannot be read
+     */
+    private static long lastModified(Path directory) {
+        try {
+            return Files.getLastModifiedTime(directory).toMillis();
+        } catch (java.io.IOException e) {
+            return 0L;
         }
     }
 

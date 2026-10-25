@@ -16,6 +16,7 @@ import dev.codewitness.core.result.RequirementVerdict;
 import dev.codewitness.core.result.RunStatus;
 import dev.codewitness.core.result.VerificationReport;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -450,4 +451,124 @@ class SqliteVerificationStoreTest {
             return rs.getLong(1);
         }
     }
+
+    @Test
+    @DisplayName("a version 1 database is migrated in place and keeps its rows")
+    void anOlderSchemaIsMigrated() throws SQLException {
+        // Version 1 keyed requirements by (run_id, requirement_id), which made a run with a repeated
+        // requirement heading impossible to store. Version 2 keys it by (run_id, ordinal). SQLite cannot
+        // alter a primary key, so the upgrade rebuilds the table; a file that is opened and silently not
+        // upgraded would keep failing to record runs, which is the failure mode the version exists to stop.
+        Path database = database();
+        try (SqliteVerificationStore store = new SqliteVerificationStore(database)) {
+            store.save(ReportFixtures.report(RUN_EARLY, tempDir, ReportFixtures.STARTED, 3));
+        }
+        // Rewrite the table into its version 1 shape, as a file written by 0.1.4 has it.
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+                Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE requirements RENAME TO requirements_v2");
+            statement.execute("""
+                    CREATE TABLE requirements (
+                        run_id                  TEXT NOT NULL REFERENCES verification_runs(run_id)
+                                                    ON DELETE CASCADE,
+                        requirement_id          TEXT NOT NULL,
+                        ordinal                 INTEGER NOT NULL,
+                        title                   TEXT,
+                        description             TEXT NOT NULL,
+                        source_file             TEXT,
+                        source_line             INTEGER,
+                        content_hash            TEXT,
+                        attributes_json         TEXT NOT NULL DEFAULT '{}',
+                        properties_json         TEXT NOT NULL DEFAULT '[]',
+                        status                  TEXT,
+                        rationale               TEXT,
+                        evidence_ids_json       TEXT NOT NULL DEFAULT '[]',
+                        unknown_aspects_json    TEXT NOT NULL DEFAULT '[]',
+                        counterexample_ids_json TEXT NOT NULL DEFAULT '[]',
+                        deterministic_evidence  INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (run_id, requirement_id)
+                    )
+                    """);
+            statement.execute("INSERT INTO requirements (run_id, requirement_id, ordinal, description) "
+                    + "SELECT run_id, requirement_id, ordinal, description FROM requirements_v2");
+            statement.execute("DROP TABLE requirements_v2");
+            statement.execute("PRAGMA user_version = 1");
+        }
+
+        try (SqliteVerificationStore store = new SqliteVerificationStore(database)) {
+            assertTrue(store.findRun(RUN_EARLY).isPresent(), "the migrated run must still be readable");
+        }
+        assertEquals(2, userVersion(database), "opening the file must upgrade it");
+        assertEquals(2, requirementRows(database), "no requirement row may be lost in the upgrade");
+        assertTrue(primaryKeyCoversOrdinal(database),
+                "the upgraded table must be keyed by occurrence, not by requirement id");
+    }
+
+    private static int requirementRows(Path database) throws SQLException {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+                Statement statement = connection.createStatement();
+                ResultSet rows = statement.executeQuery("SELECT COUNT(*) FROM requirements")) {
+            return rows.next() ? rows.getInt(1) : -1;
+        }
+    }
+
+    private static boolean primaryKeyCoversOrdinal(Path database) throws SQLException {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+                Statement statement = connection.createStatement();
+                ResultSet rows = statement.executeQuery("PRAGMA table_info(requirements)")) {
+            boolean idIsKey = false;
+            boolean ordinalIsKey = false;
+            while (rows.next()) {
+                int keyPosition = rows.getInt("pk");
+                if (keyPosition > 0) {
+                    if ("requirement_id".equals(rows.getString("name"))) {
+                        idIsKey = true;
+                    }
+                    if ("ordinal".equals(rows.getString("name"))) {
+                        ordinalIsKey = true;
+                    }
+                }
+            }
+            return ordinalIsKey && !idIsKey;
+        }
+    }
+
+    @Test
+    @DisplayName("a new database is stamped with the schema version this build writes")
+    void newDatabaseIsStamped() throws SQLException {
+        // Without a version there is no way to tell an old file from a current one, and CREATE TABLE IF NOT
+        // EXISTS is a silent no-op against a table with an older column set: an added column then makes every
+        // later insert fail against a history that already exists.
+        Path database = database();
+        try (SqliteVerificationStore store = new SqliteVerificationStore(database)) {
+            store.save(ReportFixtures.report(RUN_EARLY, tempDir, ReportFixtures.STARTED, 3));
+        }
+        assertTrue(userVersion(database) >= 1, "the schema version must be recorded in the file");
+    }
+
+    @Test
+    @DisplayName("a database written by a newer build is refused instead of being written to")
+    void aNewerSchemaIsRefused() throws SQLException {
+        Path database = database();
+        try (SqliteVerificationStore store = new SqliteVerificationStore(database)) {
+            store.save(ReportFixtures.report(RUN_EARLY, tempDir, ReportFixtures.STARTED, 3));
+        }
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+                Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA user_version = 999");
+        }
+
+        StorageException refused = assertThrows(StorageException.class,
+                () -> new SqliteVerificationStore(database));
+        assertTrue(refused.getMessage().contains("newer"), refused.getMessage());
+    }
+
+    private static int userVersion(Path database) throws SQLException {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+                Statement statement = connection.createStatement();
+                ResultSet rows = statement.executeQuery("PRAGMA user_version")) {
+            return rows.next() ? rows.getInt(1) : -1;
+        }
+    }
+
 }

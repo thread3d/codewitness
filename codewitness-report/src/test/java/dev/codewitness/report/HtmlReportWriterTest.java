@@ -10,7 +10,10 @@ import dev.codewitness.core.model.Severity;
 import dev.codewitness.core.model.TestCaseResult;
 import dev.codewitness.core.model.TestResult;
 import dev.codewitness.core.requirements.RequirementSet;
+import dev.codewitness.core.result.RequirementVerdict;
+import dev.codewitness.core.result.RunStatus;
 import dev.codewitness.core.result.VerificationReport;
+import dev.codewitness.core.result.VerificationRun;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,6 +40,103 @@ class HtmlReportWriterTest {
     static void renderOnce() {
         report = ReportFixtures.report();
         html = new HtmlReportWriter().render(report);
+    }
+
+
+    // ---------------------------------------------------------------- run status and the build phase
+
+    /** @return the standard fixture with the given run status, keeping its verdicts unchanged. */
+    private static VerificationReport withRunStatus(RunStatus status) {
+        VerificationReport standard = ReportFixtures.report();
+        VerificationRun run = standard.run();
+        VerificationRun replaced = new VerificationRun(run.runId(), run.project(), status, run.phases(),
+                run.environment(), run.budget(), run.usage(), run.workspace(), run.reportJson(),
+                run.reportHtml(), run.startedAt(), run.finishedAt(), run.notes());
+        return VerificationReport.builder(standard.runId(), standard.project(), standard.requirements())
+                .verdicts(standard.verdicts())
+                .evidence(standard.evidence())
+                .counterexamples(standard.counterexamples())
+                .tests(standard.tests())
+                .coverage(standard.coverage())
+                .mutation(standard.mutation())
+                .findings(standard.findings())
+                .dependencies(standard.dependencies())
+                .build(standard.build())
+                .run(replaced)
+                .limitations(standard.limitations())
+                .build();
+    }
+
+    @Test
+    @DisplayName("a blocked run says so even when every verdict it reached is VERIFIED")
+    void aBlockedRunIsNotRenderedAsAPass() {
+        // The polyglot case: one language fails to build, the requirements written in another are fully
+        // evaluated. The verdicts are green and the run is BLOCKED, so a report driven by the verdicts alone
+        // rendered a green page over a run that did not finish. The banner and the run status row are what
+        // stop the headline from being the only thing a skimming reader sees.
+        String blocked = new HtmlReportWriter().render(withRunStatus(RunStatus.BLOCKED));
+
+        assertTrue(blocked.contains("id=\"run-status\""), "a run that did not complete must say so");
+        assertTrue(blocked.contains("This run did not complete."), "the banner must be explicit");
+        assertTrue(blocked.contains("Run status"), "the header must state the pipeline outcome");
+        assertTrue(blocked.contains("<code>BLOCKED</code>"), "the status must be named verbatim");
+    }
+
+    @Test
+    @DisplayName("a completed run does not render the blocked-run banner")
+    void aCompletedRunHasNoBanner() {
+        String completed = new HtmlReportWriter().render(withRunStatus(RunStatus.COMPLETED));
+
+        assertFalse(completed.contains("This run did not complete."),
+                "a completed run must not be reported as truncated");
+        assertTrue(completed.contains("<code>COMPLETED</code>"), "the run status is still stated");
+    }
+
+    @Test
+    @DisplayName("the build phase is rendered, including the command and the compiler's counts")
+    void theBuildSectionShowsWhatTheBuildDid() {
+        VerificationReport standard = ReportFixtures.report();
+        assertTrue(html.contains("id=\"build\""), "the report must have a build section");
+        VerificationReport.BuildSummary build = standard.build();
+        assertTrue(html.contains(String.valueOf(build.errorCount())), "compiler error count must be rendered");
+        assertTrue(html.contains(String.valueOf(build.warningCount())), "compiler warning count must be rendered");
+        if (!build.command().isEmpty()) {
+            assertTrue(html.contains(build.displayCommand()), "the build command must be rendered");
+        }
+    }
+
+    @Test
+    @DisplayName("two verdicts for one requirement id render the most severe, and say that they conflicted")
+    void duplicateVerdictsCollapseToTheMostSevere() {
+        // A requirements document with a repeated heading produces two verdicts for one id. Last-write-wins
+        // let the card read VERIFIED while the headline counted a FAILED one, so the document contradicted
+        // itself about the least favourable fact it knew. The worse verdict wins and the collision is stated.
+        VerificationReport standard = ReportFixtures.report();
+        RequirementVerdict failedForTheSameId = new RequirementVerdict("RQ-1",
+                dev.codewitness.core.requirements.RequirementStatus.FAILED,
+                "a counterexample was observed for this id", List.of("EV-002"), List.of(),
+                List.of(), List.of("CE-001"), true);
+        VerificationReport conflicting = VerificationReport.builder(standard.runId(), standard.project(),
+                        standard.requirements())
+                .verdicts(List.of(ReportFixtures.verifiedVerdict(), failedForTheSameId))
+                .evidence(standard.evidence())
+                .counterexamples(standard.counterexamples())
+                .tests(standard.tests())
+                .coverage(standard.coverage())
+                .mutation(standard.mutation())
+                .findings(standard.findings())
+                .dependencies(standard.dependencies())
+                .build(standard.build())
+                .run(standard.run())
+                .limitations(standard.limitations())
+                .build();
+        String rendered = new HtmlReportWriter().render(conflicting);
+
+        assertTrue(rendered.contains("More than one verdict was recorded for"),
+                "a collision between verdicts must be stated, not silently resolved");
+        assertTrue(rendered.contains("RQ-1"), "the colliding id must be named");
+        assertTrue(rendered.contains("st-failed"),
+                "the most severe verdict must be the one the card renders");
     }
 
     @Test

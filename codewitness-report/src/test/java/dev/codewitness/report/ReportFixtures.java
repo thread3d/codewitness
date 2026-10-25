@@ -73,6 +73,15 @@ final class ReportFixtures {
         return reportWithFindings(findings());
     }
 
+    /**
+     * @return a build summary for the standard fixture, so reports exercise the build section
+     */
+    static VerificationReport.BuildSummary build() {
+        return new VerificationReport.BuildSummary(true, true,
+                List.of("mvn", "-B", "-q", "verify"), 12_340L, 0, 3,
+                "compiled 22 module(s) with 3 warning(s)");
+    }
+
     /** @return the standard fixture, but with dependencies whose advisories were never looked for. */
     static VerificationReport reportWithoutAdvisoryScan() {        return VerificationReport.builder(RUN_ID, project(), requirements())
                 .verdicts(List.of(verifiedVerdict(), failedVerdict()))
@@ -134,6 +143,7 @@ final class ReportFixtures {
                 .mutation(mutation())
                 .findings(findings)
                 .dependencies(dependencies())
+                .build(build())
                 .run(run())
                 .limitations(List.of(LIMITATION))
                 .build();
