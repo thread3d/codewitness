@@ -335,6 +335,7 @@ public final class SqliteVerificationStore implements VerificationStore {
             "CREATE INDEX IF NOT EXISTS idx_counterexamples_requirement ON counterexamples(requirement_id)");
 
     private final Path databaseFile;
+    private final boolean readOnly;
     private final Connection connection;
     private final Object lock = new Object();
     private boolean closed;
@@ -350,9 +351,52 @@ public final class SqliteVerificationStore implements VerificationStore {
      *                          schema cannot be applied
      */
     public SqliteVerificationStore(Path databaseFile) {
+        this(databaseFile, false);
+    }
+
+    /**
+     * Opens the verification database, optionally without any write access.
+     *
+     * <p>Reading a history is a different operation from recording one, and it must work where writing
+     * cannot: a read-only mount, a container image, a shared cache, an artefact store. Opening read-write for
+     * a read failed there with {@code SQLITE_READONLY_DIRECTORY} and filed a self-issue against CodeWitness,
+     * which was both wrong about the cause and made the history unreadable exactly where it was most useful.
+     * A read-only open does not create the file, does not configure pragmas, does not migrate and does not
+     * complete the schema - it only reads.
+     *
+     * @param databaseFile database file
+     * @param readOnly     {@code true} to open without write access
+     */
+    public SqliteVerificationStore(Path databaseFile, boolean readOnly) {
         this.databaseFile = Objects.requireNonNull(databaseFile, "databaseFile").toAbsolutePath().normalize();
+        this.readOnly = readOnly;
         Connection opened = null;
         try {
+            if (readOnly) {
+                if (!Files.isRegularFile(this.databaseFile)) {
+                    throw new StorageException("no verification history at " + this.databaseFile);
+                }
+                // The open mode is a driver property rather than part of the URL: SQLite's own mode=ro is
+                // only consulted when the driver enables URI filenames, and a URL that silently falls back
+                // to read-write is worse than no read-only mode at all - it fails on exactly the mounts it
+                // exists to support. 1 is SQLiteOpenMode.READ_ONLY.
+                Path writeAheadLog = this.databaseFile.resolveSibling(this.databaseFile.getFileName() + "-wal");
+                if (Files.isRegularFile(writeAheadLog) && Files.size(writeAheadLog) > 0) {
+                    throw new StorageException("the verification history at " + this.databaseFile
+                            + " has an uncheckpointed write-ahead log (" + writeAheadLog.getFileName()
+                            + "), which SQLite cannot read without write access to the directory. Open it "
+                            + "once with write access, or use `codewitness report <run-id>`, which reads the "
+                            + "stored report files directly and needs no database.");
+                }
+                java.util.Properties properties = new java.util.Properties();
+                properties.setProperty("open_mode", "1");
+                opened = DriverManager.getConnection(JDBC_URL_PREFIX + this.databaseFile, properties);
+                try (Statement statement = opened.createStatement()) {
+                    statement.execute("PRAGMA query_only = ON");
+                }
+                this.connection = opened;
+                return;
+            }
             Path parent = this.databaseFile.getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
@@ -384,6 +428,7 @@ public final class SqliteVerificationStore implements VerificationStore {
 
     @Override
     public void save(VerificationReport report, String reportJson) {
+        requireWritable();
         Objects.requireNonNull(report, "report");
         String runId = report.runId();
         if (runId == null || runId.isBlank()) {
@@ -458,7 +503,7 @@ public final class SqliteVerificationStore implements VerificationStore {
                 }
                 return List.copyOf(summaries);
             } catch (SQLException e) {
-                throw new StorageException("failed to list verification runs", e);
+                throw failure("failed to list verification runs", e);
             }
         }
     }
@@ -668,6 +713,7 @@ public final class SqliteVerificationStore implements VerificationStore {
      * @return number of run rows actually removed
      */
     public int deleteRuns(java.util.Collection<String> runIds) {
+        requireWritable();
         if (runIds == null || runIds.isEmpty()) {
             return 0;
         }
@@ -681,6 +727,31 @@ public final class SqliteVerificationStore implements VerificationStore {
                 }
             });
             return removed[0];
+        }
+    }
+
+    /**
+     * Refuses a write on a store opened for reading, with a message that says which store it is.
+     *
+     * @throws StorageException when this store was opened read-only
+     */
+    /**
+     * Wraps a driver failure, distinguishing "this history cannot be reached from here" from a defect.
+     *
+     * @param description what was being done
+     * @param failure     driver failure
+     * @return the exception to throw
+     */
+    private static StorageException failure(String description, SQLException failure) {
+        return StorageUnavailableException.isUnavailable(failure)
+                ? new StorageUnavailableException(description + ": " + failure.getMessage(), failure)
+                : new StorageException(description, failure);
+    }
+
+    private void requireWritable() {
+        if (readOnly) {
+            throw new StorageException("the verification history at " + databaseFile
+                    + " was opened for reading, so it cannot be written");
         }
     }
 

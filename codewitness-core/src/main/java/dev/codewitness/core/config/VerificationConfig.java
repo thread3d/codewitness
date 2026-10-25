@@ -331,26 +331,35 @@ public record VerificationConfig(
      * @param outputDirectory     where run data is written, or {@code null} for the project default
      * @param keepGeneratedTests  whether generated test sources are kept in the project after the run
      * @param sarif               whether to write a SARIF report beside the others, for code scanning
+     * @param keepRuns            how many run directories to keep after a run, or {@code 0} to keep all
      */
     public record Report(
             boolean html,
             boolean json,
             Path outputDirectory,
             boolean keepGeneratedTests,
-            boolean sarif) {
+            boolean sarif,
+            int keepRuns) {
 
         public Report {
             // SARIF is off by default: it exists so that findings can be uploaded to a code host, and a run
-            // that is not uploading anything does not need the extra file.
+            // that is not uploading anything does not need the extra file. Retention is off by default too,
+            // because deleting a user's history without being asked is not a default anyone expects.
         }
 
-        /** Keeps the four-argument form meaning "no SARIF", for callers written before it existed. */
+        /** Keeps the four-argument form meaning "no SARIF, no retention", for older callers. */
         public Report(boolean html, boolean json, Path outputDirectory, boolean keepGeneratedTests) {
-            this(html, json, outputDirectory, keepGeneratedTests, false);
+            this(html, json, outputDirectory, keepGeneratedTests, false, 0);
+        }
+
+        /** Keeps the five-argument form meaning "no retention". */
+        public Report(boolean html, boolean json, Path outputDirectory, boolean keepGeneratedTests,
+                boolean sarif) {
+            this(html, json, outputDirectory, keepGeneratedTests, sarif, 0);
         }
 
         public static Report defaults() {
-            return new Report(true, true, null, false, false);
+            return new Report(true, true, null, false, false, 0);
         }
     }
 
@@ -407,7 +416,8 @@ public record VerificationConfig(
     public VerificationConfig withOutputDirectory(Path directory) {
         return new VerificationConfig(project, language, limits, tests, mutation, propertyTesting,
                 staticAnalysis, security, llm, new Report(report.html(), report.json(), directory,
-                report.keepGeneratedTests(), report.sarif()), sandbox, scenarios, database, findings);
+                report.keepGeneratedTests(), report.sarif(), report.keepRuns()), sandbox, scenarios,
+                database, findings);
     }
 
     public VerificationConfig withBudget(Budget budget) {

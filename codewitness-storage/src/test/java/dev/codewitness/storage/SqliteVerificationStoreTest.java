@@ -452,6 +452,38 @@ class SqliteVerificationStoreTest {
         }
     }
 
+
+    @Test
+    @DisplayName("a store opened for reading refuses to write, and says why")
+    void aReadOnlyStoreRefusesToWrite() {
+        // Reading a history is a different operation from recording one. Where the directory is read-only the
+        // alternative was a driver error that reached the user as an internal failure and filed a self-issue
+        // against CodeWitness, which was both wrong about the cause and made the history unreadable.
+        Path database = database();
+        try (SqliteVerificationStore store = new SqliteVerificationStore(database)) {
+            store.save(ReportFixtures.report(RUN_EARLY, tempDir, ReportFixtures.STARTED, 3));
+        }
+
+        try (SqliteVerificationStore readOnly = new SqliteVerificationStore(database, true)) {
+            assertTrue(readOnly.findRun(RUN_EARLY).isPresent(), "reading must work");
+            StorageException refused = assertThrows(StorageException.class,
+                    () -> readOnly.save(ReportFixtures.report(RUN_EARLY, tempDir, ReportFixtures.STARTED, 3)));
+            assertTrue(refused.getMessage().contains("reading"), refused.getMessage());
+        }
+    }
+
+    @Test
+    @DisplayName("a read-only store does not create a database that is not there")
+    void aReadOnlyStoreDoesNotCreateADatabase() {
+        Path database = tempDir.resolve("absent.db");
+
+        StorageException refused = assertThrows(StorageException.class,
+                () -> new SqliteVerificationStore(database, true));
+
+        assertTrue(refused.getMessage().contains("no verification history"), refused.getMessage());
+        assertFalse(Files.exists(database), "a read must not create the file it is reading");
+    }
+
     @Test
     @DisplayName("a version 1 database is migrated in place and keeps its rows")
     void anOlderSchemaIsMigrated() throws SQLException {

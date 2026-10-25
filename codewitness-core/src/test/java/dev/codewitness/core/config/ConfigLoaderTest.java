@@ -90,6 +90,17 @@ class ConfigLoaderTest {
         assertTrue(rejected.getMessage().contains("findings.suppress"), rejected.getMessage());
     }
 
+
+    @Test
+    @DisplayName("report.keep_runs parses, and defaults to keeping everything")
+    void parsesRunRetention() {
+        assertEquals(0, load("").config().report().keepRuns(), "retention is off unless asked for");
+        assertEquals(5, load("""
+                report:
+                  keep_runs: 5
+                """).config().report().keepRuns());
+    }
+
     private static ConfigLoader.Loaded load(String yaml) {
         return ConfigLoader.parse(yaml, Path.of("codewitness.yaml"));
     }

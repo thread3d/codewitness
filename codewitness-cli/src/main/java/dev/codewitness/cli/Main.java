@@ -73,8 +73,12 @@ public final class Main implements Runnable {
             // A bad command line, a bad configuration file and an unreadable input file are statements about
             // how the tool was invoked or what it was pointed at, not defects in the tool. They must not be
             // recorded as self-issues, or the journal would fill with things no code change can fix.
-            if (cause instanceof IllegalArgumentException || cause instanceof java.io.UncheckedIOException) {
-                System.err.println("codewitness: " + cause.getMessage());
+            // The chain is walked rather than the top exception tested: the same condition arrives wrapped
+            // differently depending on whether picocli, the storage layer or an adapter threw last, and a
+            // classification that depends on wrapping depth is a classification that misfiles a journal entry.
+            Throwable environmental = environmentalCause(cause);
+            if (environmental != null) {
+                System.err.println("codewitness: " + environmental.getMessage());
                 return 3;
             }
             // An unexpected exception is a defect in CodeWitness, not a statement about the project. Keep
@@ -90,6 +94,25 @@ public final class Main implements Runnable {
             return 3;
         });
         return commandLine.execute(args);
+    }
+
+    /**
+     * Finds the exception in a chain that is a statement about the environment rather than a defect.
+     *
+     * @param cause exception to examine
+     * @return the environmental exception, or {@code null} when the chain holds none
+     */
+    private static Throwable environmentalCause(Throwable cause) {
+        Throwable current = cause;
+        while (current != null) {
+            if (current instanceof IllegalArgumentException
+                    || current instanceof java.io.UncheckedIOException
+                    || current instanceof dev.codewitness.storage.StorageUnavailableException) {
+                return current;
+            }
+            current = current.getCause() == current ? null : current.getCause();
+        }
+        return null;
     }
 
     public static void main(String[] args) {

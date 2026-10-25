@@ -216,6 +216,13 @@ public final class VerifyCommand implements Callable<Integer> {
             return 3;
         }
 
+        // Retention runs after the reports are written and the run is stored, so it can never delete the run
+        // that just finished. It is opt-in because deleting a history nobody asked to delete is not a safe
+        // default, and each run copies the project: a hundred runs of a large tree is tens of gigabytes.
+        if (config.report().keepRuns() > 0) {
+            ReportCommand.deleteRuns(base, config.report().keepRuns(), false);
+        }
+
         if (printJson) {
             System.out.println(jsonText);
         } else {

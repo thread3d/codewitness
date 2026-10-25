@@ -845,7 +845,7 @@ llm:
   api_key_env: CODEWITNESS_LLM_API_KEY
   max_calls: 0
 
-report:  { html: true, json: true, sarif: false }
+report:  { html: true, json: true, sarif: false, keep_runs: 0 }   # keep_runs prunes old runs after a verify
 findings:
   baseline: null         # a previous report.json; findings it already contains are not reported again
   suppress: []           # [{rule: CW-CONC-001, path: null, reason: "..."}]
@@ -935,6 +935,18 @@ Every run produces both:
 Run data lives in `<project>/.codewitness/runs/<run-id>/`: the report files, the raw artifacts
 (generated test sources, test and coverage reports) and an isolated copy of the project. Metadata is
 also indexed in `<project>/.codewitness/codewitness.db` (SQLite).
+
+Each run keeps a copy of the project, so a history grows with the tree: `report.keep_runs: N` prunes all
+but the N most recent runs after a successful `verify` (deleting their index rows with their directories),
+and `clean` does the same on demand. Retention is off by default, because deleting a history nobody asked
+to delete is not a safe default.
+
+Reading a history is a separate operation from writing one. `report`, `reproduce` and `listRuns` open the
+database read-only and never create it, and any storage restriction that makes the *index* unreadable — a
+read-only mount, a directory the process may not write, a database another run holds — is reported as a
+statement about the history with exit `3`, not as an internal failure of the tool. A corrupt database is
+the opposite case: that is a defect in CodeWitness, and it is journalled. Where the index cannot be read,
+`report <run-id>` still works, because it reads the stored report files directly.
 
 ---
 

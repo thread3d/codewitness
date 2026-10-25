@@ -47,18 +47,19 @@ public final class ReportCommand implements Callable<Integer> {
                 System.out.println("No verification history found at " + database);
                 return 0;
             }
-            try (SqliteVerificationStore store = new SqliteVerificationStore(database)) {
-                List<dev.codewitness.storage.RunSummary> runs = store.listRuns(limit);
-                if (runs.isEmpty()) {
-                    System.out.println("No runs recorded in " + database);
-                    return 0;
-                }
-                System.out.printf("%-26s %-22s %-20s %-20s %s%n",
-                        "RUN ID", "PROJECT", "RUN STATUS", "REQUIREMENTS", "STARTED");
-                for (dev.codewitness.storage.RunSummary run : runs) {
-                    System.out.printf("%-26s %-22s %-20s %-20s %s%n", run.runId(), run.projectName(),
-                            run.status(), run.overallStatus(), run.startedAt());
-                }
+            List<dev.codewitness.storage.RunSummary> runs;
+            try (SqliteVerificationStore store = new SqliteVerificationStore(database, true)) {
+                runs = store.listRuns(limit);
+            }
+            if (runs.isEmpty()) {
+                System.out.println("No runs recorded in " + database);
+                return 0;
+            }
+            System.out.printf("%-26s %-22s %-20s %-20s %s%n",
+                    "RUN ID", "PROJECT", "RUN STATUS", "REQUIREMENTS", "STARTED");
+            for (dev.codewitness.storage.RunSummary run : runs) {
+                System.out.printf("%-26s %-22s %-20s %-20s %s%n", run.runId(), run.projectName(),
+                        run.status(), run.overallStatus(), run.startedAt());
             }
             return 0;
         }
@@ -75,7 +76,7 @@ public final class ReportCommand implements Callable<Integer> {
             }
         }
         if (json == null && Files.isRegularFile(database)) {
-            try (SqliteVerificationStore store = new SqliteVerificationStore(database)) {
+            try (SqliteVerificationStore store = new SqliteVerificationStore(database, true)) {
                 json = store.findReportJson(runId).orElse(null);
                 fromIndex = json != null;
             }
@@ -132,6 +133,18 @@ public final class ReportCommand implements Callable<Integer> {
         }
         sb.append("Re-print the canonical JSON with: codewitness report ").append(runId).append(" --json\n");
         return sb.toString();
+    }
+
+    /**
+     * @param error exception to explain
+     * @return the innermost message, which is the one that names the actual restriction
+     */
+    private static String rootMessage(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current.getMessage() == null ? current.toString() : current.getMessage();
     }
 
     private static String firstString(String json, String key) {

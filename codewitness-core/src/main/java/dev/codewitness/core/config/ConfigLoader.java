@@ -47,7 +47,8 @@ public final class ConfigLoader {
             Map.entry("security", Set.of("enabled", "vulnerabilities")),
             Map.entry("llm", Set.of("enabled", "provider", "model", "base_url", "api_key_env", "max_calls",
                     "temperature", "timeout")),
-            Map.entry("report", Set.of("html", "json", "output_directory", "keep_generated_tests", "sarif")),
+            Map.entry("report", Set.of("html", "json", "output_directory", "keep_generated_tests", "sarif",
+                    "keep_runs")),
             Map.entry("sandbox", Set.of("mode", "image", "allow_network", "container_workdir")),
             Map.entry("database", Set.of("enabled", "engine", "schema", "seed", "url", "timeout")),
             Map.entry("findings", Set.of("suppress", "baseline")));
@@ -212,7 +213,8 @@ public final class ConfigLoader {
                 bool(reportMap, "json", defaults.report().json()),
                 path(reportMap, "output_directory"),
                 bool(reportMap, "keep_generated_tests", false),
-                bool(reportMap, "sarif", defaults.report().sarif()));
+                bool(reportMap, "sarif", defaults.report().sarif()),
+                integer(reportMap, "keep_runs", defaults.report().keepRuns()));
 
         VerificationConfig.Sandbox sandbox = new VerificationConfig.Sandbox(
                 string(sandboxMap, "mode", defaults.sandbox().mode()),
