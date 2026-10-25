@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "0.1.5";
+    public static final String VERSION = "0.1.6";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -815,6 +815,40 @@ public final class VerificationEngine {
             listener.onEvent("verdict", requirement.id() + " -> " + verdict.status());
         }
 
+        // Suppression happens once, here, after every phase has contributed: findings are advisory, so a
+        // suppressed one changes no verdict, and filtering at the point of collection would have to be
+        // repeated in every phase. What it must not do is disappear silently - the count, the rules and the
+        // reasons are all recorded below, because a reader has to be able to see that a rule was silenced and
+        // judge whether that was right.
+        List<Finding> suppressed = new ArrayList<>();
+        FindingBaseline baseline = baselineFor(config.findings().baseline(), limitations);
+        List<Finding> kept = suppressFindings(state.findings(), config, suppressed, baseline);
+        if (!suppressed.isEmpty()) {
+            Map<String, Long> byRule = new java.util.TreeMap<>();
+            for (Finding finding : suppressed) {
+                byRule.merge(finding.ruleId(), 1L, Long::sum);
+            }
+            StringBuilder reasons = new StringBuilder();
+            for (VerificationConfig.Findings.Suppression entry : config.findings().suppress()) {
+                long count = suppressed.stream()
+                        .filter(finding -> entry.matches(finding.ruleId(), finding.file()))
+                        .count();
+                if (count > 0) {
+                    reasons.append(reasons.isEmpty() ? "" : "; ").append(entry.rule())
+                            .append(" (").append(count).append(")");
+                    if (entry.reason() != null && !entry.reason().isBlank()) {
+                        reasons.append(": ").append(entry.reason().trim());
+                    }
+                    if (entry.path() != null && !entry.path().isBlank()) {
+                        reasons.append(" [only in ").append(entry.path()).append(']');
+                    }
+                }
+            }
+            limitations.add(suppressed.size() + " finding(s) were suppressed by configuration: "
+                    + reasons + ". The rules are still installed; suppression is a statement about these "
+                    + "findings in this project, not a claim that the rule is wrong.");
+        }
+
         if (budget.snapshot().exhausted()) {
             limitations.add("The verification budget was exhausted: " + budget.snapshot().exhaustedReason()
                     + ". Anything not yet verified stays unverified, and the run is reported as blocked so "
@@ -853,7 +887,7 @@ public final class VerificationEngine {
                 .tests(state.existingTests())
                 .coverage(state.coverage())
                 .mutation(state.mutation())
-                .findings(state.findings())
+                .findings(kept)
                 .dependencies(state.dependencies())
                 .run(run)
                 .limitations(limitations)
@@ -1638,6 +1672,65 @@ public final class VerificationEngine {
             case BLOCKED -> 1;
             case UNVERIFIED -> 0;
         };
+    }
+
+    /**
+     * Drops the findings a suppression entry covers, collecting them for the record.
+     *
+     * @param findings   findings to filter
+     * @param config     run configuration holding the suppression entries
+     * @param suppressed receives every finding that was dropped
+     * @return the findings that survive, in their original order
+     */
+    private static List<Finding> suppressFindings(
+            List<Finding> findings,
+            VerificationConfig config,
+            List<Finding> suppressed,
+            FindingBaseline baseline) {
+        if (config.findings().suppress().isEmpty() && baseline.size() == 0) {
+            return findings;
+        }
+        List<Finding> kept = new ArrayList<>();
+        for (Finding finding : findings) {
+            // A baseline entry is not a suppression: it says "this was here before", which is exactly what a
+            // reviewer of a change wants to see filtered, and it is disclosed below with the same honesty.
+            boolean known = baseline.contains(finding);
+            boolean drop = known || config.findings().suppress().stream()
+                    .anyMatch(entry -> entry.matches(finding.ruleId(), finding.file()));
+            if (drop) {
+                suppressed.add(finding);
+            } else {
+                kept.add(finding);
+            }
+        }
+        return List.copyOf(kept);
+    }
+
+    /**
+     * Loads the baseline a run was configured with, reporting rather than swallowing a bad file.
+     *
+     * @param baseline path from the configuration, may be {@code null}
+     * @param limitations receives the outcome: what the baseline covered, or why it could not be read
+     * @return the baseline, empty when none was configured or it could not be read
+     */
+    private static FindingBaseline baselineFor(Path baseline, List<String> limitations) {
+        if (baseline == null) {
+            return FindingBaseline.empty();
+        }
+        try {
+            FindingBaseline loaded = FindingBaseline.load(baseline);
+            limitations.add("A finding baseline was applied from " + baseline + ", which accounts for "
+                    + loaded.size() + " finding(s). Findings already present there are not reported again; "
+                    + "they are neither fixed nor waived, so the run says nothing about them.");
+            return loaded;
+        } catch (IllegalArgumentException e) {
+            // A baseline that cannot be read must not silently become "no baseline": that would report every
+            // known finding as new. It also must not stop the run, so the miss is stated and the run continues
+            // with everything reported.
+            limitations.add("The configured finding baseline could not be used, so every finding is reported: "
+                    + e.getMessage());
+            return FindingBaseline.empty();
+        }
     }
 
     private static List<Finding> deduplicateFindings(List<Finding> findings) {

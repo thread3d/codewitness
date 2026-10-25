@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The complete configuration of a verification run, loaded from {@code codewitness.yaml} and
@@ -31,7 +32,8 @@ public record VerificationConfig(
         Report report,
         Sandbox sandbox,
         List<Scenario> scenarios,
-        Database database) {
+        Database database,
+        Findings findings) {
 
     public VerificationConfig {
         project = project == null ? Project.defaults() : project;
@@ -47,6 +49,7 @@ public record VerificationConfig(
         sandbox = sandbox == null ? Sandbox.defaults() : sandbox;
         scenarios = List.copyOf(scenarios == null ? List.of() : scenarios);
         database = database == null ? Database.disabled() : database;
+        findings = findings == null ? Findings.none() : findings;
     }
 
     /**
@@ -69,7 +72,33 @@ public record VerificationConfig(
             Sandbox sandbox,
             List<Scenario> scenarios) {
         this(project, language, limits, tests, mutation, propertyTesting, staticAnalysis, security, llm, report,
-                sandbox, scenarios, null);
+                sandbox, scenarios, null, null);
+    }
+
+    /**
+     * Creates a configuration with no finding suppressions.
+     *
+     * <p>Kept so that a caller which has no {@code findings:} block - every test fixture and every adapter
+     * harness - reads as it did before suppressions existed.
+     *
+     * @param database the database fixture, may be {@code null}
+     */
+    public VerificationConfig(
+            Project project,
+            Language language,
+            Limits limits,
+            Toggle tests,
+            Mutation mutation,
+            PropertyTesting propertyTesting,
+            StaticAnalysis staticAnalysis,
+            Security security,
+            Llm llm,
+            Report report,
+            Sandbox sandbox,
+            List<Scenario> scenarios,
+            Database database) {
+        this(project, language, limits, tests, mutation, propertyTesting, staticAnalysis, security, llm, report,
+                sandbox, scenarios, database, null);
     }
 
     public static VerificationConfig defaults() {
@@ -95,6 +124,7 @@ public record VerificationConfig(
                 .append(security.vulnerabilities().source()).append('|')
                 .append(llm.enabled()).append('|').append(llm.provider()).append('|').append(llm.model()).append('|')
                 .append(report).append('|').append(sandbox).append('|');
+        sb.append(findings).append('|');
         sb.append(database.enabled()).append('|').append(database.engine()).append('|')
                 .append(database.schema()).append('|').append(database.seed()).append('|')
                 .append(database.url()).append('|');
@@ -185,6 +215,58 @@ public record VerificationConfig(
     }
 
     /**
+     * How findings are filtered before they reach a verdict or a report.
+     *
+     * <p>A rule that fires on correct code is not a bug in the code, and it cannot be argued with in a
+     * pull request: without a way to say "this rule, here, is a known false positive", the only options
+     * are to disable the rule everywhere or to learn to ignore the report. Suppression is the narrowing
+     * answer, and it is recorded: the count and the rules are stated in the run's limitations, so a
+     * suppressed finding is disclosed rather than hidden.
+     *
+     * @param suppress rules to drop, each with an optional path and a reason
+     * @param baseline a previous {@code report.json} whose findings are not reported again, or {@code null}
+     */
+    public record Findings(List<Suppression> suppress, Path baseline) {
+
+        public Findings {
+            suppress = List.copyOf(suppress == null ? List.of() : suppress);
+        }
+
+        /** Keeps the one-argument form meaning "no baseline". */
+        public Findings(List<Suppression> suppress) {
+            this(suppress, null);
+        }
+
+        public static Findings none() {
+            return new Findings(List.of(), null);
+        }
+
+        /**
+         * One suppression entry.
+         *
+         * @param rule   rule id to suppress, for example {@code CW-CONC-001}
+         * @param path   only suppress the rule in files whose path contains this text, or {@code null} for
+         *               every file
+         * @param reason why it is suppressed; recorded in the report so the next reader can judge it
+         */
+        public record Suppression(String rule, String path, String reason) {
+
+            public Suppression {
+                Objects.requireNonNull(rule, "rule");
+            }
+
+            /** @return {@code true} when this entry covers the given finding. */
+            public boolean matches(String findingRule, String findingPath) {
+                if (!rule.equals(findingRule)) {
+                    return false;
+                }
+                return path == null || path.isBlank()
+                        || (findingPath != null && findingPath.contains(path));
+            }
+        }
+    }
+
+    /**
      * Dependency advisory scanning.
      *
      * <p>Disabled by default, and deliberately so: it is the one part of a run that asks a third party
@@ -241,10 +323,34 @@ public record VerificationConfig(
         }
     }
 
-    /** Report configuration. */
-    public record Report(boolean html, boolean json, Path outputDirectory, boolean keepGeneratedTests) {
+    /**
+     * Report configuration.
+     *
+     * @param html                whether to write the human HTML report
+     * @param json                whether to write the canonical JSON report
+     * @param outputDirectory     where run data is written, or {@code null} for the project default
+     * @param keepGeneratedTests  whether generated test sources are kept in the project after the run
+     * @param sarif               whether to write a SARIF report beside the others, for code scanning
+     */
+    public record Report(
+            boolean html,
+            boolean json,
+            Path outputDirectory,
+            boolean keepGeneratedTests,
+            boolean sarif) {
+
+        public Report {
+            // SARIF is off by default: it exists so that findings can be uploaded to a code host, and a run
+            // that is not uploading anything does not need the extra file.
+        }
+
+        /** Keeps the four-argument form meaning "no SARIF", for callers written before it existed. */
+        public Report(boolean html, boolean json, Path outputDirectory, boolean keepGeneratedTests) {
+            this(html, json, outputDirectory, keepGeneratedTests, false);
+        }
+
         public static Report defaults() {
-            return new Report(true, true, null, false);
+            return new Report(true, true, null, false, false);
         }
     }
 
@@ -301,7 +407,7 @@ public record VerificationConfig(
     public VerificationConfig withOutputDirectory(Path directory) {
         return new VerificationConfig(project, language, limits, tests, mutation, propertyTesting,
                 staticAnalysis, security, llm, new Report(report.html(), report.json(), directory,
-                report.keepGeneratedTests()), sandbox, scenarios, database);
+                report.keepGeneratedTests(), report.sarif()), sandbox, scenarios, database, findings);
     }
 
     public VerificationConfig withBudget(Budget budget) {
@@ -311,12 +417,12 @@ public record VerificationConfig(
         Llm updatedLlm = new Llm(llm.enabled(), llm.provider(), llm.model(), llm.baseUrl(),
                 llm.apiKeyEnvironmentVariable(), budget.maxLlmCalls(), llm.temperature(), llm.timeout());
         return new VerificationConfig(project, language, updated, tests, mutation, propertyTesting,
-                staticAnalysis, security, updatedLlm, report, sandbox, scenarios, database);
+                staticAnalysis, security, updatedLlm, report, sandbox, scenarios, database, findings);
     }
 
     public VerificationConfig withScenarios(List<Scenario> newScenarios) {
         return new VerificationConfig(project, language, limits, tests, mutation, propertyTesting,
-                staticAnalysis, security, llm, report, sandbox, newScenarios, database);
+                staticAnalysis, security, llm, report, sandbox, newScenarios, database, findings);
     }
 
     /**
@@ -328,7 +434,7 @@ public record VerificationConfig(
      */
     public VerificationConfig withLanguage(Language newLanguage) {
         return new VerificationConfig(project, newLanguage, limits, tests, mutation, propertyTesting,
-                staticAnalysis, security, llm, report, sandbox, scenarios, database);
+                staticAnalysis, security, llm, report, sandbox, scenarios, database, findings);
     }
 
     /** @return a map representation suitable for embedding in a report. */

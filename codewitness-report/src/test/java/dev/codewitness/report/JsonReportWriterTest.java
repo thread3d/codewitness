@@ -265,7 +265,9 @@ class JsonReportWriterTest {
     @Test
     void findingsAlwaysCarryTheSpecificationKeys() {
         JsonNode finding = json.path("findings").get(0);
-        assertEquals(List.of("severity", "category", "file", "line", "message", "analyzer", "rule"),
+        // "fingerprint" is what makes a report usable as the next run's baseline.
+        assertEquals(List.of("severity", "category", "file", "line", "message", "fingerprint", "analyzer",
+                        "rule"),
                 keys(finding));
         assertEquals("HIGH", finding.path("severity").asText());
         assertEquals("SECURITY", finding.path("category").asText());

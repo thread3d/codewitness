@@ -671,7 +671,7 @@ final class McpTools {
                 : result.llm();
         return new VerificationConfig(result.project(), result.language(), result.limits(), tests,
                 mutation, propertyTesting, staticAnalysis, security, llm, result.report(),
-                result.sandbox(), result.scenarios(), result.database());
+                result.sandbox(), result.scenarios(), result.database(), result.findings());
     }
 
     private static ProjectRef projectRef(JsonNode arguments) {

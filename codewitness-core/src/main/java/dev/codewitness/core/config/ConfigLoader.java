@@ -32,7 +32,7 @@ public final class ConfigLoader {
     /** Keys understood at the root of {@code codewitness.yaml}. */
     private static final Set<String> ROOT_KEYS = Set.of("project", "language", "verification", "tests",
             "mutation", "property_testing", "static_analysis", "security", "llm", "report", "sandbox",
-            "database", "scenarios");
+            "database", "scenarios", "findings");
 
     /** Keys understood inside each top-level section. */
     private static final Map<String, Set<String>> SECTION_KEYS = Map.ofEntries(
@@ -47,9 +47,13 @@ public final class ConfigLoader {
             Map.entry("security", Set.of("enabled", "vulnerabilities")),
             Map.entry("llm", Set.of("enabled", "provider", "model", "base_url", "api_key_env", "max_calls",
                     "temperature", "timeout")),
-            Map.entry("report", Set.of("html", "json", "output_directory", "keep_generated_tests")),
+            Map.entry("report", Set.of("html", "json", "output_directory", "keep_generated_tests", "sarif")),
             Map.entry("sandbox", Set.of("mode", "image", "allow_network", "container_workdir")),
-            Map.entry("database", Set.of("enabled", "engine", "schema", "seed", "url", "timeout")));
+            Map.entry("database", Set.of("enabled", "engine", "schema", "seed", "url", "timeout")),
+            Map.entry("findings", Set.of("suppress", "baseline")));
+
+    /** Keys understood inside one entry of the {@code findings.suppress} list. */
+    private static final Set<String> SUPPRESSION_KEYS = Set.of("rule", "path", "reason");
 
     /** Keys understood inside {@code security.vulnerabilities}. */
     private static final Set<String> VULNERABILITY_KEYS = Set.of("enabled", "source", "endpoint", "timeout",
@@ -153,6 +157,7 @@ public final class ConfigLoader {
         Map<String, Object> reportMap = mapOf(map, "report");
         Map<String, Object> sandboxMap = mapOf(map, "sandbox");
         Map<String, Object> databaseMap = mapOf(map, "database");
+        Map<String, Object> findingsMap = mapOf(map, "findings");
         for (Map.Entry<String, Set<String>> section : SECTION_KEYS.entrySet()) {
             if (section.getKey().equals("project") || section.getKey().equals("language")) {
                 continue;
@@ -161,6 +166,9 @@ public final class ConfigLoader {
         }
         rejectUnknownKeys(mapOf(securityMap, "vulnerabilities"), "security.vulnerabilities",
                 VULNERABILITY_KEYS);
+        VerificationConfig.Findings findings = new VerificationConfig.Findings(
+                parseSuppressions(findingsMap.get("suppress")),
+                path(findingsMap, "baseline"));
 
         VerificationConfig.Limits limits = new VerificationConfig.Limits(
                 DurationParser.parse(string(verificationMap, "timeout", null), defaults.limits().timeout()),
@@ -203,7 +211,8 @@ public final class ConfigLoader {
                 bool(reportMap, "html", defaults.report().html()),
                 bool(reportMap, "json", defaults.report().json()),
                 path(reportMap, "output_directory"),
-                bool(reportMap, "keep_generated_tests", false));
+                bool(reportMap, "keep_generated_tests", false),
+                bool(reportMap, "sarif", defaults.report().sarif()));
 
         VerificationConfig.Sandbox sandbox = new VerificationConfig.Sandbox(
                 string(sandboxMap, "mode", defaults.sandbox().mode()),
@@ -233,8 +242,47 @@ public final class ConfigLoader {
         VerificationConfig config = new VerificationConfig(project, language, limits,
                 new VerificationConfig.Toggle(bool(testsMap, "enabled", true)), mutation, propertyTesting,
                 staticAnalysis, new VerificationConfig.Security(bool(securityMap, "enabled", true), vulnerabilityScan),
-                llm, report, sandbox, scenarios, database);
+                llm, report, sandbox, scenarios, database, findings);
         return new Loaded(config, source, warnings);
+    }
+
+    /**
+     * Parses {@code findings.suppress}.
+     *
+     * <p>Every entry needs a rule id, because a suppression without one would either suppress nothing or
+     * suppress everything. The reason is optional to write but strongly recommended, and is carried into the
+     * report: a suppression nobody can explain is indistinguishable from a mistake months later.
+     *
+     * @param value the raw {@code suppress} value, may be {@code null}
+     * @return parsed entries, never {@code null}
+     * @throws IllegalArgumentException when the value is not a list of mappings, an entry has no rule, or an
+     *     entry has a key that is not understood
+     */
+    @SuppressWarnings("unchecked")
+    private static List<VerificationConfig.Findings.Suppression> parseSuppressions(Object value) {
+        if (value == null) {
+            return List.of();
+        }
+        if (!(value instanceof List<?> list)) {
+            throw new IllegalArgumentException("findings.suppress must be a list of mappings with a rule, an "
+                    + "optional path and an optional reason");
+        }
+        List<VerificationConfig.Findings.Suppression> suppressions = new ArrayList<>();
+        for (Object entry : list) {
+            if (!(entry instanceof Map<?, ?> raw)) {
+                throw new IllegalArgumentException("findings.suppress entries must be mappings, found: " + entry);
+            }
+            Map<String, Object> map = (Map<String, Object>) raw;
+            rejectUnknownKeys(map, "findings.suppress", SUPPRESSION_KEYS);
+            String rule = string(map, "rule", null);
+            if (rule == null || rule.isBlank()) {
+                throw new IllegalArgumentException("findings.suppress entry has no rule: " + map
+                        + ". A suppression without a rule id would silently cover every finding.");
+            }
+            suppressions.add(new VerificationConfig.Findings.Suppression(rule,
+                    string(map, "path", null), string(map, "reason", null)));
+        }
+        return suppressions;
     }
 
     @SuppressWarnings("unchecked")

@@ -25,6 +25,71 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ConfigLoaderTest {
 
+
+    @Test
+    @DisplayName("findings.suppress parses a rule, an optional path and a reason")
+    void parsesSuppressions() {
+        // A rule that fires on correct code cannot be argued with in a pull request, so suppression is the
+        // narrowing answer to a false positive. It has to be expressible, and it has to be recorded.
+        ConfigLoader.Loaded loaded = load("""
+                findings:
+                  suppress:
+                    - rule: CW-CONC-001
+                      reason: immutable model class
+                    - rule: CW-SEC-004
+                      path: src/main/java/dev/example/Sandbox.java
+                      reason: the sandbox executes commands by design
+                """);
+
+        List<VerificationConfig.Findings.Suppression> suppressed = loaded.config().findings().suppress();
+        assertEquals(2, suppressed.size());
+        assertEquals("CW-CONC-001", suppressed.get(0).rule());
+        assertNull(suppressed.get(0).path(), "no path means every file");
+        assertEquals("immutable model class", suppressed.get(0).reason());
+        assertEquals("src/main/java/dev/example/Sandbox.java", suppressed.get(1).path());
+    }
+
+    @Test
+    @DisplayName("a suppression matches a rule everywhere, or only in the paths it names")
+    void suppressionsMatchByRuleAndPath() {
+        VerificationConfig.Findings.Suppression everywhere =
+                new VerificationConfig.Findings.Suppression("CW-CONC-001", null, "reason");
+        VerificationConfig.Findings.Suppression narrow = new VerificationConfig.Findings.Suppression(
+                "CW-CONC-001", "src/main/java/dev/example/Evidence.java", "reason");
+
+        assertTrue(everywhere.matches("CW-CONC-001", "anything/at/all.java"));
+        assertFalse(everywhere.matches("CW-SEC-001", "anything/at/all.java"), "the rule must match exactly");
+        assertTrue(narrow.matches("CW-CONC-001", "src/main/java/dev/example/Evidence.java"));
+        assertFalse(narrow.matches("CW-CONC-001", "src/main/java/dev/example/Other.java"));
+    }
+
+    @Test
+    @DisplayName("a suppression with no rule is rejected rather than suppressing everything")
+    void aSuppressionWithoutARuleIsRejected() {
+        IllegalArgumentException rejected = assertThrows(IllegalArgumentException.class, () ->
+                load("""
+                        findings:
+                          suppress:
+                            - reason: I do not like this finding
+                        """));
+
+        assertTrue(rejected.getMessage().contains("rule"), rejected.getMessage());
+    }
+
+    @Test
+    @DisplayName("an unknown key inside a suppression is rejected")
+    void anUnknownSuppressionKeyIsRejected() {
+        IllegalArgumentException rejected = assertThrows(IllegalArgumentException.class, () ->
+                load("""
+                        findings:
+                          suppress:
+                            - rule: CW-CONC-001
+                              why: a key that is not understood
+                        """));
+
+        assertTrue(rejected.getMessage().contains("findings.suppress"), rejected.getMessage());
+    }
+
     private static ConfigLoader.Loaded load(String yaml) {
         return ConfigLoader.parse(yaml, Path.of("codewitness.yaml"));
     }

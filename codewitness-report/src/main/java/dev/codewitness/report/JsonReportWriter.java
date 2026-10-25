@@ -581,6 +581,9 @@ public final class JsonReportWriter {
                 node.put("line", finding.line());
             }
             node.put("message", finding.message());
+            // The fingerprint makes a report usable as the next run's baseline: identity is what a
+            // comparison needs, and computing it at read time from five fields is how the two sides drift.
+            node.put("fingerprint", finding.fingerprint());
             node.put("analyzer", finding.analyzer());
             node.put("rule", finding.ruleId());
             array.add(node);

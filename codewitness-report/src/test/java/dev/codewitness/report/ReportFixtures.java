@@ -74,6 +74,31 @@ final class ReportFixtures {
     }
 
     /**
+     * @param status run status to report
+     * @return the standard fixture with that pipeline outcome, verdicts unchanged
+     */
+    static VerificationReport reportWithRunStatus(RunStatus status) {
+        VerificationReport standard = report();
+        VerificationRun run = standard.run();
+        VerificationRun replaced = new VerificationRun(run.runId(), run.project(), status, run.phases(),
+                run.environment(), run.budget(), run.usage(), run.workspace(), run.reportJson(),
+                run.reportHtml(), run.startedAt(), run.finishedAt(), run.notes());
+        return VerificationReport.builder(standard.runId(), standard.project(), standard.requirements())
+                .verdicts(standard.verdicts())
+                .evidence(standard.evidence())
+                .counterexamples(standard.counterexamples())
+                .tests(standard.tests())
+                .coverage(standard.coverage())
+                .mutation(standard.mutation())
+                .findings(standard.findings())
+                .dependencies(standard.dependencies())
+                .build(standard.build())
+                .run(replaced)
+                .limitations(standard.limitations())
+                .build();
+    }
+
+    /**
      * @return a build summary for the standard fixture, so reports exercise the build section
      */
     static VerificationReport.BuildSummary build() {

@@ -15,6 +15,7 @@ import dev.codewitness.core.requirements.RequirementStatus;
 import dev.codewitness.core.result.Budget;
 import dev.codewitness.core.result.VerificationReport;
 import dev.codewitness.report.HtmlReportWriter;
+import dev.codewitness.report.SarifReportWriter;
 import dev.codewitness.report.JsonReportWriter;
 import dev.codewitness.storage.SqliteVerificationStore;
 
@@ -90,6 +91,17 @@ public final class VerifyCommand implements Callable<Integer> {
     @Option(names = "--json", description = "Print the canonical JSON report to standard out.")
     private boolean printJson;
 
+    @Option(names = "--baseline", paramLabel = "<report.json>",
+            description = "Do not report findings that a previous run's report already contains, so a code "
+                    + "scanning upload shows only what this change introduced. The count is disclosed in the "
+                    + "run's limitations.")
+    private String baselineFile;
+
+    @Option(names = "--sarif", paramLabel = "<file>",
+            description = "Write findings and counterexamples as SARIF 2.1.0 to this file, for a code "
+                    + "scanning consumer. Implies nothing else: the verdicts and the exit code are the same.")
+    private String sarifFile;
+
     @Option(names = "--quiet", description = "Only print the final summary.")
     private boolean quiet;
 
@@ -163,6 +175,7 @@ public final class VerifyCommand implements Callable<Integer> {
         Path runDirectory = base.resolve("runs").resolve(report.runId());
         Path jsonPath = null;
         Path htmlPath = null;
+        Path sarifPath = null;
         String jsonText = json.render(report);
         try {
             if (config.report().json()) {
@@ -170,6 +183,14 @@ public final class VerifyCommand implements Callable<Integer> {
             }
             if (config.report().html()) {
                 htmlPath = html.write(report, runDirectory.resolve("report.html"));
+            }
+            // SARIF goes wherever it was asked for. A scanner reads one file, usually inside the workspace,
+            // so the path is honoured exactly rather than derived from the run directory.
+            Path sarifTarget = sarifFile != null
+                    ? Path.of(sarifFile).toAbsolutePath().normalize()
+                    : config.report().sarif() ? runDirectory.resolve("report.sarif") : null;
+            if (sarifTarget != null) {
+                sarifPath = new SarifReportWriter().write(report, sarifTarget);
             }
             try (SqliteVerificationStore store = new SqliteVerificationStore(
                     base.resolve("codewitness.db"))) {
@@ -206,6 +227,9 @@ public final class VerifyCommand implements Callable<Integer> {
         }
         if (htmlPath != null) {
             System.out.println("HTML report: " + htmlPath);
+        }
+        if (sarifPath != null) {
+            System.out.println("SARIF report: " + sarifPath);
         }
 
         // Only new issues are announced. Repeating the whole backlog on every run would train the reader
@@ -261,9 +285,13 @@ public final class VerifyCommand implements Callable<Integer> {
                         result.llm().baseUrl(), result.llm().apiKeyEnvironmentVariable(),
                         Math.max(1, result.llm().maxCalls()), result.llm().temperature(), result.llm().timeout())
                 : result.llm();
+        VerificationConfig.Findings findings = baselineFile == null
+                ? result.findings()
+                : new VerificationConfig.Findings(result.findings().suppress(),
+                        Path.of(baselineFile).toAbsolutePath().normalize());
         return new VerificationConfig(result.project(), result.language(), limits, tests, mutation,
                 propertyTesting, staticAnalysis, security, llm, result.report(), result.sandbox(),
-                result.scenarios(), result.database());
+                result.scenarios(), result.database(), findings);
     }
 
     /**
