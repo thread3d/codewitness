@@ -80,6 +80,19 @@ class StaticAnalysisStrategyTest {
     }
 
     @Test
+    void aRunWithoutAnalyzersDoesNotClaimACleanAnalyzerRun() {
+        Fixture fixture = fixture(List.of(), false);
+
+        StrategyOutcome outcome = verify(fixture);
+
+        assertTrue(outcome.notes().stream().anyMatch(note -> note.startsWith("No static analyzer ran")),
+                "nothing looked, so the note must say so: " + outcome.notes());
+        assertFalse(outcome.notes().stream().anyMatch(note -> note.contains("found nothing attributable")),
+                "a run where no analyzer executed must not read as a clean analyzer run: "
+                        + outcome.notes());
+    }
+
+    @Test
     void aHighSeverityHeuristicMatchIsAdvisoryAndNeverFailsTheRequirement() {
         Fixture fixture = fixture(List.of(heuristic("CW-SEC-004", Severity.CRITICAL)), true);
 

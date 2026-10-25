@@ -81,6 +81,23 @@ class VerificationEngineTest {
     }
 
     @Test
+    @DisplayName("a failed build says no build succeeded, not that no analyzer is registered")
+    void failedBuildExplainsWhyDependencyAndCoverageAnalysisDidNotRun() {
+        // Both phases select languages by a successful build, so an empty selection is ambiguous: no
+        // adapter declares the capability, or no language built. The second is an infrastructure answer
+        // and must not be reported as the first, which would send a reader looking for an adapter that
+        // is in fact registered.
+        VerificationReport report = run(adapter(
+                Set.of(Capability.INSPECT, Capability.BUILD, Capability.COVERAGE), false));
+
+        assertTrue(report.dependencies().note().startsWith("no language's build succeeded"),
+                "dependencies must name the failed build, not a missing analyzer: "
+                        + report.dependencies().note());
+        assertTrue(report.coverage().note().startsWith("no language's build succeeded"),
+                "coverage must name the failed build, not a missing provider: " + report.coverage().note());
+    }
+
+    @Test
     @DisplayName("an exhausted budget makes the run BLOCKED, never COMPLETED")
     void exhaustedBudgetIsBlockedNotCompleted() {
         // A truncated run must not look like a finished one. The budget used to be consulted only after

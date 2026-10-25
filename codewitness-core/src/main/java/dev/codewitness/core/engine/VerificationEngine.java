@@ -561,6 +561,16 @@ public final class VerificationEngine {
                     evidenceIds.add(evidence.id());
                 }
                 DependencyReport merged = mergeDependencies(inventories);
+                if (!merged.analysed() && inventories.isEmpty()) {
+                    // An empty selection is ambiguous: no adapter declares a dependency analyzer, or no
+                    // language's build succeeded. Reporting the second as the first claims a configuration
+                    // fact that is false, so name the real reason when there is one.
+                    String reason = noBuildSucceeded(builds);
+                    if (reason != null) {
+                        merged = DependencyReport.notAnalysed("none",
+                                reason + ", so no dependency inventory was produced");
+                    }
+                }
                 state.dependencies(merged);
                 return new PhaseOutcome(merged.analysed(),
                         merged.analysed() ? merged.totalDependencies() + " dependencies" : merged.note(),
@@ -604,6 +614,12 @@ public final class VerificationEngine {
                     }
                 }
                 CoverageReport merged = mergeCoverage(results);
+                if (!merged.measured() && results.isEmpty()) {
+                    String reason = noBuildSucceeded(builds);
+                    if (reason != null) {
+                        merged = CoverageReport.notMeasured("none", reason + ", so coverage was not measured");
+                    }
+                }
                 state.coverage(merged);
                 return new PhaseOutcome(merged.measured(), merged.describe(), List.copyOf(evidenceIds),
                         merged.measured() ? null : merged.note());
@@ -932,6 +948,22 @@ public final class VerificationEngine {
 
     private static boolean builtSuccessfully(BuildResult build) {
         return build != null && build.success();
+    }
+
+    /**
+     * @return the reason a build-dependent phase had nothing to analyse because no language's build
+     *     succeeded, or {@code null} when a build was never attempted or at least one succeeded.
+     *
+     * <p>The dependency and coverage phases select languages by a successful build, so an empty
+     * selection is ambiguous. "No analyzer is registered" is a configuration answer; a failed build is
+     * an infrastructure answer, and the two must stay distinguishable - a report that names the wrong
+     * one sends a reader looking for an adapter that is in fact there.
+     */
+    private static String noBuildSucceeded(Map<String, BuildResult> builds) {
+        if (builds.isEmpty() || builds.values().stream().anyMatch(VerificationEngine::builtSuccessfully)) {
+            return null;
+        }
+        return "no language's build succeeded";
     }
 
     /** @return a context bound to one language's project description but to the run's shared state. */

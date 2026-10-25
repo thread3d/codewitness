@@ -152,6 +152,10 @@ class KotlinProviderCommandsTest {
     void theMutationCommandIsNotTheTestCommand(@TempDir Path root) throws IOException {
         KotlinTestContexts.project(root);
         KotlinTestContexts.write(root, "pom.xml", KotlinTestContexts.MAVEN_POM);
+        // A project wrapper keeps this test about the command's flags rather than about whether the
+        // host happens to have a system Maven installed; without one the resolution is empty and the
+        // assertions below would fail on a machine that builds with ./mvnw only.
+        KotlinTestContexts.write(root, "mvnw", "#!/bin/sh\n");
         VerificationContext context = KotlinTestContexts.context(root, root.resolve(".codewitness"));
         KotlinMavenBuildSystem maven = new KotlinMavenBuildSystem();
 

@@ -200,8 +200,13 @@ public final class StaticAnalysisStrategy implements VerificationStrategy {
         }
 
         if (relevant.isEmpty()) {
-            notes.add("Static analysis found nothing attributable to " + requirement.id()
-                    + " (a clean analyzer run is weak evidence: it only covers the rules the analyzers know).");
+            // "Found nothing" and "nothing looked" are different observations. The note must say
+            // which one happened, or a blocked run reads as a clean analyzer run.
+            notes.add(analyzersRun > 0
+                    ? "Static analysis found nothing attributable to " + requirement.id()
+                            + " (a clean analyzer run is weak evidence: it only covers the rules the analyzers know)."
+                    : "No static analyzer ran, so static analysis provides no evidence about "
+                            + requirement.id() + ".");
         }
         return new StrategyOutcome(id(), requirement.id(), evidence, counterexamples, outcomes, notes);
     }

@@ -19,6 +19,12 @@ each rule is about, against `VerdictCalculator`, `Evidence`, `RequirementParser`
 `verify` exits `1` if a requirement FAILED, `2` if it was BLOCKED and `0` otherwise. The machine
 report is written to `.codewitness/runs/<run-id>/report.json` and the human report to `report.html`.
 
+The build runs through the project's `./mvnw`, which caches Maven under `$HOME/.m2`. In a sandbox whose
+`$HOME` is read-only, point `HOME` at a writable directory; otherwise the wrapper fails before
+compiling anything and the run is correctly, but unhelpfully, reported `BLOCKED`. A JDK that can
+compile for release 25 is required as well - a runtime image without `javac` fails at the first
+compile with "release version 25 not supported".
+
 ## What it checks
 
 | Requirement | Rule | How it is executed |
@@ -36,7 +42,8 @@ not pass by default; leaving one claim unexecuted keeps that behaviour in the se
 
 ## Result
 
-Run `CW-2026-10-07-SP7DE` (isolated-copy mode, `--no-mutation`), after both defects below were fixed:
+Run `CW-2026-10-25-2415C` (isolated-copy mode, `--no-mutation`, Temurin JDK 25.0.5), after the defects
+below were fixed:
 
 ```
 CWR-001  VERIFIED    CWR-005  VERIFIED
@@ -44,8 +51,8 @@ CWR-002  VERIFIED    CWR-006  VERIFIED
 CWR-003  VERIFIED    CWR-007  UNVERIFIED
 CWR-004  VERIFIED
 
-711 existing tests executed, 711 passed, 0 failed
-coverage line 70.1% (11215/15991), branch 59.0% (4980/8438)
+1671 existing tests executed, 1671 passed, 0 failed
+coverage line 71.1% (24988/35138), branch 59.5% (12181/20485)
 overall status PARTIALLY_VERIFIED (6 verified, 0 failed, 1 unverified)
 verify exit code 0
 ```
@@ -55,7 +62,8 @@ verify exit code 0
 The first self-check pointed CodeWitness at its own tree in its default isolated-copy mode and the
 build failed. That is not a failure of the check: the tool reported every requirement `BLOCKED`
 (never `FAILED`), which is CWR-001 holding under a real defect. It then found a second defect that
-kept coverage from being measured. Both are fixed.
+kept coverage from being measured. Both are fixed. Re-running the same blocked path later found three
+more, items 3-5.
 
 1. **`WorkspaceManager` excluded source packages named like build output (fixed).**
    The copy step matched excluded directory *names* at any depth, so it skipped
@@ -74,7 +82,29 @@ kept coverage from being measured. Both are fixed.
    empty `<argLine>` default property. Regression test:
    `SurefireArgLineConfigurationTest`.
 
-Both findings are instances of the same principle the project documents: infrastructure problems and
+3. **A failed build was reported as a missing analyzer (fixed).**
+   The dependency and coverage phases select languages by a successful build, so a failed build leaves
+   an empty selection — and the report said "no dependency analyzer was registered for any language"
+   and "no coverage provider was registered for any language", claiming a configuration fact that was
+   false. The two reasons are now distinguished: "no language's build succeeded, so no dependency
+   inventory was produced" (and the coverage equivalent), which is what a blocked run says. Regression
+   test: `VerificationEngineTest.failedBuildExplainsWhyDependencyAndCoverageAnalysisDidNotRun`.
+
+4. **"Nothing looked" read as "a clean analyzer run" (fixed).**
+   When no static analyzer ran — a failed build, for instance — each requirement's note still said
+   "Static analysis found nothing attributable to CWR-00x (a clean analyzer run is weak evidence …)",
+   asserting a run that never happened while the obligation outcome beside it correctly said none ran.
+   The note now says "No static analyzer ran, so static analysis provides no evidence about CWR-00x."
+   when the run executed none. Regression test:
+   `StaticAnalysisStrategyTest.aRunWithoutAnalyzersDoesNotClaimACleanAnalyzerRun`.
+
+5. **One unit test depended on the host having a system Maven (fixed).**
+   `KotlinProviderCommandsTest.theMutationCommandIsNotTheTestCommand` resolved the build tool from
+   `MAVEN_HOME` or `PATH` without writing a project wrapper, so on a machine that builds with
+   `./mvnw` only it reported an empty command instead of testing the flags it is about. It now writes
+   a stub `mvnw`, the same way the wrapper-resolution test beside it does.
+
+All of these are instances of the same principle the project documents: infrastructure problems and
 code defects stay distinguishable, and a tool that cannot run something says so instead of guessing.
 
 ## Dependency advisories
@@ -109,7 +139,7 @@ Turning this check on the project itself found something, exactly as it should:
 The self-check is green again, and this time the zero is a measurement rather than an absence:
 
 ```
-18 dependencies, 0 advisories (source osv, checked <run time>)
+30 dependencies, 0 advisories (source osv, checked <run time>)
 overall PARTIALLY_VERIFIED (6 verified, 1 unverified), verify exit code 0
 ```
 
