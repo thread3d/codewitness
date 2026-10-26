@@ -29,10 +29,7 @@ report assembly — each a separate change, and each now readable without the ph
 
 - **The README is ~2,300 lines**, including a status section longer than the reference material it follows. It
   wants splitting into `docs/` with a landing page that fits on a screen.
-- **`.github/workflows/release.yml` is written but not in the repository.** GitHub refuses the push because the
-  token this work was done under lacks the `workflow` scope. It builds the shaded jar on a `v*` tag, refuses to
-  publish unless the tag, the pom version and the reported version agree, and attaches the jar. To land it, a
-  token with that scope is needed (`gh auth refresh -s workflow`), or the file added through the web UI.
+- **The README split** is the last packaging item; the release workflow landed in 1.0.1.
 
 ### Features
 
