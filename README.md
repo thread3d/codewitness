@@ -941,6 +941,11 @@ but the N most recent runs after a successful `verify` (deleting their index row
 and `clean` does the same on demand. Retention is off by default, because deleting a history nobody asked
 to delete is not a safe default.
 
+Two runs against the same project contend for one SQLite writer. The loser waits 15 s for the lock and, if it
+still cannot get it, retries the write with a doubling backoff before reporting the failure — and the failure
+names the contention, so it cannot arrive as a generic storage error. A read-only directory or a corrupt file
+is never retried, because waiting cannot fix either.
+
 Reading a history is a separate operation from writing one. `report`, `reproduce` and `listRuns` open the
 database read-only and never create it, and any storage restriction that makes the *index* unreadable — a
 read-only mount, a directory the process may not write, a database another run holds — is reported as a

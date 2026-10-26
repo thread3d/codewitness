@@ -334,7 +334,22 @@ public final class SqliteVerificationStore implements VerificationStore {
             "CREATE INDEX IF NOT EXISTS idx_evidence_evidence ON evidence(evidence_id)",
             "CREATE INDEX IF NOT EXISTS idx_counterexamples_requirement ON counterexamples(requirement_id)");
 
+    /** How many times a contended write is attempted before it is reported as a failure. */
+    private static final int MAX_WRITE_ATTEMPTS = 3;
+
+    /** First retry delay; it doubles on each subsequent attempt. */
+    private static final long RETRY_BASE_MILLIS = 100L;
+
+    /**
+     * How long SQLite waits for a lock before returning {@code SQLITE_BUSY}.
+     *
+     * <p>Long enough that an ordinary contended write succeeds on the first attempt, short enough that a run
+     * which cannot record its evidence finds out promptly instead of appearing to hang.
+     */
+    private static final int DEFAULT_BUSY_TIMEOUT_MILLIS = 15_000;
+
     private final Path databaseFile;
+    private final int busyTimeoutMillis;
     private final boolean readOnly;
     private final Connection connection;
     private final Object lock = new Object();
@@ -368,8 +383,23 @@ public final class SqliteVerificationStore implements VerificationStore {
      * @param readOnly     {@code true} to open without write access
      */
     public SqliteVerificationStore(Path databaseFile, boolean readOnly) {
+        this(databaseFile, readOnly, DEFAULT_BUSY_TIMEOUT_MILLIS);
+    }
+
+    /**
+     * Opens the database with an explicit busy timeout.
+     *
+     * <p>Exposed so a test can prove the retry with a timeout short enough to fail inside a test, rather than
+     * by holding a lock for fifteen seconds.
+     *
+     * @param databaseFile      database file
+     * @param readOnly          {@code true} to open without write access
+     * @param busyTimeoutMillis how long SQLite waits for a lock before reporting contention
+     */
+    public SqliteVerificationStore(Path databaseFile, boolean readOnly, int busyTimeoutMillis) {
         this.databaseFile = Objects.requireNonNull(databaseFile, "databaseFile").toAbsolutePath().normalize();
         this.readOnly = readOnly;
+        this.busyTimeoutMillis = busyTimeoutMillis;
         Connection opened = null;
         try {
             if (readOnly) {
@@ -440,19 +470,26 @@ public final class SqliteVerificationStore implements VerificationStore {
             ProjectInfo projectInfo = report.project() != null
                     ? report.project()
                     : ProjectInfo.builder(projectRef).build();
-            inTransaction("failed to persist verification run " + runId, () -> {
-                upsertProject(projectInfo);
-                String createdAt = existingCreatedAt(runId);
-                deleteRun(runId);
-                insertRun(report, projectInfo.project(), reportJson, createdAt);
-                insertRequirements(report);
-                insertObligations(report);
-                insertEvidence(report);
-                insertTests(report);
-                insertFindings(report);
-                insertCounterexamples(report);
-                insertToolRuns(report);
-            });
+            // A second run against the same project is a normal thing to do, and SQLite allows one writer: the
+            // loser waits for busy_timeout and then gives up. Giving up lost the whole run, silently, because
+            // the failure was reported as a warning. Waiting longer is not the fix on its own - a long busy
+            // timeout still fails eventually, and it makes every contended write slower - so the write is
+            // retried a few times with a backoff that starts short. Only contention is retried: a read-only
+            // directory or a corrupt file will not become writable by waiting.
+            retrying("failed to persist verification run " + runId, () ->
+                    inTransaction("failed to persist verification run " + runId, () -> {
+                        upsertProject(projectInfo);
+                        String createdAt = existingCreatedAt(runId);
+                        deleteRun(runId);
+                        insertRun(report, projectInfo.project(), reportJson, createdAt);
+                        insertRequirements(report);
+                        insertObligations(report);
+                        insertEvidence(report);
+                        insertTests(report);
+                        insertFindings(report);
+                        insertCounterexamples(report);
+                        insertToolRuns(report);
+                    }));
         }
     }
 
@@ -543,10 +580,10 @@ public final class SqliteVerificationStore implements VerificationStore {
 
     // ------------------------------------------------------------------ schema
 
-    private static void configure(Connection connection) throws SQLException {
+    private void configure(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA foreign_keys = ON");
-            statement.execute("PRAGMA busy_timeout = 5000");
+            statement.execute("PRAGMA busy_timeout = " + busyTimeoutMillis);
             statement.execute("PRAGMA journal_mode = WAL");
             statement.execute("PRAGMA synchronous = NORMAL");
         }
@@ -1954,6 +1991,43 @@ public final class SqliteVerificationStore implements VerificationStore {
         }
         if (failure != null) {
             throw failure;
+        }
+    }
+
+    /**
+     * Runs a write, retrying while another process holds the database.
+     *
+     * <p>Bounded on purpose: three attempts over roughly a second and a half, so a run whose evidence cannot be
+     * recorded fails with a clear message instead of hanging, and two runs that start together do not both
+     * stall until a timeout. The delay doubles so that a contender that holds the lock briefly is not retried
+     * as often as one that holds it for a while.
+     *
+     * @param description what is being written, for the failure message
+     * @param work        the write
+     */
+    private void retrying(String description, SqlWork work) {
+        int attempt = 0;
+        while (true) {
+            try {
+                work.run();
+                return;
+            } catch (SQLException e) {
+                // A raw driver failure means the write never reached the retry decision; report it rather than
+                // guessing whether waiting would have helped.
+                throw failure(description, e);
+            } catch (StorageException e) {
+                if (!StorageUnavailableException.isBusy(e) || attempt >= MAX_WRITE_ATTEMPTS - 1) {
+                    throw e;
+                }
+                attempt++;
+                try {
+                    Thread.sleep(RETRY_BASE_MILLIS << attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new StorageException(description + ": interrupted while waiting for the database",
+                            interrupted);
+                }
+            }
         }
     }
 

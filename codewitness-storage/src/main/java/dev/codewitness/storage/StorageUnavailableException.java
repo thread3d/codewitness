@@ -32,6 +32,23 @@ public class StorageUnavailableException extends StorageException {
 
     /**
      * @param failure a driver failure
+     * @return {@code true} when another writer holds the database, which waiting may resolve
+     */
+    public static boolean isBusy(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && (message.contains("SQLITE_BUSY") || message.contains("database is locked")
+                    || message.contains("SQLITE_LOCKED"))) {
+                return true;
+            }
+            current = current.getCause() == current ? null : current.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * @param failure a driver failure
      * @return {@code true} when it describes an environment restriction rather than a defect
      */
     public static boolean isUnavailable(Throwable failure) {

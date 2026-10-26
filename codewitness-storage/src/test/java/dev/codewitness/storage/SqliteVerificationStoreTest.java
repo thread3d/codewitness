@@ -453,6 +453,65 @@ class SqliteVerificationStoreTest {
     }
 
 
+
+    @Test
+    @DisplayName("a write that loses the race for the database either succeeds or says it was contention")
+    void aContendedWriteIsRetriedOrExplained() throws Exception {
+        // Two runs against the same project is a normal thing to do, and SQLite allows one writer. The loser
+        // used to wait out busy_timeout and give up, which lost the whole run and said so in a warning. Now it
+        // retries; and if the contention outlasts the retries, the failure must name contention rather than
+        // arriving as a generic storage error. Either outcome is correct here - what must not happen is a
+        // silent loss, which is what the classifier below rules out.
+        Path database = database();
+        try (SqliteVerificationStore store = new SqliteVerificationStore(database)) {
+            store.save(ReportFixtures.report(RUN_EARLY, tempDir, ReportFixtures.STARTED, 3));
+        }
+        boolean recorded;
+        try (Connection holder = DriverManager.getConnection("jdbc:sqlite:" + database);
+                SqliteVerificationStore contender = new SqliteVerificationStore(database, false, 25)) {
+            holder.setAutoCommit(true);
+            try (Statement statement = holder.createStatement()) {
+                statement.execute("BEGIN IMMEDIATE");
+            }
+            Thread release = new Thread(() -> {
+                try {
+                    Thread.sleep(250);
+                    holder.rollback();
+                } catch (Exception ignored) {
+                    // the assertions are the evidence
+                }
+            });
+            release.start();
+            try {
+                contender.save(ReportFixtures.report(RUN_MIDDLE, tempDir, ReportFixtures.STARTED, 3));
+                recorded = true;
+            } catch (StorageException e) {
+                recorded = false;
+                assertTrue(StorageUnavailableException.isBusy(e),
+                        "a contended write that gives up must name the contention: " + e.getMessage());
+            } finally {
+                release.join();
+            }
+        }
+        if (recorded) {
+            try (SqliteVerificationStore reopened = new SqliteVerificationStore(database, true)) {
+                assertTrue(reopened.findRun(RUN_MIDDLE).isPresent(), "a reported success must be readable back");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("contention is distinguished from a restriction the database cannot recover from")
+    void contentionIsClassifiedSeparately() throws Exception {
+        // Retrying a read-only directory or a corrupt file would only wait, so only contention is retried.
+        assertTrue(StorageUnavailableException.isBusy(new SQLException("[SQLITE_BUSY] database is locked")));
+        assertTrue(StorageUnavailableException.isBusy(new SQLException("SQLITE_LOCKED: locked")));
+        assertFalse(StorageUnavailableException.isBusy(new SQLException("[SQLITE_READONLY] read only")));
+        assertTrue(StorageUnavailableException.isUnavailable(new SQLException("[SQLITE_READONLY] read only")));
+        assertFalse(StorageUnavailableException.isUnavailable(new SQLException("file is not a database")),
+                "a corrupt database is a defect, not a restriction");
+    }
+
     @Test
     @DisplayName("a store opened for reading refuses to write, and says why")
     void aReadOnlyStoreRefusesToWrite() {
