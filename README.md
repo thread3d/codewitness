@@ -1106,6 +1106,19 @@ Nothing in core names a language it cannot already verify.
 
 ---
 
+## Releasing
+
+Release notes live in the repository: [`docs/release-notes/<version>.md`](docs/release-notes), backfilled to
+0.1.5. A release's notes are the file whose name is its version, so the repository's account of its own history
+travels with the code instead of living beside somebody's checkout.
+
+A release is a tag whose version agrees in three places — the tag itself, the root `pom.xml` version every module
+inherits, and the version the tool reports — with the shaded jar attached. Automation for that is landing as its
+own change (`.github/workflows/release.yml`); until it does, a release is cut with those three checks by hand,
+which is what every release so far has done.
+
+---
+
 ## Building and testing
 
 ```bash
