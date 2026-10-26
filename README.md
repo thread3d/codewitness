@@ -166,6 +166,12 @@ the file that gave it away — a language that appears nowhere in the report is 
 that is not there. Recognition comes from `LanguageDetector` implementations discovered like adapters are,
 so naming a language CodeWitness cannot verify is a module and a provider file, not an edit to the engine.
 
+An adapter declares the phases it supports (`Capability`) and registers the providers that implement them. The
+two are recorded in different places, so the engine checks them against each other at the start of every run: an
+adapter that registers a coverage provider while not declaring `COVERAGE` would have that phase skipped with the
+provider sitting unused, and that is now a stated limitation and a self-issue rather than a quietly narrower
+verification.
+
 `language.adapter: java`, `python`, `rust`, `go`, `typescript`, `javascript`, `csharp`, `kotlin`,
 `cpp`, `php`, `ruby`, `swift`, `verilog`, `vhdl`, `sql` or `pascal`
 *narrows* the run

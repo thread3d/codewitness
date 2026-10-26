@@ -29,6 +29,7 @@ import dev.codewitness.core.spi.StrategyOutcome;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
 import dev.codewitness.core.spi.VerificationStrategy;
+import dev.codewitness.core.spi.VerificationTools;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -495,6 +496,46 @@ class VerificationEngineTest {
         return new VerificationEngine(registry, providers, LanguageDetectorRegistry.of(),
                 new dev.codewitness.core.exec.LocalProcessSandbox(List.of(tmp)).runner())
                 .verify(ProjectRef.of(tmp), requirements, config, (phase, message) -> { });
+    }
+
+
+    @Test
+    @DisplayName("an adapter that registers a provider for a phase it does not declare is reported")
+    void aProviderWithoutItsCapabilityIsReported(@TempDir Path tmp) {
+        // The engine schedules a phase from the declared capability and the provider is registered separately,
+        // so forgetting the declaration skipped the phase silently: the run looked complete and simply had no
+        // coverage section while the provider sat in the registry unused. Nothing in the tree does this today,
+        // which is exactly why it needs a test: it is a guard against the next adapter.
+        LanguageAdapter adapter = adapter(Set.of(Capability.INSPECT, Capability.BUILD), true);
+        LanguageAdapterRegistry registry = LanguageAdapterRegistry.of(adapter);
+        VerificationProviderRegistry providers = VerificationProviderRegistry.empty()
+                .register(new VerificationTools.CoverageProvider() {
+                    @Override
+                    public String id() {
+                        return "orphan-coverage";
+                    }
+
+                    @Override
+                    public boolean supports(ProjectInfo project) {
+                        return true;
+                    }
+
+                    @Override
+                    public dev.codewitness.core.model.CoverageReport measure(VerificationContext context) {
+                        return dev.codewitness.core.model.CoverageReport.notMeasured(
+                                "orphan-coverage", "not called");
+                    }
+                });
+        VerificationReport report = new VerificationEngine(registry, providers, LanguageDetectorRegistry.of(),
+                new dev.codewitness.core.exec.LocalProcessSandbox(List.of(tmp)).runner())
+                .verify(ProjectRef.of(tmp), new RequirementSet(List.of()), VerificationConfig.defaults(),
+                        (phase, message) -> { });
+
+        assertTrue(report.limitations().stream().anyMatch(l -> l.contains("does not declare COVERAGE")),
+                "the skipped phase must be stated: " + report.limitations());
+        assertTrue(report.limitations().stream().anyMatch(l -> l.contains("orphan-coverage")
+                        || l.contains("registers a COVERAGE provider")),
+                report.limitations().toString());
     }
 
     /** The defaults with only the database section changed, so a test says one thing at a time. */

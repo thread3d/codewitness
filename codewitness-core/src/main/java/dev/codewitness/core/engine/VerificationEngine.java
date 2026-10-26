@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "0.1.14";
+    public static final String VERSION = "0.1.15";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -322,6 +322,12 @@ public final class VerificationEngine {
                 inspected, List.copyOf(inspectionEvidence), null));
 
         LlmProvider llm = llm(config);
+
+        // An adapter that registers a provider for a phase but does not declare the matching capability has that
+        // phase skipped without a word, because the engine schedules phases from the declared capabilities. That
+        // is a defect in the adapter and it makes a verification quietly narrower than it looks, so it is looked
+        // for explicitly rather than left to be noticed in a report that simply has no coverage section.
+        recordCapabilityMismatches(inspections, providers, limitations, runId);
 
         // ---------------------------------------------------------------- build
         // Every language that claims part of the project gets its own build. One language failing to
@@ -1578,6 +1584,61 @@ public final class VerificationEngine {
      * @param limitations receives one entry per problem found
      * @param listener    receives the same problems as live progress events
      */
+    /**
+     * Records adapters whose declared capabilities disagree with the providers they registered.
+     *
+     * <p>The engine schedules a phase from the adapter's declared {@link Capability}, and the adapter's providers
+     * are registered separately on the provider registry. Nothing connected the two, so an adapter that
+     * registered a coverage provider and forgot {@code Capability.COVERAGE} had its coverage phase skipped
+     * silently: the run looked complete and simply had no coverage section, while the provider sat in the
+     * registry unused.
+     *
+     * @param inspections the languages this run claimed
+     * @param providers   the registry the run will execute against
+     * @param limitations receives one entry per mismatch
+     * @param runId       run the mismatch belongs to
+     */
+    private void recordCapabilityMismatches(
+            List<Inspection> inspections,
+            VerificationProviderRegistry providers,
+            List<String> limitations,
+            RunId runId) {
+        for (Inspection inspection : inspections) {
+            ProjectInfo info = inspection.info();
+            LanguageAdapter adapter = inspection.adapter();
+            Set<Capability> declared = adapter.capabilities();
+            Map<Capability, Boolean> registered = new LinkedHashMap<>();
+            registered.put(Capability.BUILD, !providers.compilers(info).isEmpty());
+            registered.put(Capability.TEST, !providers.testRunners(info).isEmpty());
+            registered.put(Capability.STATIC_ANALYSIS, !providers.staticAnalyzers(info).isEmpty());
+            registered.put(Capability.COVERAGE, !providers.coverageProviders(info).isEmpty());
+            registered.put(Capability.MUTATION, !providers.mutationTesters(info).isEmpty());
+            registered.put(Capability.SECURITY_SCAN, !providers.securityAnalyzers(info).isEmpty());
+            registered.put(Capability.DEPENDENCY_SCAN, !providers.dependencyAnalyzers(info).isEmpty());
+            for (Map.Entry<Capability, Boolean> entry : registered.entrySet()) {
+                Capability capability = entry.getKey();
+                // Only this direction is a defect. An adapter may implement a phase itself rather than through a
+                // registered provider - that is what {@code LanguageAdapter.build} and friends are for, and a
+                // test adapter that throws from {@code build} is doing exactly that - so "declares a capability
+                // with no provider" is not evidence of anything. "Registers a provider for a phase it does not
+                // declare", on the other hand, can only mean the phase will be skipped while the provider sits
+                // there unused.
+                if (!entry.getValue() || declared.contains(capability)) {
+                    continue;
+                }
+                String message = adapter.id() + " registers a " + capability + " provider but does not declare "
+                        + capability + ", so that phase will be skipped and the provider will not be used. The "
+                        + "phase is reported as not run rather than assumed to have failed.";
+                limitations.add(message);
+                selfIssues.record(SelfIssueCategory.ADAPTER_FAILURE, SelfIssueSeverity.MEDIUM, message, null,
+                        Map.of(SelfIssueRecord.RUN_ID, runId.value(),
+                                SelfIssueRecord.PROJECT, info.project().root().toString(),
+                                SelfIssueRecord.PHASE, "inspect",
+                                SelfIssueRecord.VERSION, VERSION));
+            }
+        }
+    }
+
     private static void recordDeclarationProblems(
             RequirementSet requirements,
             VerificationConfig config,
