@@ -112,12 +112,32 @@ public final class GeneratedTestsStrategy implements VerificationStrategy {
             generated = new ArrayList<>(generated.subList(0, Math.max(0, limit)));
         }
         if (generated.isEmpty()) {
-            notes.add("No executable scenario is declared for " + requirement.id()
-                    + ", so CodeWitness could not run any experiment against it. Declare a scenario in "
-                    + "codewitness.yaml to make this requirement verifiable.");
+            // "No executable scenario is declared" is true only when the requirement declares no
+            // scenario at all. A requirement whose scenario is a process scenario declares one: the
+            // process strategy runs it, and this strategy cannot express it as a generated test unless
+            // the scenario asks for a native test. Claiming otherwise contradicted the executed
+            // evidence for the same requirement in this project's own self-check, which verified its
+            // exit-code requirement while the limitations list said no experiment could be run.
+            boolean scenarioDeclared = context.config().scenarios().stream()
+                    .anyMatch(scenario -> requirement.id().equals(scenario.requirement()));
+            if (scenarioDeclared) {
+                notes.add("The generated-test strategy produced no test for " + requirement.id()
+                        + ": its declared scenario(s) cannot be expressed as a generated test here, and a "
+                        + "process scenario is run by the process strategy unless it asks for a native "
+                        + "test. This requirement's own evidence records what did run.");
+            } else {
+                notes.add("No executable scenario is declared for " + requirement.id()
+                        + ", so CodeWitness could not run any experiment against it. Declare a scenario in "
+                        + "codewitness.yaml to make this requirement verifiable.");
+            }
             for (VerificationObligation obligation : attemptable) {
                 outcomes.add(new ObligationOutcome(obligation.id(), RequirementStatus.UNVERIFIED,
-                        "No declared scenario produces an executable experiment for this obligation.",
+                        scenarioDeclared
+                                ? "The generated-test strategy produced no experiment for this obligation, "
+                                        + "because its declared scenario(s) cannot be expressed as a "
+                                        + "generated test; a process scenario is run by the process "
+                                        + "strategy instead."
+                                : "No declared scenario produces an executable experiment for this obligation.",
                         List.of(), List.of(), 0));
             }
             return new StrategyOutcome(id(), requirement.id(), evidence, counterexamples, outcomes, notes);

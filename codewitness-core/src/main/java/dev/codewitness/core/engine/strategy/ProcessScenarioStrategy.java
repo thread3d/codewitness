@@ -70,9 +70,11 @@ public final class ProcessScenarioStrategy implements VerificationStrategy {
     public StrategyOutcome verify(
             VerificationContext context, Requirement requirement, List<VerificationObligation> obligations) {
 
-        List<Scenario> declared = context.config().scenarios().stream()
+        List<Scenario> processScenarios = context.config().scenarios().stream()
                 .filter(scenario -> scenario.mode() == Scenario.Mode.PROCESS)
                 .filter(scenario -> scenario.requirement().equals(requirement.id()))
+                .toList();
+        List<Scenario> declared = processScenarios.stream()
                 // A scenario the project asked to have as a native test is executed by that test, in the project's
                 // own runner. Running the command here as well would execute the same assertion twice and could
                 // produce two counterexamples for one violation.
@@ -82,16 +84,32 @@ public final class ProcessScenarioStrategy implements VerificationStrategy {
                 .filter(scenario -> !scenario.nativeTest())
                 .toList();
         if (declared.isEmpty()) {
-            // The obligation still needs an outcome, or the engine treats it as unattempted; UNVERIFIED is the
-            // honest answer, and reporting nothing at all would be a second way of saying the same thing badly.
+            // "No process scenario was declared" is only true when there is none. A scenario that asks for a
+            // native test is declared, and saying it is absent denies a statement of the project's own
+            // configuration - the same mistake the generated-tests strategy made in the other direction. The
+            // outcome still has to be reported, because a requirement with no outcome is treated as
+            // unattempted; UNVERIFIED is the honest answer either way, and the reason says which case it is.
+            boolean allAskForNativeTests = !processScenarios.isEmpty();
+            String reason = allAskForNativeTests
+                    ? "The process scenario declared for this obligation asks for a native test, so the command "
+                            + "is executed by that test rather than by the process strategy."
+                    : "No process scenario was declared for this obligation, so no command was run.";
+            String note;
+            if (allAskForNativeTests) {
+                note = "The process scenario(s) declared for " + requirement.id() + " ask for a native test, so "
+                        + "the process strategy did not run their commands: whether the command ran at all "
+                        + "depends on the generated-test phase, which writes the native test or reports why it "
+                        + "could not.";
+            } else {
+                note = "No process scenario was declared for " + requirement.id()
+                        + ", so nothing about a command's exit code or output was executed.";
+            }
             List<ObligationOutcome> unattempted = obligations.stream()
                     .map(obligation -> new ObligationOutcome(obligation.id(), RequirementStatus.UNVERIFIED,
-                            "No process scenario was declared for this obligation, so no command was run.",
-                            List.of(), List.of(), 0))
+                            reason, List.of(), List.of(), 0))
                     .toList();
             return new StrategyOutcome(id(), requirement.id(), List.of(), List.of(), unattempted,
-                    List.of("No process scenario was declared for " + requirement.id()
-                            + ", so nothing about a command's exit code or output was executed."));
+                    List.of(note));
         }
 
         List<Evidence> evidence = new ArrayList<>();

@@ -156,7 +156,16 @@ class ProcessScenarioStrategyTest {
 
         assertTrue(outcome.evidence().isEmpty(), "the engine must not run a command a native test owns");
         assertFalse(outcome.notes().isEmpty(), "the absence of an execution must be stated");
+        // The scenario exists. "No process scenario was declared" is a different statement, and a false
+        // one: the report used to make it here, for a requirement whose only process scenario asked for
+        // a native test rather than for having none.
+        assertFalse(outcome.notes().stream().anyMatch(note -> note.contains("No process scenario was declared")),
+                "a process scenario is declared, it asks for a native test: " + outcome.notes());
+        assertTrue(outcome.notes().stream().anyMatch(note -> note.contains("native test")),
+                outcome.notes().toString());
         assertEquals(RequirementStatus.UNVERIFIED, outcome.obligations().getFirst().status());
+        assertFalse(outcome.obligations().getFirst().rationale().contains("No process scenario was declared"),
+                outcome.obligations().getFirst().rationale());
     }
 
     private static Requirement requirement(String id) {

@@ -1,5 +1,6 @@
 package dev.codewitness.core.engine.strategy;
 
+import dev.codewitness.core.config.Scenario;
 import dev.codewitness.core.config.VerificationConfig;
 import dev.codewitness.core.evidence.Evidence;
 import dev.codewitness.core.evidence.EvidenceLedger;
@@ -139,6 +140,48 @@ class GeneratedTestsStrategyTest {
         assertEquals(1, outcome.counterexamples().size(), "a failing case is a counterexample");
     }
 
+    @Test
+    void aDeclaredProcessScenarioIsNotReportedAsNoScenario() {
+        // This project's own self-check: its exit-code requirement declares a process scenario, which
+        // the process strategy executed and discharged. A process scenario has no steps, observation or
+        // invariant, so the generator emits nothing for it unless it asks for a native test - and this
+        // strategy used to announce "No executable scenario is declared ... so CodeWitness could not run
+        // any experiment against it" on a requirement the same run had just verified by running it.
+        // (The requirement id is deliberately not repeated: this mapping is by mention, and naming it
+        // here would make this test "evidence" for that requirement.)
+        Scenario process = new Scenario("SC-TEST", REQUIREMENT_ID, "a command", Scenario.Mode.PROCESS, null,
+                List.of(), null, null, 1, 42L, 30, List.of("/bin/true"),
+                new Scenario.ProcessExpectation(0, List.of(), List.of()));
+        Fixture fixture = fixture(VerificationConfig.defaults().withScenarios(List.of(process)), false);
+
+        StrategyOutcome outcome = verify(fixture);
+
+        assertFalse(outcome.notes().stream().anyMatch(note -> note.contains("No executable scenario is declared")),
+                "a scenario is declared, so the note must not say none is: " + outcome.notes());
+        assertTrue(outcome.notes().stream().anyMatch(note -> note.contains("generated test")),
+                "the note must say why the generated-test strategy ran nothing: " + outcome.notes());
+        ObligationOutcome obligation = only(fixture, outcome);
+        assertEquals(RequirementStatus.UNVERIFIED, obligation.status(),
+                "the generated-test strategy observed nothing, so it cannot verify anything");
+        assertFalse(obligation.rationale().contains("No declared scenario"),
+                "a scenario is declared; the rationale must not deny it: " + obligation.rationale());
+    }
+
+    @Test
+    void withoutAScenarioTheNoteStillSaysThereIsNone() {
+        // The counterpart of the test above: when nothing is declared, the note that says so is true
+        // and must survive. A fix that silenced both cases would hide a real gap.
+        Fixture fixture = fixture(VerificationConfig.defaults(), false);
+
+        StrategyOutcome outcome = verify(fixture);
+
+        assertTrue(outcome.notes().stream()
+                        .anyMatch(note -> note.contains("No executable scenario is declared")),
+                outcome.notes().toString());
+        assertTrue(only(fixture, outcome).rationale().contains("No declared scenario"),
+                only(fixture, outcome).rationale());
+    }
+
     // ------------------------------------------------------------------ fixture
 
     private record Fixture(
@@ -163,6 +206,20 @@ class GeneratedTestsStrategyTest {
      * declared an oracle.
      */
     private Fixture fixture(boolean checksInvariant, List<TestCaseResult> cases) {
+        return fixture(VerificationConfig.defaults(), true, checksInvariant, cases);
+    }
+
+    /**
+     * The same context with the two knobs the "no generated test" branch depends on: the scenarios the
+     * run declares, and whether the generator produces a test at all.
+     */
+    private Fixture fixture(VerificationConfig config, boolean generatorProducesTest) {
+        return fixture(config, generatorProducesTest, true, List.of(passed("case0000")));
+    }
+
+    private Fixture fixture(
+            VerificationConfig config, boolean generatorProducesTest, boolean checksInvariant,
+            List<TestCaseResult> cases) {
         Requirement requirement = Requirement.builder(REQUIREMENT_ID, "A withdrawal limit must hold.")
                 .title("Withdrawal limit").build();
         VerificationObligation obligation = new VerificationObligation(
@@ -184,8 +241,11 @@ class GeneratedTestsStrategyTest {
             @Override
             public List<GeneratedTest> generate(
                     VerificationContext context, Requirement target, List<VerificationObligation> obligations) {
-                return List.of(new GeneratedTest(CLASS_NAME, "class Cw {}", "randomSearch",
-                        List.of(REQUIREMENT_ID), List.of(OBLIGATION_ID), "test", 42L, null, checksInvariant));
+                return generatorProducesTest
+                        ? List.of(new GeneratedTest(CLASS_NAME, "class Cw {}", "randomSearch",
+                                List.of(REQUIREMENT_ID), List.of(OBLIGATION_ID), "test", 42L, null,
+                                checksInvariant))
+                        : List.of();
             }
         };
         VerificationTools.GeneratedTestExecutor executor = new VerificationTools.GeneratedTestExecutor() {
@@ -215,7 +275,7 @@ class GeneratedTestsStrategyTest {
                 .runId("CW-2026-01-01-TEST0")
                 .projectRef(ProjectRef.of(tmp))
                 .projectInfo(ProjectInfo.builder(ProjectRef.of(tmp)).language(LanguageId.JAVA).build())
-                .config(VerificationConfig.defaults())
+                .config(config)
                 .workspace(new WorkspaceManager.Workspace(tmp, WorkspaceManager.Mode.IN_PLACE, "test"))
                 .artifacts(new ArtifactStore(tmp.resolve("artifacts")))
                 .budget(new BudgetUsage.Tracker(Budget.defaults()))

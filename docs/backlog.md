@@ -6,26 +6,9 @@ closed it, so the list is also a short history of what was fixed and why.
 
 ## Open
 
-One defect that CodeWitness's own self-verification reports about itself, found by pointing the tool at this
-repository — `./codewitness verify . --requirements selfcheck/requirements.yaml --config
-selfcheck/codewitness.yaml --no-mutation --max-duration 30m` — which returns `VERIFIED` with zero
-unsuppressed findings; the fault is in what the report says about its own evidence, not in a rule. Its
-companion, a mapped test class that ran no case being scored as support, was closed by 1.0.15.
-
-### A limitation note says a requirement could not be exercised after it was
-
-For CWR-007, `GeneratedTestsStrategy` adds *"No executable scenario is declared for CWR-007, so
-CodeWitness could not run any experiment against it. Declare a scenario in codewitness.yaml to make this
-requirement verifiable."* — while the same requirement lists `SC-CWR-007`, a process scenario that the
-`process-scenario` strategy executed and whose obligation it discharged to `VERIFIED` (evidence EV-021).
-The unknown-aspects list therefore claims nothing could be run for a requirement the run had just verified
-by running something.
-
-The note conflates "no scenario is declared" with "the declared scenario cannot be expressed as a generated
-test". The second is true — a process scenario is executed by the process strategy unless it asks for a
-native test. The first is false. The obligation outcome this branch records ("No declared scenario
-produces an executable experiment for this obligation") has the same fault; a stronger outcome currently
-hides it at merge, which is luck rather than design.
+Nothing. Every item this backlog has carried is closed, and the closed table below records what each release
+settled. A new item should be written here — with its reasoning — before it is worked, so the list stays the
+authority rather than a summary of what was done.
 
 ## Closed
 
@@ -33,6 +16,7 @@ Every release, newest first, with the item it closed.
 
 | Release | Item |
 | --- | --- |
+| 1.0.16 | No limitation note denies a scenario that exists: the generated-tests phase no longer says "No executable scenario is declared" for a requirement whose process scenario ran and verified it, and the process phase no longer says "No process scenario was declared" for one that asks for a native test. |
 | 1.0.15 | An existing-tests record no longer claims support when the mapped test class ran no case: `SUPPORTS` became `INCONCLUSIVE` for the self-check's `@Tag("e2e")` test class, which the default suite never runs. |
 | 1.0.14 | The per-phase progress line accounts for suppression: `2 medium (2 suppressed by configuration)` instead of a count the report then contradicted. |
 | 1.0.13 | Running the tool on itself: fourteen findings, nine of them precision defects in the rules (builders, and code inside string literals) which are fixed, and five judged and suppressed with reasons. |

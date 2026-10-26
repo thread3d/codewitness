@@ -1257,7 +1257,10 @@ record that overstated what was observed**. The self-check's exit-code requireme
 contributed no case at all — and `ExistingTestsStrategy` still recorded *"Existing tests mapped to CWR-007: 1 classes,
 0 passing, 0 failing"* with status `SUPPORTS`. A test class the runner never reached is not a passing test; it now
 yields `INCONCLUSIVE` evidence and `UNVERIFIED` obligations with a reason, and the evidence line states how many cases
-executed. The same run's unknown-aspects list also claims *"No executable scenario is declared for CWR-007, so
-CodeWitness could not run any experiment against it"* while the process scenario `SC-CWR-007` ran and discharged the
-obligation — that one is separate, is still open in `docs/backlog.md`, and is not a findings-list entry either.
+executed (1.0.15). The same run's unknown-aspects list also claimed *"No executable scenario is declared for CWR-007,
+so CodeWitness could not run any experiment against it"* while the process scenario `SC-CWR-007` ran and discharged the
+obligation: the note now distinguishes "no scenario is declared" from "the declared scenario cannot be expressed as a
+generated test", and the process phase makes the same distinction for a scenario that asks for a native test rather
+than for having none (1.0.16). Neither fault is a findings-list entry — a finding is a claim about the project, and an
+evidence record or a limitation is a claim about the run.
 
