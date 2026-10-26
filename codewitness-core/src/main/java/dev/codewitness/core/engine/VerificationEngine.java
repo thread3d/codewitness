@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "0.1.18";
+    public static final String VERSION = "0.1.19";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -466,68 +466,8 @@ public final class VerificationEngine {
         }
 
         if (withinBudget(budget)) {
-            phases.add(runPhase("dependencies", runId, project, listener, () -> {
-                List<String> evidenceIds = new ArrayList<>();
-                List<LanguageInventory> inventories = new ArrayList<>();
-                for (Inspection inspection : analysable(inspections, builds)) {
-                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
-                    List<VerificationTools.DependencyAnalyzer> analyzers =
-                            providers.dependencyAnalyzers(inspection.info());
-                    DependencyReport report = analyzers.isEmpty()
-                            ? DependencyReport.notAnalysed("none", "no dependency analyzer registered")
-                            : analyzers.getFirst().analyseDependencies(languageContext);
-                    List<String> dependencyCommand = analyzers.isEmpty()
-                            ? List.of() : analyzers.getFirst().dependencyCommand(languageContext);
-                    List<Path> advisoryArtifacts = new ArrayList<>();
-                    if (report.analysed() && config.security().vulnerabilities().enabled()) {
-                        OsvAdvisoryScanner.Scan scan = OsvAdvisoryScanner.scan(
-                                config.security().vulnerabilities(), report.coordinates(), artifacts);
-                        report = report.withAdvisoryScan(scan.coverage(), scan.vulnerabilities());
-                        advisoryArtifacts.addAll(scan.artifacts());
-                        listener.onEvent("dependencies", inspection.adapter().id()
-                                + " advisory scan: " + scan.coverage().note());
-                    }
-                    inventories.add(new LanguageInventory(inspection, report));
-                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.DEPENDENCY_SCAN)
-                            .description("Dependency analysis (" + inspection.adapter().id() + "): "
-                                    + report.totalDependencies() + " dependencies; "
-                                    + (report.advisoryScan().performed()
-                                            ? report.vulnerabilities().size() + " known vulnerabilities"
-                                            : "vulnerabilities not checked"))
-                            .command(dependencyCommand)
-                            .confidence(EvidenceConfidence.DETERMINISTIC)
-                            .status(EvidenceStatus.INCONCLUSIVE)
-                            .result(report.analysed() ? report.totalDependencies() + " dependencies"
-                                    : "not analysed: " + report.note())
-                            .output(report.advisoryScan().performed()
-                                    ? "advisory source " + report.advisoryScan().source() + " at "
-                                            + report.advisoryScan().endpoint() + ": "
-                                            + report.advisoryScan().note()
-                                    : "no advisory source was consulted: " + report.advisoryScan().note())
-                            .metadata("adapter", inspection.adapter().id())
-                            .metadata("vulnerabilities", report.vulnerabilities().size())
-                            .metadata("vulnerabilitiesChecked", report.advisoryScan().performed())
-                            .metadata("vulnerabilitySource", report.advisoryScan().source())
-                            .artifacts(advisoryArtifacts)
-                            .build());
-                    evidenceIds.add(evidence.id());
-                }
-                DependencyReport merged = mergeDependencies(inventories);
-                if (!merged.analysed() && inventories.isEmpty()) {
-                    // An empty selection is ambiguous: no adapter declares a dependency analyzer, or no
-                    // language's build succeeded. Reporting the second as the first claims a configuration
-                    // fact that is false, so name the real reason when there is one.
-                    String reason = noBuildSucceeded(builds);
-                    if (reason != null) {
-                        merged = DependencyReport.notAnalysed("none",
-                                reason + ", so no dependency inventory was produced");
-                    }
-                }
-                state.dependencies(merged);
-                return new PhaseOutcome(merged.analysed(),
-                        merged.analysed() ? merged.totalDependencies() + " dependencies" : merged.note(),
-                        List.copyOf(evidenceIds), merged.analysed() ? null : merged.note());
-            }));
+            phases.add(runPhase("dependencies", runId, project, listener,
+                    () -> dependenciesPhase(scope, inspections, builds)));
         }
 
         // ---------------------------------------------------------------- coverage
@@ -857,6 +797,83 @@ public final class VerificationEngine {
      * @param startedAt  when the run started
      * @param database   the prepared database fixture, or a disabled one
      */
+    /**
+     * The dependency phase: an inventory per language, plus the advisory scan that may follow it.
+     *
+     * <p>It was the deepest-nested of the seven lambdas — a loop, inside it a three-way conditional for the
+     * analyzer, inside that an advisory scan gated on configuration, inside that an evidence builder with nested
+     * ternaries — and the only one whose empty result has two different meanings. Extracting it put the ambiguity
+     * it guards against next to the guard, instead of at the bottom of a method that had already done seven other
+     * things.
+     *
+     * @param scope       the run-wide facts
+     * @param inspections every language this run claimed
+     * @param builds      the build result per language, used to explain an empty selection
+     * @return the phase outcome recorded in the run
+     */
+    private PhaseOutcome dependenciesPhase(
+            RunScope scope, List<Inspection> inspections, Map<String, BuildResult> builds) {
+        List<String> evidenceIds = new ArrayList<>();
+        List<LanguageInventory> inventories = new ArrayList<>();
+        for (Inspection inspection : analysable(inspections, builds)) {
+            VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
+            List<VerificationTools.DependencyAnalyzer> analyzers =
+                    scope.providers().dependencyAnalyzers(inspection.info());
+            DependencyReport report = analyzers.isEmpty()
+                    ? DependencyReport.notAnalysed("none", "no dependency analyzer registered")
+                    : analyzers.getFirst().analyseDependencies(languageContext);
+            List<String> dependencyCommand = analyzers.isEmpty()
+                    ? List.of() : analyzers.getFirst().dependencyCommand(languageContext);
+            List<Path> advisoryArtifacts = new ArrayList<>();
+            if (report.analysed() && scope.config().security().vulnerabilities().enabled()) {
+                OsvAdvisoryScanner.Scan scan = OsvAdvisoryScanner.scan(
+                        scope.config().security().vulnerabilities(), report.coordinates(), scope.artifacts());
+                report = report.withAdvisoryScan(scan.coverage(), scan.vulnerabilities());
+                advisoryArtifacts.addAll(scan.artifacts());
+                scope.listener().onEvent("dependencies", inspection.adapter().id()
+                        + " advisory scan: " + scan.coverage().note());
+            }
+            inventories.add(new LanguageInventory(inspection, report));
+            Evidence evidence = scope.ledger().add(scope.ledger().newEvidence(EvidenceType.DEPENDENCY_SCAN)
+                    .description("Dependency analysis (" + inspection.adapter().id() + "): "
+                            + report.totalDependencies() + " dependencies; "
+                            + (report.advisoryScan().performed()
+                                    ? report.vulnerabilities().size() + " known vulnerabilities"
+                                    : "vulnerabilities not checked"))
+                    .command(dependencyCommand)
+                    .confidence(EvidenceConfidence.DETERMINISTIC)
+                    .status(EvidenceStatus.INCONCLUSIVE)
+                    .result(report.analysed() ? report.totalDependencies() + " dependencies"
+                            : "not analysed: " + report.note())
+                    .output(report.advisoryScan().performed()
+                            ? "advisory source " + report.advisoryScan().source() + " at "
+                                    + report.advisoryScan().endpoint() + ": " + report.advisoryScan().note()
+                            : "no advisory source was consulted: " + report.advisoryScan().note())
+                    .metadata("adapter", inspection.adapter().id())
+                    .metadata("vulnerabilities", report.vulnerabilities().size())
+                    .metadata("vulnerabilitiesChecked", report.advisoryScan().performed())
+                    .metadata("vulnerabilitySource", report.advisoryScan().source())
+                    .artifacts(advisoryArtifacts)
+                    .build());
+            evidenceIds.add(evidence.id());
+        }
+        DependencyReport merged = mergeDependencies(inventories);
+        if (!merged.analysed() && inventories.isEmpty()) {
+            // An empty selection is ambiguous: no adapter declares a dependency analyzer, or no language's build
+            // succeeded. Reporting the second as the first claims a configuration fact that is false, so name the
+            // real reason when there is one.
+            String reason = noBuildSucceeded(builds);
+            if (reason != null) {
+                merged = DependencyReport.notAnalysed("none",
+                        reason + ", so no dependency inventory was produced");
+            }
+        }
+        scope.state().dependencies(merged);
+        return new PhaseOutcome(merged.analysed(),
+                merged.analysed() ? merged.totalDependencies() + " dependencies" : merged.note(),
+                List.copyOf(evidenceIds), merged.analysed() ? null : merged.note());
+    }
+
     /**
      * The security phase: the same shape as static analysis, over the security rule tables.
      *
