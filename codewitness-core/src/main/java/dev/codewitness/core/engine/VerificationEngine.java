@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "1.0.13";
+    public static final String VERSION = "1.0.14";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -1028,7 +1028,7 @@ public final class VerificationEngine {
                     .build());
             evidenceIds.add(evidence.id());
         }
-        return new PhaseOutcome(!analysable.isEmpty(), summariseFindings(findings),
+        return new PhaseOutcome(!analysable.isEmpty(), summariseFindings(findings, scope.config()),
                 List.copyOf(evidenceIds), null);
     }
 
@@ -1085,7 +1085,7 @@ public final class VerificationEngine {
         // Record that the phase ran, not just what it found: a clean run and a run where nothing could execute
         // must not look the same to the strategies.
         scope.state().staticAnalysisRan(!analysable.isEmpty());
-        return new PhaseOutcome(!analysable.isEmpty(), summariseFindings(findings),
+        return new PhaseOutcome(!analysable.isEmpty(), summariseFindings(findings, scope.config()),
                 List.copyOf(evidenceIds), null);
     }
 
@@ -2095,6 +2095,32 @@ public final class VerificationEngine {
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new IllegalStateException("failed to render the static analysis findings artifact", e);
         }
+    }
+
+    /**
+     * Summarises what an analyzer produced, and how much of it the report will not show.
+     *
+     * <p>The phase line used to print a count that suppression then contradicted two lines later: "2 medium" followed
+     * by a report containing none of them. The count is a fact about the analyzer, so it stays; what was missing is the
+     * sentence that makes the two numbers reconcile. Suppression is applied once, after every phase, because a finding
+     * is advisory and filtering at collection would have to be repeated in each phase — so the phase cannot ask the
+     * report, and asks the configuration instead, with the same predicate the suppression pass uses.
+     *
+     * @param findings what the analyzers produced
+     * @param config   the run configuration, holding the suppression entries
+     * @return for example {@code 2 medium, 3 high (2 suppressed by configuration)}
+     */
+    static String summariseFindings(List<Finding> findings, VerificationConfig config) {
+        String summary = summariseFindings(findings);
+        if (config == null || config.findings().suppress().isEmpty()) {
+            return summary;
+        }
+        long suppressed = findings.stream()
+                .filter(finding -> config.findings().suppress().stream()
+                        .anyMatch(entry -> entry.matches(finding.ruleId(), finding.file())))
+                .count();
+        return suppressed == 0 ? summary
+                : summary + " (" + suppressed + " suppressed by configuration)";
     }
 
     private static String summariseFindings(List<Finding> findings) {

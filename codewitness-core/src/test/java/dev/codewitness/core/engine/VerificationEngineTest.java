@@ -538,6 +538,42 @@ class VerificationEngineTest {
                 report.limitations().toString());
     }
 
+
+    @Test
+    @DisplayName("the phase line says how many of the findings it counted will not reach the report")
+    void thePhaseSummaryAccountsForSuppression() {
+        // Suppression runs once, after every phase, so a phase cannot ask the report what survived; it asks the
+        // configuration instead, with the same predicate. Without this, the phase printed "1 medium" and the report
+        // then contained nothing, which reads as a contradiction rather than as two facts about different things.
+        Finding suppressed = new dev.codewitness.core.model.Finding("heuristics", "CW-TEST-001",
+                dev.codewitness.core.model.Severity.MEDIUM, dev.codewitness.core.model.FindingCategory.BUG,
+                "a known false positive", "src/A.java", 1, null, Map.of());
+        VerificationConfig defaults = VerificationConfig.defaults();
+
+        assertEquals("1 medium",
+                VerificationEngine.summariseFindings(List.of(suppressed), defaults),
+                "with nothing suppressed the count stands alone");
+
+        VerificationConfig withSuppression = new VerificationConfig(defaults.project(), defaults.language(),
+                defaults.limits(), defaults.tests(), defaults.mutation(), defaults.propertyTesting(),
+                defaults.staticAnalysis(), defaults.security(), defaults.llm(), defaults.report(),
+                defaults.sandbox(), defaults.scenarios(), defaults.database(),
+                new VerificationConfig.Findings(List.of(new VerificationConfig.Findings.Suppression(
+                        "CW-TEST-001", null, "known false positive"))));
+
+        assertEquals("1 medium (1 suppressed by configuration)",
+                VerificationEngine.summariseFindings(List.of(suppressed), withSuppression));
+
+        VerificationConfig otherRule = new VerificationConfig(defaults.project(), defaults.language(),
+                defaults.limits(), defaults.tests(), defaults.mutation(), defaults.propertyTesting(),
+                defaults.staticAnalysis(), defaults.security(), defaults.llm(), defaults.report(),
+                defaults.sandbox(), defaults.scenarios(), defaults.database(),
+                new VerificationConfig.Findings(List.of(new VerificationConfig.Findings.Suppression(
+                        "CW-OTHER-001", null, "a different rule"))));
+        assertEquals("1 medium", VerificationEngine.summariseFindings(List.of(suppressed), otherRule),
+                "a suppression for another rule must not change this phase's sum");
+    }
+
     /** The defaults with only the database section changed, so a test says one thing at a time. */
     private static VerificationConfig configWithDatabase(boolean enabled) {
         VerificationConfig defaults = VerificationConfig.defaults();

@@ -1246,7 +1246,8 @@ was more useful than the number:
   finding(s) were suppressed by configuration: …"* with the rule and the reason.
 - The result is a self-check with **no unexplained findings**, which is what a findings list has to be to be read.
 
-A wrinkle this exposed, recorded rather than fixed: the per-phase progress lines still count findings *before*
-suppression ("2 medium, 3 high") while the report has none, because suppression happens once at the end. The
-disclosure line reconciles them, but a reader seeing the two numbers first should not have to.
+The wrinkle this exposed is fixed: the per-phase progress lines used to count findings *before* suppression
+("2 medium, 3 high") while the report had none, because suppression happens once at the end. They now say how many of
+what they counted will not reach the report — `2 medium (2 suppressed by configuration)` — so the two numbers
+reconcile where a reader meets them first.
 

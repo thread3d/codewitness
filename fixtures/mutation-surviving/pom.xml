@@ -6,7 +6,7 @@
 
   <groupId>com.example</groupId>
   <artifactId>mutation-surviving</artifactId>
-  <version>1.0.13</version>
+  <version>1.0.14</version>
   <packaging>jar</packaging>
 
   <name>mutation-surviving</name>
