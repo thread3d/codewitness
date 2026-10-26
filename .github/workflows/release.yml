@@ -1,0 +1,99 @@
+name: Release
+
+# Publishes the runnable jar when a version tag is pushed.
+#
+# Before this workflow a release was cut by hand: build, tag, then upload the jar to a GitHub release from a
+# developer's machine. Everything else in this repository is reproducible from a clean checkout, and the one
+# artifact users actually download was not - so the jar attached to a release was whatever happened to be in
+# that terminal, built from a working tree whose state nobody recorded.
+#
+# The workflow refuses to publish unless the tag and the project version agree, and it publishes only the
+# jar the build produced. Release notes are read from `docs/release-notes/<version>.md`; when that file is
+# absent the release is created with a generated changelog, so a tag never fails for want of prose.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# `contents: write` is what publishing a release needs, and it is the only permission granted.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish the jar
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Pinned to a full commit SHA rather than a movable tag, for the same reason the CI workflow is: a
+      # re-pointed upstream ref must not be able to change what a release runs.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The project targets release 25 (pom.xml: maven.compiler.release=25), so the JDK must be 25. The jar is
+      # bytecode for Java 25 and says so in its manifest; building it on anything else would publish an
+      # artifact that does not match the project's own contract.
+      - name: Set up Temurin JDK 25
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # A release whose version does not match its tag is a support problem nobody can debug later, so it is
+      # refused here rather than published. The version lives in two places - the root pom, which every module
+      # inherits, and the constant the tool reports - and both are checked.
+      - name: Check the tag matches the project version
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          pom_version=$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' pom.xml | head -1)
+          reported=$(grep -oP 'VERSION = "\K[^"]+' \
+            codewitness-core/src/main/java/dev/codewitness/core/engine/VerificationEngine.java)
+          echo "tag=$tag_version pom=$pom_version reported=$reported"
+          if [ "$tag_version" != "$pom_version" ] || [ "$tag_version" != "$reported" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pom version $pom_version / reported version $reported"
+            exit 1
+          fi
+
+      # Tests are not run here: the CI workflow runs the full reactor suite on every push to main, and a release
+      # is a tag on a commit that already passed it. Re-running the fixture suite here would double the cost of
+      # every release to re-prove what CI proved minutes earlier.
+      - name: Build the runnable jar
+        run: ./mvnw -B -ntp -DskipTests package
+
+      - name: Check the jar exists and runs
+        run: |
+          set -euo pipefail
+          jar=codewitness-cli/target/codewitness.jar
+          test -f "$jar" || { echo "::error::$jar was not produced"; exit 1; }
+          java -jar "$jar" version
+          java -jar "$jar" version | grep -q "${GITHUB_REF_NAME#v}" \
+            || { echo "::error::the jar does not report ${GITHUB_REF_NAME#v}"; exit 1; }
+          ls -l "$jar"
+
+      # `gh` is on the runner and the token is the workflow's own, so no third-party action is needed to
+      # publish - which keeps the supply chain to the two actions already pinned above.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          notes="docs/release-notes/${version}.md"
+          if [ -f "$notes" ]; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "CodeWitness ${version}" \
+              --notes-file "$notes" \
+              codewitness-cli/target/codewitness.jar
+          else
+            echo "no $notes; publishing with a generated changelog"
+            gh release create "$GITHUB_REF_NAME" \
+              --title "CodeWitness ${version}" \
+              --generate-notes \
+              codewitness-cli/target/codewitness.jar
+          fi
