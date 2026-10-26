@@ -49,7 +49,11 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
                     "Weak message digest (MD5/SHA-1). Use SHA-256 or better."),
             new Rule("CW-SEC-004", Severity.HIGH, FindingCategory.SECURITY, true,
                     Pattern.compile("Runtime\\.getRuntime\\(\\)\\.exec\\s*\\(|new\\s+ProcessBuilder\\s*\\(\\s*[A-Za-z_]"),
-                    "External process execution with a computed command: input reaching this call allows arbitrary command execution."),
+                    "External process execution with a computed command: input reaching this call allows arbitrary command execution.",
+                    // Code only. A generator that *emits* a ProcessBuilder has that text in a string literal, and a
+                    // finding about a template is a finding about the text, not about the program: the SQL rules are
+                    // the opposite case, because their evidence is the literal itself.
+                    true),
             new Rule("CW-NUM-002", Severity.HIGH, FindingCategory.CORRECTNESS, false,
                     Pattern.compile("\\b(?:double|float)\\s+\\w*(?i:(amount|balance|price|money|total|fee|rate))\\w*"),
                     "Binary floating point used for a monetary value: use BigDecimal to avoid rounding errors."),
@@ -77,6 +81,91 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
             "^\\s*(?:throws\\s+[\\w.$]+(?:\\s*,\\s+[\\w.$]+)*\\s*)?\\{");
     private static final Pattern ASSERTION = Pattern.compile(
             "assert\\w*\\s*\\(|Assertions\\.|Assert\\.|fail\\s*\\(|assertThat\\s*\\(|verify\\s*\\(|expect\\s*\\(|assertThrows|assertAll|AssertionError\\b");
+    /**
+     * Replaces the contents of every string literal on a line with spaces, leaving the quotes and the code around
+     * them where they were.
+     *
+     * <p>A rule marked code-only is asking about the program, and text inside a literal is not the program. The case
+     * that made this necessary is a generator: it emits {@code new ProcessBuilder(...)} as a string, and a rule that
+     * reports it is reporting on the generator's output rather than on the generator. Quotes are kept so that a rule
+     * that looks for an unterminated literal still sees the same shape.
+     *
+     * @param line one source line
+     * @return the same line with literal contents blanked
+     */
+    private static String blankLiterals(String line) {
+        StringBuilder out = new StringBuilder(line.length());
+        boolean inLiteral = false;
+        boolean escaped = false;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (inLiteral) {
+                if (escaped) {
+                    escaped = false;
+                    out.append(' ');
+                } else if (c == '\\') {
+                    escaped = true;
+                    out.append(' ');
+                } else if (c == '"') {
+                    inLiteral = false;
+                    out.append('"');
+                } else {
+                    out.append(' ');
+                }
+            } else if (c == '"') {
+                inLiteral = true;
+                out.append('"');
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * @param content a Java source file
+     * @return the character ranges occupied by the bodies of classes whose name ends in {@code Builder}
+     *
+     * <p>A builder is a thread-confined accumulator: it is created, filled and read by the thread that wants the
+     * object, and sharing one is a bug in the caller. The check-then-act shape this rule looks for therefore means
+     * nothing inside one, and flagging every builder in a codebase is how a rule teaches its readers to ignore it.
+     */
+    private static java.util.List<int[]> builderRanges(String content) {
+        java.util.List<int[]> ranges = new java.util.ArrayList<>();
+        Matcher declaration = Pattern.compile("\\bclass\\s+\\w*Builder\\b[^{]*\\{").matcher(content);
+        while (declaration.find()) {
+            int open = content.indexOf('{', declaration.start());
+            int depth = 0;
+            for (int i = open; i < content.length(); i++) {
+                char c = content.charAt(i);
+                if (c == '{') {
+                    depth++;
+                } else if (c == '}') {
+                    depth--;
+                    if (depth == 0) {
+                        ranges.add(new int[] {open, i});
+                        break;
+                    }
+                }
+            }
+        }
+        return ranges;
+    }
+
+    /**
+     * @param ranges ranges from {@link #builderRanges}
+     * @param offset a character offset
+     * @return {@code true} when the offset sits inside one of them
+     */
+    private static boolean insideAny(java.util.List<int[]> ranges, int offset) {
+        for (int[] range : ranges) {
+            if (offset >= range[0] && offset <= range[1]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static final Pattern PRIVATE_FIELD = Pattern.compile(
             "(?m)^\\s*private\\s+(?!static\\s+final|final)\\w[\\w.<>\\[\\]]*\\s+(\\w+)\\s*(?:=[^;]*)?;");
     private static final Pattern IF_STATEMENT = Pattern.compile("(?m)^\\s*if\\s*\\(");
@@ -88,7 +177,14 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
             FindingCategory category,
             boolean security,
             Pattern pattern,
-            String message) {
+            String message,
+            boolean codeOnly) {
+
+        /** A rule that is matched against the whole line, literals included. */
+        Rule(String id, Severity severity, FindingCategory category, boolean security, Pattern pattern,
+                String message) {
+            this(id, severity, category, security, pattern, message, false);
+        }
     }
 
     @Override
@@ -165,7 +261,19 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
             if (line.stripLeading().startsWith("//") || line.stripLeading().startsWith("*")) {
                 continue;
             }
+            String code = null;
             for (Rule rule : LINE_RULES) {
+                if (rule.codeOnly()) {
+                    if (code == null) {
+                        code = blankLiterals(line);
+                    }
+                    Matcher matcher = rule.pattern().matcher(code);
+                    if (matcher.find()) {
+                        findings.add(new Finding("heuristics", rule.id(), rule.severity(), rule.category(),
+                                rule.message(), relative, i + 1, null, Map.of("snippet", line.strip())));
+                    }
+                    continue;
+                }
                 Matcher matcher = rule.pattern().matcher(line);
                 if (matcher.find()) {
                     findings.add(new Finding("heuristics", rule.id(), rule.severity(), rule.category(),
@@ -189,12 +297,20 @@ public final class HeuristicSourceAnalyzer implements VerificationTools.StaticAn
                     relative, lineOf(content, emptyCatch.start()), null, Map.of()));
         }
 
-        if (!testTree && content.contains("if") && !content.contains("synchronized")) {
-            Matcher field = PRIVATE_FIELD.matcher(content);
+        // The scan reads the code, not the text: a field declaration that appears inside a string literal is a
+        // generator's template for another language, not a field of this class. The C# scenario generator holds
+        // `private ulong _state;` as text, and a rule that reports it is reporting on the C# it emits.
+        String code = codeOnly(content);
+        if (!testTree && code.contains("if") && !code.contains("synchronized")) {
+            java.util.List<int[]> builders = builderRanges(code);
+            Matcher field = PRIVATE_FIELD.matcher(code);
             while (field.find()) {
+                if (insideAny(builders, field.start())) {
+                    continue;
+                }
                 String name = field.group(1);
                 Pattern assignment = Pattern.compile("(?m)^\\s*(?:this\\.)?" + Pattern.quote(name) + "\\s*=[^=]");
-                if (IF_STATEMENT.matcher(content).find() && assignment.matcher(content).find()) {
+                if (IF_STATEMENT.matcher(code).find() && assignment.matcher(code).find()) {
                     findings.add(new Finding("heuristics", "CW-CONC-001", Severity.MEDIUM,
                             FindingCategory.CONCURRENCY,
                             "Field '" + name + "' is read in a condition and written in the same class without any "

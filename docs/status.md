@@ -1228,3 +1228,25 @@ Two things were needed to make the measurement possible, and both are worth know
   whole reactor (2,538 mutants, 73.5%). It is read now. The defect was found by pointing the tool at itself with a
   scoped target and reading the count it reported back.
 
+## What the tool found in itself
+
+Running `./codewitness verify .` with `selfcheck/` reported **fourteen findings** in this repository. Triaging them
+was more useful than the number:
+
+- **Nine were precision defects in the rules, and are fixed.** Eight `CW-CONC-001` hits were builder classes — a builder
+  is created, filled and read by the thread that wants the object, so a check-then-act shape inside one means nothing —
+  and one was a field declaration inside a **string literal**, the C# scenario generator's template for the code it
+  emits. A ninth `CW-SEC-004` hit was the same mistake in the other direction: `new ProcessBuilder(...)` inside the
+  Java generator's string literal, which is text about a program rather than that program. The rules now read code
+  rather than text, and skip builder bodies.
+- **Five survive, and are suppressed with reasons** in `selfcheck/codewitness.yaml`: two `CW-CONC-001` on `RunState` and
+  `BudgetUsage` (the engine is strictly sequential, so neither is touched by two threads), `CW-SEC-004` on the sandbox
+  itself (executing a command is what it is for, and the command comes from CodeWitness), and two `CW-SEC-002` on
+  `PRAGMA` statements (a PRAGMA takes no bind parameters and both interpolate an `int`). The run discloses them: *"5
+  finding(s) were suppressed by configuration: …"* with the rule and the reason.
+- The result is a self-check with **no unexplained findings**, which is what a findings list has to be to be read.
+
+A wrinkle this exposed, recorded rather than fixed: the per-phase progress lines still count findings *before*
+suppression ("2 medium, 3 high") while the report has none, because suppression happens once at the end. The
+disclosure line reconciles them, but a reader seeing the two numbers first should not have to.
+

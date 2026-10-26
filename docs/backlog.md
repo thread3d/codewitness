@@ -6,9 +6,17 @@ closed it, so the list is also a short history of what was fixed and why.
 
 ## Open
 
-Nothing. Every item this backlog has carried is closed, and the closed table below records what each release settled.
-A new item should be written here — with its reasoning — before it is worked, so the list stays the authority rather
-than a summary of what was done.
+### The per-phase progress line counts findings before suppression
+
+`verify` prints `[static-analysis ] 2 medium` and `[security ] 3 high`, then the report contains none of them, because
+suppression is applied once after every phase has contributed. The disclosure line explains it (*"5 finding(s) were
+suppressed by configuration"*), so nothing is hidden — but a reader who sees the phase counters first is told a number
+the report then contradicts. Found by running the tool on itself with suppressions configured.
+
+The fix is small and has a shape decision in it: either count findings after suppression (which means moving the
+suppression pass before the phase summaries, and the summaries are emitted while the phase runs), or keep the phase
+counts as "observed" and label them so (*"2 medium (1 suppressed)"*). The second is probably right — the phase counted
+what the analyzer produced, and that is a fact about the analyzer rather than about the report.
 
 ## Closed
 
@@ -16,6 +24,7 @@ Every release, newest first, with the item it closed.
 
 | Release | Item |
 | --- | --- |
+| 1.0.13 | Running the tool on itself: fourteen findings, nine of them precision defects in the rules (builders, and code inside string literals) which are fixed, and five judged and suppressed with reasons. |
 | 1.0.12 | Documentation correction: the landing page no longer claims a requirement it can verify is unverifiable, the status document describes the four scenario modes and where `native_test` stops, and the sharp edge in `native_test` is pinned by a test. |
 | 1.0.11 | Process scenarios can be generated as native JUnit and unittest tests (`native_test: true`), and the generator no longer emits a syntactically invalid test for a process scenario it cannot render. |
 | 1.0.10 | Engine decomposition finished: the strategy loop and the verdict loop are methods, `verify()` 670 → 360 lines; the report assembly is deliberately left as an eleven-line builder chain. |

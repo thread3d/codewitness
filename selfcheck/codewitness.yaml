@@ -56,6 +56,36 @@ mutation:
     - dev.codewitness.core.engine.VerdictCalculator
     - dev.codewitness.core.result.BudgetUsage
 
+# Running the tool on itself is the point of this configuration, and it produced findings. Five survive the rules'
+# precision, and each is a judgement this project can state rather than a defect it can fix:
+#
+#   * CW-CONC-001 on RunState and BudgetUsage - the engine runs phases, requirements and strategies strictly
+#     sequentially (see ARCHITECTURE.md); neither object is touched by two threads, and making them atomic would
+#     suggest a concurrency the design does not have.
+#   * CW-SEC-004 on LocalProcessSandbox - this is the component whose purpose is to execute a command. The command
+#     comes from CodeWitness, never from the project; the project's own commands are what the sandbox runs.
+#   * CW-SEC-002 on two PRAGMA statements - SQLite's PRAGMA takes no bind parameters, and the interpolated value is an
+#     int (a busy timeout and a schema version), never a string from the project or the user. The rest of the storage
+#     layer's SQL is fully parameterised, which the rule confirms by not firing.
+#
+# They are suppressed rather than left in the report because a list of five known-and-judged entries is what teaches a
+# reader to skim the sixth. Suppression is disclosed: the run states how many findings were suppressed, by which rule
+# and for what reason.
+findings:
+  suppress:
+    - rule: CW-CONC-001
+      path: codewitness-core/src/main/java/dev/codewitness/core/spi/RunState.java
+      reason: the engine is strictly sequential, so this state is never touched by two threads
+    - rule: CW-CONC-001
+      path: codewitness-core/src/main/java/dev/codewitness/core/result/BudgetUsage.java
+      reason: the tracker is created per run and only that run's thread advances it
+    - rule: CW-SEC-004
+      path: codewitness-core/src/main/java/dev/codewitness/core/exec/LocalProcessSandbox.java
+      reason: this is the sandbox; executing a command is its purpose, and the command comes from CodeWitness
+    - rule: CW-SEC-002
+      path: codewitness-storage/src/main/java/dev/codewitness/storage/SqliteVerificationStore.java
+      reason: both sites are PRAGMA statements, which take no bind parameters and interpolate an int, never a string
+
 report:
   html: true
   json: true

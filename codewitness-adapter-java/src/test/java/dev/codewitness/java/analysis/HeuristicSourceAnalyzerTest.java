@@ -9,6 +9,7 @@ import dev.codewitness.core.model.Severity;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.java.TestContexts;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -696,6 +697,82 @@ class HeuristicSourceAnalyzerTest {
         ProjectInfo unknown = ProjectInfo.builder(ref).language(LanguageId.UNKNOWN).build();
         assertFalse(new HeuristicSourceAnalyzer().supports(unknown));
         assertFalse(new HeuristicSecurityAnalyzer().supports(unknown));
+    }
+
+
+    @Test
+    @DisplayName("a process execution inside a string literal is not a process execution")
+    void processExecutionInsideALiteralIsNotReported(@TempDir Path unused) throws IOException {
+        // A generator emits `new ProcessBuilder(...)` as text; reporting it is reporting on the generator's output
+        // rather than on the generator, and this project has such a generator.
+        VerificationContext context = contextWithSource("Emitter.java", """
+                package com.example;
+
+                public class Emitter {
+                    String render() {
+                        return "new ProcessBuilder(command).start()";
+                    }
+                }
+                """, false);
+
+        assertNoRule(context, "CW-SEC-004");
+    }
+
+    @Test
+    @DisplayName("a builder's fields are not check-then-act races")
+    void builderFieldsAreNotReportedAsRaces(@TempDir Path unused) throws IOException {
+        // A builder is created, filled and read by the thread that wants the object; sharing one is the caller's bug.
+        VerificationContext context = contextWithSource("Holder.java", """
+                package com.example;
+
+                public final class Holder {
+                    private final String id;
+
+                    private Holder(Builder builder) {
+                        this.id = builder.id;
+                    }
+
+                    public static final class Builder {
+                        private String id;
+
+                        Builder id(String value) {
+                            if (value == null) {
+                                throw new IllegalArgumentException("id");
+                            }
+                            this.id = value;
+                            return this;
+                        }
+
+                        Holder build() {
+                            return new Holder(this);
+                        }
+                    }
+                }
+                """, false);
+
+        assertNoRule(context, "CW-CONC-001");
+    }
+
+    @Test
+    @DisplayName("a shared mutable field still trips the concurrency rule, so the exclusion is narrow")
+    void ordinarySharedStateIsStillReported(@TempDir Path unused) throws IOException {
+        VerificationContext context = contextWithSource("Cache.java", """
+                package com.example;
+
+                public class Cache {
+                    private int hits;
+
+                    void record(boolean found) {
+                        if (found) {
+                            hits = hits + 1;
+                        }
+                    }
+                }
+                """, false);
+
+        Finding race = finding(context, "CW-CONC-001");
+
+        assertEquals("CW-CONC-001", race.ruleId());
     }
 
     // ------------------------------------------------------------------ helpers
