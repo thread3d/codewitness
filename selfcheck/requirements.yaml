@@ -6,9 +6,10 @@
 # project says it will not break, so that pointing CodeWitness at its own source tree is a
 # meaningful test rather than a vanity run.
 #
-# Every requirement except CWR-007 has a scenario in selfcheck/codewitness.yaml that exercises the
-# code path the rule is about. CWR-007 is deliberately left without a scenario: its evidence lives
-# in the opt-in e2e suite, and the honest answer for an unexecuted obligation is UNVERIFIED.
+# Every requirement has a scenario in selfcheck/codewitness.yaml that exercises the code path the
+# rule is about. CWR-007 is a property of a *process* - the exit code a caller sees - so it uses a
+# process scenario: before that mode existed it could only be checked by a human, and it was the one
+# requirement this self-check had to report UNVERIFIED.
 
 requirements:
   - id: CWR-001

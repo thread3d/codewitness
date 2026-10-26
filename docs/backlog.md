@@ -33,15 +33,34 @@ report assembly — each a separate change, and each now readable without the ph
 
 ### Features
 
-- **`mode: process` scenarios.** A scenario can only be `single`, `sequence` or `concurrent`, so nothing about a
-  *process* — exit code, stdout, stderr — can be asserted. That is why the exit-code contract, the most
-  user-facing interface CodeWitness has, is `UNVERIFIED` in the project's own self-check. A process mode would let
-  a requirement say "this command exits 2 and prints this", for CodeWitness and for every user verifying a CLI.
 - **Mutation testing of CodeWitness's own core.** The engine's verdict and merge logic is pure, static and
   I/O-free, which makes it the cheapest place to apply the tool's own strongest technique. Mutation is currently
   off in the self-check (PIT over five modules is slow), so the project does not measure the strength of the tests
   that protect its own guarantees.
 
+- **Process scenarios in the per-language adapters.** `mode: process` is implemented in the engine — it runs a
+  command and asserts on the outcome — so it works for any project, in any language, today. What it does *not* yet
+  do is generate a language-native test from a process scenario the way the other modes do; a project that wants
+  its process assertions to live in its own test suite still writes them there. Adding generators for the Java and
+  Python adapters is the natural next step.
+
+## Closed
+
+| Release | Item |
+| --- | --- |
+| 0.1.5 | The report and the exit code stopped asserting what the run did not establish; the workspace copy stopped following symbolic links out of the project. |
+| 0.1.6 | Findings reached CI: SARIF export, baselines, suppression. |
+| 0.1.7 | Run retention; a history that can be read where it cannot be written. |
+| 0.1.8 | One implementation of the tool-output tail; the Kotlin copies' `strip()` drift removed. |
+| 0.1.9 | One boundary-case enumeration instead of fourteen, with its truncation rule documented rather than assumed. |
+| 0.1.10 | One hardened XML loader instead of nine copies across seven adapters. |
+| 0.1.11 | A contended write is retried instead of lost to a five-second timeout. |
+| 0.1.12 | Report hardening: surrogate safety, a content security policy, bounded tables. |
+| 0.1.13 | Release notes moved into the repository. |
+| 0.1.14 | One implementation of the security-phase forwarding; fourteen copies removed. |
+| 0.1.15 | An adapter that registers a provider for a phase it does not declare is reported. |
+| 0.1.16–0.1.21 | Engine decomposition: `RunScope`, then all seven phase bodies extracted as methods; `verify()` 670 → 433 lines. |
+| 1.0.2 | `mode: process` scenarios: a command is run and its exit code and streams asserted, so CodeWitness's own exit-code contract (CWR-007) is now `VERIFIED` by execution — every ground rule in the self-check is verified for the first time. |
 ## Closed
 
 | Release | Item |

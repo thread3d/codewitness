@@ -39,7 +39,8 @@ public final class VerdictCalculator {
 
     /** Evidence types that represent an experiment CodeWitness actually executed. */
     private static final Set<EvidenceType> EXPERIMENT_TYPES = Set.of(
-            EvidenceType.GENERATED_TEST, EvidenceType.PROPERTY_TEST, EvidenceType.FUZZ_TEST);
+            EvidenceType.GENERATED_TEST, EvidenceType.PROPERTY_TEST, EvidenceType.FUZZ_TEST,
+            EvidenceType.PROCESS_EXECUTION);
 
     private VerdictCalculator() {
     }

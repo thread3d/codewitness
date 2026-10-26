@@ -122,7 +122,7 @@ public final class VerifyCommand implements Callable<Integer> {
         RequirementSet requirements = RequirementSet.empty();
         if (requirementsFile != null) {
             if (!Files.isRegularFile(requirementsFile)) {
-                System.err.println("requirements file not found: " + requirementsFile);
+                System.err.println("codewitness: requirements file not found: " + requirementsFile);
                 return 3;
             }
             requirements = RequirementParser.parseFile(requirementsFile);

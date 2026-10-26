@@ -148,3 +148,27 @@ scenarios:
         description: parse a valid duration and an invalid one
     observation: 'd006.toSeconds() + ":" + d006b.toSeconds()'
     invariant: 'observation.equals("600:15")'
+
+  # The exit-code contract, asserted the only way a contract about a process can be: run the built jar
+  # and look at what it returns. A usage error (no such requirements file) is exit 3 and one line on
+  # standard error. This is the scenario that process mode exists for: before it, CWR-007 was the single
+  # requirement this self-check reported UNVERIFIED, because a generated test cannot observe an exit code.
+  - id: SC-CWR-007
+    requirement: CWR-007
+    description: A usage error exits 3 and explains itself on standard error
+    mode: process
+    command:
+      - java
+      - -jar
+      # The jar is build output, which the isolated copy excludes by design, so the scenario names the original
+      # tree. The command still runs with the sandbox's environment, timeout and working directory.
+      - ${project_root}/codewitness-cli/target/codewitness.jar
+      - verify
+      - .
+      - --requirements
+      - selfcheck/does-not-exist.md
+    expect:
+      exit_code: 3
+      stderr_contains:
+        - "codewitness:"
+    timeout_seconds: 120

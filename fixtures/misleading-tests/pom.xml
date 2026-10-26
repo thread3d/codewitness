@@ -8,7 +8,7 @@
        CodeWitness reactor, exactly like the projects CodeWitness is pointed at in the real world. -->
   <groupId>com.example</groupId>
   <artifactId>misleading-tests</artifactId>
-  <version>1.0.1</version>
+  <version>1.0.2</version>
   <packaging>jar</packaging>
 
   <name>misleading-tests</name>

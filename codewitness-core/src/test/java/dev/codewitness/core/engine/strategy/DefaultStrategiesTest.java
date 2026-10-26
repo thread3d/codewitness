@@ -28,6 +28,7 @@ class DefaultStrategiesTest {
                 "existing-tests",
                 "static-analysis",
                 "dependency-advisories",
+                "process-scenarios",
                 "generated-tests",
                 "mutation-testing",
                 "llm-advisory"), ids);

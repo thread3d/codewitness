@@ -38,6 +38,10 @@ public final class DefaultStrategies {
                 new ExistingTestsStrategy(providers),
                 new StaticAnalysisStrategy(),
                 new DependencyAdvisoryStrategy(providers),
+                // Before the generated-test strategy: a process scenario is a declared experiment like any other, and
+                // one that passes should discharge its obligation rather than leaving it for a generator that cannot
+                // express it.
+                new ProcessScenarioStrategy(),
                 new GeneratedTestsStrategy(providers),
                 new MutationStrategy(),
                 new LlmAdvisoryStrategy());

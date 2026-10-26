@@ -46,6 +46,7 @@ public final class ObligationPlanner {
                 case CONCURRENT -> ObligationKind.CONCURRENCY;
                 case SEQUENCE -> ObligationKind.PROPERTY;
                 case SINGLE -> ObligationKind.BOUNDARY_VALUE;
+                case PROCESS -> ObligationKind.PROCESS;
             };
             Map<String, Object> parameters = new LinkedHashMap<>();
             parameters.put("scenario", scenario.id());

@@ -37,6 +37,14 @@ public enum EvidenceType {
     REQUIREMENT_INTERPRETATION,
     /** Output of a language model. Advisory only. */
     LLM_ANALYSIS,
+    /**
+     * A process was executed and its exit code, standard output and standard error were observed.
+     *
+     * <p>Kept separate from {@link #GENERATED_TEST} because the experiment is different in kind: a generated test
+     * runs inside the project's own test framework and reports cases, while this runs a command and observes what
+     * a caller of that command would see.
+     */
+    PROCESS_EXECUTION,
     /** Budget or infrastructure limit that stopped verification. */
     INFRASTRUCTURE,
     /** Recorded environment information for reproducibility. */

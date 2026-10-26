@@ -111,6 +111,35 @@ any input declares no `values`, no boundary cases are generated and only the ran
   eight threads released simultaneously against one shared subject, then checks the invariant once.
   Use it for check-then-act races and lost updates.
 
+- **`process`** — runs a command and asserts on its exit code and streams. This is the only mode that can say
+  anything about a program's own interface: the other three call code inside the project's test framework, which
+  cannot observe what a caller of the built program sees. It has no step list and no invariant:
+
+  ```yaml
+  - id: SC-EXIT
+    requirement: R-007
+    mode: process
+    command: ["./tool", "check", "--strict"]      # argv, not a shell string
+    expect:
+      exit_code: 2                                  # optional; omit to accept any
+      stdout_contains: ["3 problems"]               # all must appear, in order of declaration
+      stderr_contains: ["warning:"]
+    timeout_seconds: 30
+  ```
+
+  `command` is a list because there is no shell: no quoting to get wrong, and no value can become a second
+  command. `${project_root}` is substituted with the original project tree, which is how a scenario names an
+  artefact the isolated copy excludes — build output is excluded by design, so a jar this run just built is not in
+  the copy. Using it is recorded in the run's limitations, because the command then reads the real tree.
+
+  `expect` is declarative rather than an expression language. A process has exactly three observable outcomes, and a
+  free-form expression evaluated inside CodeWitness would be a second scenario language with different semantics
+  from the one every other mode evaluates in the project's own environment.
+
+  A violated expectation is a counterexample carrying the argv, the observed exit code and the tails of both
+  streams. A command that could not be started — a missing binary, a sandbox refusal — is `UNVERIFIED` and never a
+  failure: a tool that is not there says nothing about the code under verification.
+
 ## How it becomes a test
 
 For each obligation CodeWitness writes a JUnit 5 class into

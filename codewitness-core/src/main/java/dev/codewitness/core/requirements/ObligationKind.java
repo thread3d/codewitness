@@ -29,6 +29,14 @@ public enum ObligationKind {
     SECURITY,
     /** A property that only static analysis or human review can check. */
     STATIC,
+    /**
+     * An obligation to be discharged by running a process and observing what it printed and returned.
+     *
+     * <p>Distinct from {@link #PROPERTY} and {@link #BOUNDARY_VALUE}, which are discharged by executing code inside
+     * a generated test. A process obligation is the only way to say anything about a program's own interface —
+     * its exit codes, its standard output — because those are properties of a process, not of a method call.
+     */
+    PROCESS,
     /** An obligation that the system cannot discharge automatically. */
     MANUAL,
     /** Obligation derived by the language model; advisory until executed. */

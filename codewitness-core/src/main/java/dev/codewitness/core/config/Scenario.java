@@ -30,6 +30,8 @@ import java.util.Objects;
  * @param cases       number of randomised cases to run
  * @param seed        random seed; recorded in evidence so a failing case can be replayed exactly
  * @param timeout     per-case wall-clock budget in seconds
+ * @param command     argv for {@link Mode#PROCESS}, empty for the other modes
+ * @param expect      what the process must print and return, or {@code null} for the other modes
  */
 public record Scenario(
         String id,
@@ -42,7 +44,9 @@ public record Scenario(
         String invariant,
         int cases,
         long seed,
-        int timeoutSeconds) {
+        int timeoutSeconds,
+        List<String> command,
+        ProcessExpectation expect) {
 
     public Scenario {
         Objects.requireNonNull(id, "id");
@@ -50,11 +54,55 @@ public record Scenario(
         description = description == null ? id : description;
         mode = mode == null ? Mode.SINGLE : mode;
         steps = List.copyOf(steps == null ? List.of() : steps);
-        if (steps.isEmpty()) {
-            throw new IllegalArgumentException("scenario " + id + " declares no steps");
+        command = List.copyOf(command == null ? List.of() : command);
+        if (mode == Mode.PROCESS) {
+            // A process scenario names a command and what it must produce; it has no step list, because there is no
+            // API to call. Requiring one would force every process scenario to carry a fragment nobody reads.
+            if (command.isEmpty()) {
+                throw new IllegalArgumentException("scenario " + id
+                        + " has mode process but declares no command; a process scenario runs a command and asserts "
+                        + "on what it returns");
+            }
+            if (expect == null) {
+                throw new IllegalArgumentException("scenario " + id
+                        + " has mode process but declares no expect block; a command with nothing to assert would "
+                        + "run and prove nothing");
+            }
+        } else {
+            if (!command.isEmpty()) {
+                throw new IllegalArgumentException("scenario " + id + " declares a command but its mode is "
+                        + mode.name().toLowerCase(java.util.Locale.ROOT) + "; command and expect are only read in "
+                        + "mode process, and silently ignoring them would leave the scenario doing something other "
+                        + "than what it says");
+            }
+            if (steps.isEmpty()) {
+                throw new IllegalArgumentException("scenario " + id + " declares no steps");
+            }
         }
         cases = Math.max(1, cases);
         timeoutSeconds = timeoutSeconds <= 0 ? 60 : timeoutSeconds;
+    }
+
+    /**
+     * A scenario with no command, which is every mode but {@link Mode#PROCESS}.
+     *
+     * <p>Kept so that a caller written before process scenarios existed reads as it did: a step list, an observation
+     * and an invariant.
+     */
+    public Scenario(
+            String id,
+            String requirement,
+            String description,
+            Mode mode,
+            String setup,
+            List<Step> steps,
+            String observation,
+            String invariant,
+            int cases,
+            long seed,
+            int timeoutSeconds) {
+        this(id, requirement, description, mode, setup, steps, observation, invariant, cases, seed, timeoutSeconds,
+                List.of(), null);
     }
 
     /** How the declared steps are driven. */
@@ -64,7 +112,40 @@ public record Scenario(
         /** Seeded random search over the declared input domains, checking the invariant after each case. */
         SEQUENCE,
         /** The step list is executed concurrently from several threads. */
-        CONCURRENT
+        CONCURRENT,
+        /**
+         * A command is executed once and its exit code, standard output and standard error are asserted.
+         *
+         * <p>This is the only mode that can say anything about a program's own interface. A generated test calls
+         * methods inside the project's test framework; it cannot observe what a *caller of the built program* sees,
+         * which is why an exit-code contract used to be permanently unverifiable — including CodeWitness's own.
+         */
+        PROCESS
+    }
+
+    /**
+     * What a {@link Mode#PROCESS} scenario requires of the process it ran.
+     *
+     * <p>Assertions are deliberately declarative rather than an expression language. A process outcome is three
+     * values, and a free-form expression evaluated inside CodeWitness would be a second, differently-behaved
+     * scenario language — the one thing every other mode avoids by evaluating its invariant in the project's own
+     * environment.
+     *
+     * @param exitCode       the exit code the command must return, or {@code null} to accept any
+     * @param stdoutContains substrings that must appear in standard output, empty to accept anything
+     * @param stderrContains substrings that must appear in standard error, empty to accept anything
+     */
+    public record ProcessExpectation(Integer exitCode, List<String> stdoutContains, List<String> stderrContains) {
+
+        public ProcessExpectation {
+            stdoutContains = List.copyOf(stdoutContains == null ? List.of() : stdoutContains);
+            stderrContains = List.copyOf(stderrContains == null ? List.of() : stderrContains);
+        }
+
+        /** @return {@code true} when at least one assertion is stated. */
+        public boolean hasAssertions() {
+            return exitCode != null || !stdoutContains.isEmpty() || !stderrContains.isEmpty();
+        }
     }
 
     /** One call in a scenario. */

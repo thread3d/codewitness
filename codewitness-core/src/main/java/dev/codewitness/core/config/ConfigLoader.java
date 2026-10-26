@@ -62,7 +62,11 @@ public final class ConfigLoader {
 
     /** Keys understood inside one entry of the {@code scenarios} list. */
     private static final Set<String> SCENARIO_KEYS = Set.of("id", "requirement", "description", "mode",
-            "setup", "steps", "observation", "invariant", "cases", "seed", "timeout_seconds");
+            "setup", "steps", "observation", "invariant", "cases", "seed", "timeout_seconds", "command",
+            "expect");
+
+    /** Keys understood inside {@code expect} of a {@code process} scenario. */
+    private static final Set<String> EXPECT_KEYS = Set.of("exit_code", "stdout_contains", "stderr_contains");
 
     /** Keys understood inside one entry of a scenario's {@code steps} list. */
     private static final Set<String> STEP_KEYS = Set.of("call", "inputs", "description");
@@ -321,9 +325,10 @@ public final class ConfigLoader {
                             string(stepMap, "description", null)));
                 }
             }
+            Scenario.Mode mode = parseMode(string(map, "mode", "single"));
             String observation = string(map, "observation", null);
             String invariant = string(map, "invariant", null);
-            if (observation == null || invariant == null) {
+            if (mode != Scenario.Mode.PROCESS && (observation == null || invariant == null)) {
                 // Not fatal - the scenario still executes its steps - but it asserts nothing, so it can
                 // never discharge an obligation. Saying so here is the difference between a user who
                 // knows their scenario proves nothing and one who reads VERIFIED and believes it.
@@ -332,21 +337,96 @@ public final class ConfigLoader {
                         + ", so the generated test runs the steps but asserts nothing. It cannot make "
                         + requirement + " VERIFIED; declare both `observation` and `invariant`.");
             }
+            List<String> command = parseCommand(map.get("command"), id);
+            Scenario.ProcessExpectation expect = parseExpectation(map.get("expect"), id);
+            if (mode == Scenario.Mode.PROCESS && (observation != null || invariant != null)) {
+                // The two vocabularies are not interchangeable: `observation` and `invariant` are expressions in the
+                // project's language, evaluated inside a generated test, and there is no generated test here.
+                // Accepting them and ignoring them would leave a scenario asserting nothing while reading as though
+                // it asserted something.
+                throw new IllegalArgumentException("scenario " + id + " has mode process and also declares "
+                        + (observation != null ? "observation" : "invariant") + ". A process scenario asserts with "
+                        + "`expect`, not with `observation`/`invariant`: those are evaluated inside a generated test, "
+                        + "and a process scenario generates none.");
+            }
+            if (mode != Scenario.Mode.PROCESS && expect != null) {
+                throw new IllegalArgumentException("scenario " + id + " declares an `expect` block but its mode is "
+                        + mode.name().toLowerCase(java.util.Locale.ROOT) + "; `expect` is only read in mode process.");
+            }
             Scenario scenario = new Scenario(
                     id,
                     requirement,
                     string(map, "description", null),
-                    parseMode(string(map, "mode", "single")),
+                    mode,
                     string(map, "setup", null),
                     steps,
                     observation,
                     invariant,
                     integer(map, "cases", 100),
                     longValue(map, "seed", 42L),
-                    integer(map, "timeout_seconds", 120));
+                    integer(map, "timeout_seconds", 120),
+                    command,
+                    expect);
             scenarios.add(scenario);
         }
         return scenarios;
+    }
+
+    /**
+     * Parses a process scenario's {@code command}.
+     *
+     * <p>A list of arguments is required rather than a shell string: no shell means no quoting rules to get wrong,
+     * no word splitting to be surprised by, and no place for a value to turn into a second command. A single string
+     * is also accepted when it is one argument with no spaces, so a trivial {@code command: ./tool} reads naturally.
+     *
+     * @param value raw value, may be {@code null}
+     * @param id    scenario id, for the error message
+     * @return argv, empty when absent
+     */
+    private static List<String> parseCommand(Object value, String id) {
+        if (value == null) {
+            return List.of();
+        }
+        if (value instanceof List<?> list) {
+            List<String> argv = new ArrayList<>();
+            for (Object element : list) {
+                if (element == null || String.valueOf(element).isBlank()) {
+                    throw new IllegalArgumentException("scenario " + id + " has an empty entry in its command");
+                }
+                argv.add(String.valueOf(element));
+            }
+            return argv;
+        }
+        String single = String.valueOf(value).trim();
+        return single.isEmpty() ? List.of() : List.of(single);
+    }
+
+    /**
+     * Parses a process scenario's {@code expect} block.
+     *
+     * @param value raw value, may be {@code null}
+     * @param id    scenario id, for the error message
+     * @return the expectation, or {@code null} when absent
+     */
+    @SuppressWarnings("unchecked")
+    private static Scenario.ProcessExpectation parseExpectation(Object value, String id) {
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof Map<?, ?> raw)) {
+            throw new IllegalArgumentException("scenario " + id + ": `expect` must be a mapping with exit_code, "
+                    + "stdout_contains and/or stderr_contains");
+        }
+        Map<String, Object> map = (Map<String, Object>) raw;
+        rejectUnknownKeys(map, "expect of scenario " + id, EXPECT_KEYS);
+        Integer exitCode = map.get("exit_code") == null ? null : integer(map, "exit_code", 0);
+        Scenario.ProcessExpectation expectation = new Scenario.ProcessExpectation(exitCode,
+                stringList(map, "stdout_contains"), stringList(map, "stderr_contains"));
+        if (!expectation.hasAssertions()) {
+            throw new IllegalArgumentException("scenario " + id + ": `expect` states nothing to assert, so the "
+                    + "command would run and prove nothing");
+        }
+        return expectation;
     }
 
     @SuppressWarnings("unchecked")
@@ -387,7 +467,7 @@ public final class ConfigLoader {
             return Scenario.Mode.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("unknown scenario mode \"" + value.trim()
-                    + "\"; known modes are single, sequence and concurrent", e);
+                    + "\"; known modes are single, sequence, concurrent and process", e);
         }
     }
 

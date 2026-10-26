@@ -809,6 +809,48 @@ replay is the two-step `fpc` then executable recipe. The generator declares only
 and `observation` — it has no scratch variables — so a scenario assigns to `observation` or calls
 project code directly.
 
+### Process scenarios: asserting on a program's own interface
+
+Every mode above calls code from *inside* the project's test framework. None of them can observe what a caller of
+the built program sees — its exit code, its diagnostics — because those are properties of a process. `mode: process`
+closes that gap: it runs a command and asserts on what it returned.
+
+```yaml
+scenarios:
+  - id: SC-EXIT
+    requirement: R-007
+    mode: process
+    command:                      # argv, not a shell string
+      - java
+      - -jar
+      - ${project_root}/codewitness-cli/target/codewitness.jar
+      - verify
+      - .
+      - --requirements
+      - does-not-exist.md
+    expect:
+      exit_code: 3
+      stderr_contains: ["codewitness: requirements file not found"]
+    timeout_seconds: 120
+```
+
+- **`command`** is a list of arguments. There is no shell, so there are no quoting rules to get wrong and no place
+  for a value to become a second command. `${project_root}` is substituted with the original project tree — needed
+  because the isolated copy excludes build output, so an artefact the run just built is not in the copy; using it is
+  recorded in the run's limitations.
+- **`expect`** is declarative rather than an expression language: `exit_code`, `stdout_contains`, `stderr_contains`.
+  A free-form expression evaluated inside CodeWitness would be a second scenario language with different semantics;
+  the other modes avoid that by evaluating their invariant in the project's own environment.
+- The command runs through the same sandbox as every other process — allow-listed environment, hard timeout, capped
+  output — and with the isolated copy as its working directory.
+- A violated expectation produces a counterexample carrying the argv, the observed exit code and the tails of both
+  streams. A process that never started is `UNVERIFIED`, never a failure: a missing binary is not a defect in the
+  code under verification.
+
+This mode exists because CodeWitness's own exit-code contract was the one ground rule its self-check could not
+demonstrate. It is demonstrated now: `selfcheck/codewitness.yaml` runs the built jar and asserts exit `3` on a usage
+error, and every requirement in `selfcheck/requirements.yaml` is `VERIFIED` by execution.
+
 See [`docs/writing-scenarios.md`](docs/writing-scenarios.md) for the full reference.
 
 ---

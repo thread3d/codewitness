@@ -29,7 +29,7 @@ public final class InitCommand implements Callable<Integer> {
     public Integer call() {
         Path root = Path.of(project).toAbsolutePath().normalize();
         if (!Files.isDirectory(root)) {
-            System.err.println("not a directory: " + root);
+            System.err.println("codewitness: not a directory: " + root);
             return 2;
         }
         SelfIssues.install(root);
@@ -57,7 +57,7 @@ public final class InitCommand implements Callable<Integer> {
             Files.writeString(file, content, StandardCharsets.UTF_8);
             return 1;
         } catch (Exception e) {
-            System.err.println("cannot write " + file + ": " + e.getMessage());
+            System.err.println("codewitness: cannot write " + file + ": " + e.getMessage());
             return 0;
         }
     }
