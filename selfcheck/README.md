@@ -35,25 +35,30 @@ compile with "release version 25 not supported".
 | CWR-004 | Language-model output is advisory | `compute` with `LLM_ANALYSIS`/`ADVISORY` evidence only; the verdict must not be `VERIFIED` and the evidence must not qualify as proof |
 | CWR-005 | Requirement identifiers are stable | `RequirementParser.parseMarkdown` on a heading; the id comes from the heading |
 | CWR-006 | Durations parse with documented suffixes | `DurationParser.parse("10m", …)` and an unparseable value falling back |
-| CWR-007 | CLI exit codes are part of the interface | **No scenario** — its evidence is in the opt-in `e2e` suite, so the honest verdict is `UNVERIFIED` |
+| CWR-007 | CLI exit codes are part of the interface | A `mode: process` scenario runs the built jar with a requirements file that does not exist and asserts exit `3` and one line on standard error |
 
-CWR-007 is deliberate. A requirement CodeWitness cannot execute must stay `UNVERIFIED` with a reason,
-not pass by default; leaving one claim unexecuted keeps that behaviour in the self-check.
+CWR-007 used to be the exception: an exit code is a property of a process, and a generated test cannot
+observe one, so the self-check reported it `UNVERIFIED` until `mode: process` made it executable. Every
+one of the seven ground rules is now verified by running something. The rule that an unexecutable claim
+must stay `UNVERIFIED` has not gone untested: `SC-CWR-002` asserts exactly that verdict against
+`VerdictCalculator`, so the behaviour is exercised inside a scenario rather than by leaving one
+requirement out.
 
 ## Result
 
-Run `CW-2026-10-25-2415C` (isolated-copy mode, `--no-mutation`, Temurin JDK 25.0.5), after the defects
-below were fixed:
+Run `CW-2026-10-26-XRNH0` (isolated-copy mode, `--no-mutation`, Temurin JDK 25.0.5), with the fixes
+described below in place:
 
 ```
 CWR-001  VERIFIED    CWR-005  VERIFIED
 CWR-002  VERIFIED    CWR-006  VERIFIED
-CWR-003  VERIFIED    CWR-007  UNVERIFIED
+CWR-003  VERIFIED    CWR-007  VERIFIED
 CWR-004  VERIFIED
 
-1671 existing tests executed, 1671 passed, 0 failed
-coverage line 71.1% (24988/35138), branch 59.5% (12181/20485)
-overall status PARTIALLY_VERIFIED (6 verified, 0 failed, 1 unverified)
+1759 existing tests executed, 1759 passed, 0 failed
+coverage line 71.2% (25562/35919), branch 59.4% (12413/20890)
+30 dependencies, 0 advisories (source osv)
+overall status VERIFIED (7 verified, 0 failed, 0 unverified)
 verify exit code 0
 ```
 
@@ -140,7 +145,7 @@ The self-check is green again, and this time the zero is a measurement rather th
 
 ```
 30 dependencies, 0 advisories (source osv, checked <run time>)
-overall PARTIALLY_VERIFIED (6 verified, 1 unverified), verify exit code 0
+overall VERIFIED (7 verified, 0 unverified), verify exit code 0
 ```
 
 This is a moving target. The dependencies are clean as of the run recorded in the report, against what
@@ -150,17 +155,22 @@ count.
 
 ## Known false positives in the report
 
-The static-analysis section reports 10 findings (1 high, 9 medium). They are heuristic and cannot
-change any verdict: a finding only refutes a requirement when a deterministic tool produced it
-(`Finding.fromDeterministicTool`), and every rule in the heuristic table identifies itself as
-`*-heuristics`. A rule match is recorded as advisory evidence with a note instead.
+The report contains **no unsuppressed findings**. Five are suppressed in
+[`codewitness.yaml`](codewitness.yaml), each with a reason the run restates, and the phase line counts
+them so the two numbers reconcile (`2 medium (2 suppressed by configuration)`,
+`3 high (3 suppressed by configuration)`):
 
-- the `HIGH` finding is `ProcessBuilder` use in `LocalProcessSandbox` — that class *is* the sandbox
+- two `CW-CONC-001` mediums on `RunState` and `BudgetUsage`, per-run accumulators that the strictly
+  sequential engine never shares with another thread: the rule sees a private mutable field, an `if` and
+  an assignment in the same class and calls it a check-then-act race without asking whether two threads
+  can reach it;
+- one `CW-SEC-004` high on `ProcessBuilder` use in `LocalProcessSandbox` — that class *is* the sandbox
   boundary, and the README documents this rule's false-positive profile;
-- the `CW-CONC-001` medium findings fire on value types and per-run accumulators whose fields are
-  never shared: the rule sees a private mutable field, an `if` and an assignment in the same class
-  and calls it a check-then-act race, without asking whether two threads can reach it. The README
-  calls this out as advisory by design.
+- two `CW-SEC-002` highs on `PRAGMA` statements, which take no bind parameters and interpolate an `int`.
+
+They are heuristic and cannot change any verdict: a finding only refutes a requirement when a
+deterministic tool produced it (`Finding.fromDeterministicTool`), and every rule in the heuristic table
+identifies itself as `*-heuristics`. A rule match is recorded as advisory evidence with a note instead.
 
 Two rules that used to dominate this list report nothing here now. Both were fixed rather than
 suppressed, and each has regression tests in `HeuristicSourceAnalyzerTest`:
