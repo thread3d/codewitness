@@ -93,6 +93,11 @@ Evidence is the atom. Every record contains:
 The rule that matters: `generatedByLlm && !executedIndependently` is never proof, no matter what
 confidence is attached to it.
 
+A mapped test class supports a requirement only when a case in it actually ran. A class the runner
+never reached — excluded by a tag, filtered out, not discovered — reports nothing, and its silence is
+recorded as `INCONCLUSIVE` with the obligations left `UNVERIFIED`, never as a pass: "no failure was
+reported" and "a test passed" are different observations, and only the second one supports anything.
+
 ## Counterexamples
 
 A counterexample is the most valuable thing the tool can produce, so it is a first-class record:

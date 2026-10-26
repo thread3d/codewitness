@@ -6,8 +6,11 @@ import dev.codewitness.core.evidence.EvidenceStatus;
 import dev.codewitness.core.evidence.EvidenceType;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.TestCaseResult;
+import dev.codewitness.core.model.TestOutcome;
 import dev.codewitness.core.model.TestResult;
+import dev.codewitness.core.requirements.ObligationKind;
 import dev.codewitness.core.requirements.Requirement;
+import dev.codewitness.core.requirements.RequirementStatus;
 import dev.codewitness.core.requirements.VerificationObligation;
 import dev.codewitness.core.result.Counterexample;
 import dev.codewitness.core.result.ObligationOutcome;
@@ -33,7 +36,10 @@ import java.util.Map;
  *       counterexample;</li>
  *   <li>a passing mapped test produces supporting evidence with {@code HIGH} confidence, but it is
  *       deliberately not counted as a deterministic experiment, so a requirement whose only support
- *       is "the existing tests pass" stays {@code UNVERIFIED}.</li>
+ *       is "the existing tests pass" stays {@code UNVERIFIED};</li>
+ *   <li>a mapped class that reported no executed case at all - excluded by a tag, filtered out, not
+ *       discovered - produces {@code INCONCLUSIVE} evidence and {@code UNVERIFIED} obligations,
+ *       because "no failure was reported" is not the same observation as "a test passed".</li>
  * </ul>
  *
  * <p>That asymmetry is the whole point: tests written by the same process that wrote the code are
@@ -96,26 +102,75 @@ public final class ExistingTestsStrategy implements VerificationStrategy {
 
         List<TestCaseResult> failedMapped = new ArrayList<>();
         List<TestCaseResult> passedMapped = new ArrayList<>();
+        List<TestCaseResult> mapped = new ArrayList<>();
         for (TestCaseResult testCase : tests.cases()) {
             String owner = mapper.requirementForTestClass(testCase.suite()).orElse(null);
             if (owner != null && owner.equals(requirement.id())) {
+                mapped.add(testCase);
                 if (testCase.outcome().isFailure()) {
                     failedMapped.add(testCase);
-                } else if (testCase.outcome() == dev.codewitness.core.model.TestOutcome.PASSED) {
+                } else if (testCase.outcome() == TestOutcome.PASSED) {
                     passedMapped.add(testCase);
                 }
             }
         }
+        List<TestCaseResult> executedMapped = mapped.stream()
+                .filter(testCase -> testCase.outcome() != TestOutcome.SKIPPED)
+                .toList();
+
+        // "No failing case was reported" is evidence of support only when a case was reported at all.
+        // A mapped class the runner never reached - excluded by a tag, filtered out, not discovered -
+        // contributes no failure, and scoring its silence as SUPPORTS is exactly the promotion of "we
+        // could not check" into "it passed" that this project forbids. The same guard exists for
+        // generated tests in GeneratedTestsStrategy; this is its counterpart for the project's own
+        // suite. It was missing, and this project's own self-check recorded "1 classes, 0 passing, 0
+        // failing" with status SUPPORTS for its exit-code requirement, whose declared test class is
+        // @Tag("e2e") and was therefore never run.
+        if (executedMapped.isEmpty()) {
+            notes.add("The " + mappedClasses.size() + " test class(es) mapped to " + requirement.id()
+                    + " reported no executed case, so their absence of a failure is not evidence: a "
+                    + "class excluded by tag, filtered out or not discovered is not a passing test.");
+            Evidence nothingRan = context.evidence().newEvidence(EvidenceType.TEST)
+                    .description("Existing tests mapped to " + requirement.id() + ": " + mappedClasses.size()
+                            + " classes, 0 executed, 0 passing, 0 failing")
+                    .source(id())
+                    .confidence(EvidenceConfidence.HIGH)
+                    .status(EvidenceStatus.INCONCLUSIVE)
+                    .result(tests.describeWithNote())
+                    .requirement(requirement.id())
+                    .metadata("mapped_test_classes", mappedClasses)
+                    .metadata("executed", 0)
+                    .metadata("relevance_basis", "the mapped test source mentions the requirement id")
+                    .build();
+            context.evidence().add(nothingRan);
+            evidence.add(nothingRan);
+            for (VerificationObligation obligation : obligations) {
+                if (obligation.kind() == ObligationKind.MANUAL) {
+                    continue;
+                }
+                outcomes.add(new ObligationOutcome(
+                        obligation.id(),
+                        RequirementStatus.UNVERIFIED,
+                        "No executed case of the test class(es) mapped to " + requirement.id()
+                                + " was reported, so nothing about this obligation was observed.",
+                        List.of(nothingRan.id()),
+                        List.of(),
+                        0));
+            }
+            return new StrategyOutcome(id(), requirement.id(), evidence, counterexamples, outcomes, notes);
+        }
 
         Evidence evidenceRecord = context.evidence().newEvidence(EvidenceType.TEST)
                 .description("Existing tests mapped to " + requirement.id() + ": " + mappedClasses.size()
-                        + " classes, " + passedMapped.size() + " passing, " + failedMapped.size() + " failing")
+                        + " classes, " + executedMapped.size() + " executed, " + passedMapped.size()
+                        + " passing, " + failedMapped.size() + " failing")
                 .source(id())
                 .confidence(EvidenceConfidence.HIGH)
                 .status(failedMapped.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.REFUTES)
                 .result(tests.describeWithNote())
                 .requirement(requirement.id())
                 .metadata("mapped_test_classes", mappedClasses)
+                .metadata("executed", executedMapped.size())
                 .metadata("passing", passedMapped.stream().map(TestCaseResult::displayName).toList())
                 .metadata("failing", failedMapped.stream().map(TestCaseResult::displayName).toList())
                 .metadata("relevance_basis", "the mapped test source mentions the requirement id")
@@ -179,12 +234,12 @@ public final class ExistingTestsStrategy implements VerificationStrategy {
             // never discharges one, because tests written by the same process that wrote the code are
             // not independent verification.
             for (VerificationObligation obligation : obligations) {
-                if (obligation.kind() == dev.codewitness.core.requirements.ObligationKind.MANUAL) {
+                if (obligation.kind() == ObligationKind.MANUAL) {
                     continue;
                 }
                 outcomes.add(new ObligationOutcome(
                         obligation.id(),
-                        dev.codewitness.core.requirements.RequirementStatus.PARTIALLY_VERIFIED,
+                        RequirementStatus.PARTIALLY_VERIFIED,
                         "The " + mappedClasses.size() + " test class(es) mapped to " + requirement.id()
                                 + " pass, which supports this obligation but does not discharge it.",
                         List.of(evidenceRecord.id()),

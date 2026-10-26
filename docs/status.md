@@ -1251,3 +1251,13 @@ The wrinkle this exposed is fixed: the per-phase progress lines used to count fi
 what they counted will not reach the report — `2 medium (2 suppressed by configuration)` — so the two numbers
 reconcile where a reader meets them first.
 
+Running the tool on itself a second time, in 1.0.15, found something the findings list could not: an **evidence
+record that overstated what was observed**. The self-check's exit-code requirement declares
+`tests: dev.codewitness.cli.EndToEndVerificationTest`, an `@Tag("e2e")` class the default suite excludes, so the class
+contributed no case at all — and `ExistingTestsStrategy` still recorded *"Existing tests mapped to CWR-007: 1 classes,
+0 passing, 0 failing"* with status `SUPPORTS`. A test class the runner never reached is not a passing test; it now
+yields `INCONCLUSIVE` evidence and `UNVERIFIED` obligations with a reason, and the evidence line states how many cases
+executed. The same run's unknown-aspects list also claims *"No executable scenario is declared for CWR-007, so
+CodeWitness could not run any experiment against it"* while the process scenario `SC-CWR-007` ran and discharged the
+obligation — that one is separate, is still open in `docs/backlog.md`, and is not a findings-list entry either.
+

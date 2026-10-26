@@ -2,7 +2,10 @@ package dev.codewitness.core.engine.strategy;
 
 import dev.codewitness.core.config.VerificationConfig;
 import dev.codewitness.core.engine.RequirementCodeMapper;
+import dev.codewitness.core.evidence.Evidence;
 import dev.codewitness.core.evidence.EvidenceLedger;
+import dev.codewitness.core.evidence.EvidenceStatus;
+import dev.codewitness.core.evidence.EvidenceType;
 import dev.codewitness.core.exec.LocalProcessSandbox;
 import dev.codewitness.core.io.ArtifactStore;
 import dev.codewitness.core.io.WorkspaceManager;
@@ -94,6 +97,52 @@ class ExistingTestsStrategyTest {
         assertTrue(outcome.notes().stream().anyMatch(note -> note.contains("unavailable")),
                 outcome.notes().toString());
         assertTrue(outcome.counterexamples().isEmpty());
+    }
+
+    @Test
+    void aMappedClassThatRanNoCaseIsNotAPassingTest() {
+        // This project's own self-check found it. The exit-code requirement declares
+        // `tests: dev.codewitness.cli.EndToEndVerificationTest`, an @Tag("e2e") class the default suite
+        // excludes, so the class contributed no case at all; the record still said "SUPPORTS" with
+        // "1 classes, 0 passing, 0 failing". (The requirement id is deliberately not repeated here:
+        // this mapping is by mention, so naming it would make this test "evidence" for it.)
+        Fixture fixture = fixture(List.of());
+
+        StrategyOutcome outcome = verify(fixture);
+
+        Evidence evidence = fixture.context().evidence().forRequirement(REQUIREMENT_ID).stream()
+                .filter(candidate -> candidate.type() == EvidenceType.TEST)
+                .findFirst()
+                .orElseThrow();
+        assertEquals(EvidenceStatus.INCONCLUSIVE, evidence.status(),
+                "a mapped class that ran no case is not a passing test: " + evidence.description());
+        assertTrue(evidence.description().contains("0 executed"), evidence.description());
+        ObligationOutcome obligation = only(outcome);
+        assertEquals(RequirementStatus.UNVERIFIED, obligation.status(),
+                "nothing was observed, so nothing about the obligation is supported");
+        assertTrue(obligation.rationale().contains("executed case"), obligation.rationale());
+        assertTrue(outcome.notes().stream().anyMatch(note -> note.contains("no executed case")),
+                outcome.notes().toString());
+    }
+
+    @Test
+    void aMappedClassWhoseCasesWereAllSkippedIsNotAPassingTest() {
+        // A skipped case (an assumption aborted, a filter matched it) reported an outcome, so it is
+        // not the "no case at all" case above - but it still executed nothing, and "none of the
+        // mapped cases failed" must not be read as support.
+        Fixture fixture = fixture(List.of(new TestCaseResult(TEST_CLASS, "limitHolds", TestOutcome.SKIPPED,
+                Duration.ofMillis(0), null, null, null)));
+
+        StrategyOutcome outcome = verify(fixture);
+
+        Evidence evidence = fixture.context().evidence().forRequirement(REQUIREMENT_ID).stream()
+                .filter(candidate -> candidate.type() == EvidenceType.TEST)
+                .findFirst()
+                .orElseThrow();
+        assertEquals(EvidenceStatus.INCONCLUSIVE, evidence.status(),
+                "a skipped case executed nothing: " + evidence.description());
+        assertEquals(RequirementStatus.UNVERIFIED, only(outcome).status(),
+                "a skipped case supports nothing");
     }
 
     // ------------------------------------------------------------------ fixture
