@@ -182,12 +182,15 @@ public final class KotlinMutationTester implements VerificationTools.MutationTes
         }
 
         private static String lastLines(String text, int count) {
-            String[] lines = text.strip().split("\\R");
-            StringBuilder sb = new StringBuilder();
-            for (int i = Math.max(0, lines.length - count); i < lines.length; i++) {
-                sb.append(lines[i].strip()).append(" | ");
-            }
-            return sb.toString();
+
+            // One implementation, in support. Five copies of this existed and three of them had
+
+            // silently diverged by stripping each line, so the same tool output was quoted with
+
+            // different whitespace in a Kotlin report than in a Java one.
+
+            return dev.codewitness.support.Text.lastLines(text, count);
+
         }
     }
 }
