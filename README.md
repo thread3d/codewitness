@@ -1113,6 +1113,28 @@ Nothing in core names a language it cannot already verify.
 
 ---
 
+## Versioning and what 1.0 means
+
+A major version is a promise about what will not break. CodeWitness 1.0 makes it about these, and only these:
+
+- **the command line**: the commands, their flags, and the exit codes in the table above;
+- **the report documents**: `report.json` keys, the SARIF profile, and the `Status`/`Run status` vocabulary;
+- **the configuration**: every key `codewitness.yaml` understands;
+- **the adapter SPI**: `LanguageAdapter`, `VerificationTools.*` and `Capability`, which is what a new language
+  is written against.
+
+Adding to any of those is a minor release. Renaming or removing is a major one. Everything else — internal
+structure, artefact layout under `.codewitness/runs/`, the wording of a limitation — may change in a minor
+release, because those are implementation, and calling them an interface would freeze mistakes.
+
+**What 1.0 is not.** It is not a claim that verification is complete. The tool's own self-check still reports one
+requirement `UNVERIFIED` — the exit-code contract, because a scenario cannot yet assert anything about a
+*process* — and that is the honest answer rather than a failure. Findings from heuristic rules are advisory and
+never fail a requirement. The `local-process` sandbox is a resource boundary, not a security boundary, and every
+report says so. The open work is in [`docs/backlog.md`](docs/backlog.md), with the reasoning.
+
+---
+
 ## Backlog
 
 What is known to be wrong or worth doing next lives in [`docs/backlog.md`](docs/backlog.md), together with the
