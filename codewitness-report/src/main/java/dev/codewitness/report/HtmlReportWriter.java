@@ -58,6 +58,16 @@ import java.util.Objects;
 public final class HtmlReportWriter {
 
     /** Colour-blind safe Okabe-Ito palette, paired with symbols and labels. */
+    /**
+     * Rows rendered per table before it is truncated with a count.
+     *
+     * <p>The number of findings a project produces is a property of the project, not of CodeWitness: a compiler
+     * emitting two million warnings is a thing that happens, and a report nobody can open is not a report. The
+     * full set is still in the JSON and in the evidence appendix; only the human table is bounded, and the
+     * truncation says so.
+     */
+    private static final int MAX_TABLE_ROWS = 500;
+
     private static final String CSS = """
             :root { color-scheme: light; }
             * { box-sizing: border-box; }
@@ -129,6 +139,12 @@ public final class HtmlReportWriter {
         html.append("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
                 .append("<meta charset=\"utf-8\">\n")
                 .append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
+                // Defence in depth. Nothing here is executable today - the report has no script, no event
+                // handler and no external reference - but a report is written to be emailed, archived and
+                // opened from file://, so the one interpolation that ever slips past the escaping must not be
+                // able to reach an attacker's host. The policy allows the inline stylesheet and nothing else.
+                .append("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; "
+                        + "style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'\">\n")
                 .append("<title>CodeWitness Verification Report - ")
                 .append(esc(report.project() != null ? report.project().project().name() : report.runId()))
                 .append("</title>\n<style>\n").append(CSS).append("</style>\n</head>\n<body>\n");
@@ -171,7 +187,7 @@ public final class HtmlReportWriter {
             if (parent != null) {
                 Files.createDirectories(parent);
             }
-            Files.writeString(target, render(report), StandardCharsets.UTF_8);
+            Files.writeString(target, ReportText.encodable(render(report)), StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new UncheckedIOException("failed to write HTML report to " + target, e);
         }
@@ -534,13 +550,18 @@ public final class HtmlReportWriter {
         } else {
             html.append("<table>\n<thead><tr><th>Suite</th><th>Test</th><th>Failure type</th>"
                             + "<th>Message</th></tr></thead>\n<tbody>\n");
-            for (TestCaseResult failure : failures) {
+            for (TestCaseResult failure : failures.stream().limit(MAX_TABLE_ROWS).toList()) {
                 html.append("<tr><td><code>").append(esc(failure.suite())).append("</code></td><td><code>")
                         .append(esc(failure.name())).append("</code></td><td>")
                         .append(esc(failure.failureType())).append("</td><td>")
                         .append(esc(failure.failureMessage())).append("</td></tr>\n");
             }
             html.append("</tbody>\n</table>\n");
+            if (failures.size() > MAX_TABLE_ROWS) {
+                html.append("<p class=\"warn\">Showing the first ").append(MAX_TABLE_ROWS)
+                        .append(" of ").append(failures.size())
+                        .append(" failing tests; the rest are in the JSON report.</p>\n");
+            }
         }
         html.append("</section>\n");
     }
@@ -656,7 +677,9 @@ public final class HtmlReportWriter {
             html.append("<table>\n<thead><tr><th>Severity</th><th>Category</th><th>File</th>"
                             + "<th class=\"num\">Line</th><th>Analyzer</th><th>Rule</th><th>Message</th>"
                             + "</tr></thead>\n<tbody>\n");
-            for (Finding finding : report.findings()) {
+            // A hostile project decides how many warnings its compiler emits, so the table is bounded and the
+            // truncation is stated in the row rather than left to be inferred from a table that simply stops.
+            for (Finding finding : report.findings().stream().limit(MAX_TABLE_ROWS).toList()) {
                 html.append("<tr><td>").append(esc(finding.severity().name())).append("</td><td>")
                         .append(esc(finding.category().name())).append("</td><td><code>")
                         .append(esc(finding.file() == null ? "<unknown>" : finding.file())).append("</code></td>")
@@ -667,6 +690,12 @@ public final class HtmlReportWriter {
                         .append("</td></tr>\n");
             }
             html.append("</tbody>\n</table>\n");
+            if (report.findings().size() > MAX_TABLE_ROWS) {
+                html.append("<p class=\"warn\">Showing the first ").append(MAX_TABLE_ROWS)
+                        .append(" of ").append(report.findings().size())
+                        .append(" findings. The rest are in the JSON report and in the evidence appendix; "
+                                + "nothing was discarded, this table is just bounded.</p>\n");
+            }
         }
         html.append("</section>\n");
     }

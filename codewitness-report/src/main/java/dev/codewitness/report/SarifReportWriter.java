@@ -94,7 +94,7 @@ public final class SarifReportWriter {
             if (parent != null) {
                 Files.createDirectories(parent);
             }
-            Files.writeString(target, render(report), StandardCharsets.UTF_8);
+            Files.writeString(target, ReportText.encodable(render(report)), StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new UncheckedIOException("failed to write SARIF report to " + target, e);
         }

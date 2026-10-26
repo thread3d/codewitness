@@ -925,6 +925,12 @@ Every run produces both:
   `runStatus` the pipeline's own outcome, and they are separate keys because a run can be `BLOCKED` while
   every requirement it reached is `VERIFIED`. `build` records what the build phase attempted, ran and
   observed: the command, the exit status and the compiler's error and warning counts;
+- every report is written through a text guard that replaces an unpaired surrogate with U+FFFD, because a
+  hostile test report can carry one and `Files.writeString` throws on it before writing anything — which used to
+  lose both report files and the durable record with them. The HTML report additionally carries a
+  `Content-Security-Policy` that allows nothing but its own inline stylesheet, and its tables are bounded at 500
+  rows with the truncation stated in the report, so a project's own warning count cannot make the report
+  unopenable;
 - `report.html` — a self-contained human report that starts with an executive summary and then shows
   the evidence, including an appendix listing every evidence record with the command that produced it.
   Both the overall status and the run status appear in the header, a run that did not complete says so in
