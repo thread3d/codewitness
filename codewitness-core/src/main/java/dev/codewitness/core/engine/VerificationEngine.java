@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "0.1.17";
+    public static final String VERSION = "0.1.18";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -461,33 +461,8 @@ public final class VerificationEngine {
 
         if (config.security().enabled() && withinBudget(budget)) {
             List<Inspection> analysable = analysable(inspections, builds);
-            phases.add(runPhase("security", runId, project, listener, () -> {
-                List<String> evidenceIds = new ArrayList<>();
-                List<Finding> findings = new ArrayList<>();
-                for (Inspection inspection : analysable) {
-                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
-                    var analyzers = providers.securityAnalyzers(inspection.info());
-                    List<Finding> found = new ArrayList<>();
-                    for (var analyzer : analyzers) {
-                        found.addAll(analyzer.analyze(languageContext));
-                    }
-                    found = deduplicateFindings(found);
-                    findings.addAll(found);
-                    state.addFindings(found);
-                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.SECURITY_SCAN)
-                            .description("Security analysis (" + inspection.adapter().id() + "): "
-                                    + found.size() + " finding(s)")
-                            .confidence(EvidenceConfidence.DETERMINISTIC)
-                            .status(found.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
-                            .result(summariseFindings(found))
-                            .metadata("adapter", inspection.adapter().id())
-                            .metadata("tools", analyzers.stream().map(a -> a.id()).toList())
-                            .build());
-                    evidenceIds.add(evidence.id());
-                }
-                return new PhaseOutcome(!analysable.isEmpty(), summariseFindings(findings),
-                        List.copyOf(evidenceIds), null);
-            }));
+            phases.add(runPhase("security", runId, project, listener,
+                    () -> securityPhase(scope, analysable)));
         }
 
         if (withinBudget(budget)) {
@@ -882,6 +857,46 @@ public final class VerificationEngine {
      * @param startedAt  when the run started
      * @param database   the prepared database fixture, or a disabled one
      */
+    /**
+     * The security phase: the same shape as static analysis, over the security rule tables.
+     *
+     * <p>It shares static analysis's skeleton — loop over the languages that built, build a context, call the
+     * providers, deduplicate, record evidence, merge the outcome — and differs in which providers it asks and
+     * which evidence type it writes. Extracting them one at a time is what makes the shared shape visible instead
+     * of something a reader has to reconstruct by comparing seven lambdas.
+     *
+     * @param scope      the run-wide facts
+     * @param analysable the languages whose build succeeded
+     * @return the phase outcome recorded in the run
+     */
+    private PhaseOutcome securityPhase(RunScope scope, List<Inspection> analysable) {
+        List<String> evidenceIds = new ArrayList<>();
+        List<Finding> findings = new ArrayList<>();
+        for (Inspection inspection : analysable) {
+            VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
+            var analyzers = scope.providers().securityAnalyzers(inspection.info());
+            List<Finding> found = new ArrayList<>();
+            for (var analyzer : analyzers) {
+                found.addAll(analyzer.analyze(languageContext));
+            }
+            found = deduplicateFindings(found);
+            findings.addAll(found);
+            scope.state().addFindings(found);
+            Evidence evidence = scope.ledger().add(scope.ledger().newEvidence(EvidenceType.SECURITY_SCAN)
+                    .description("Security analysis (" + inspection.adapter().id() + "): " + found.size()
+                            + " finding(s)")
+                    .confidence(EvidenceConfidence.DETERMINISTIC)
+                    .status(found.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
+                    .result(summariseFindings(found))
+                    .metadata("adapter", inspection.adapter().id())
+                    .metadata("tools", analyzers.stream().map(a -> a.id()).toList())
+                    .build());
+            evidenceIds.add(evidence.id());
+        }
+        return new PhaseOutcome(!analysable.isEmpty(), summariseFindings(findings),
+                List.copyOf(evidenceIds), null);
+    }
+
     /**
      * The static-analysis phase: one pass over every language that built.
      *
