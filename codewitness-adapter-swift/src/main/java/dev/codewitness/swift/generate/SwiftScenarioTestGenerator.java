@@ -826,34 +826,11 @@ public final class SwiftScenarioTestGenerator implements VerificationTools.TestG
      * what makes a scenario whose inputs have no boundaries still execute exactly one case rather than
      * none.
      */
-    private static List<Map<String, String>> boundaryCases(List<Scenario.Input> inputs) {
-        if (inputs.isEmpty()) {
-            return List.of();
-        }
-        List<Map<String, String>> accumulation = new ArrayList<>();
-        accumulation.add(new LinkedHashMap<>());
-        for (Scenario.Input input : inputs) {
-            List<String> candidates = boundaryValuesFor(input);
-            if (candidates.isEmpty()) {
-                return List.of();
-            }
-            List<Map<String, String>> next = new ArrayList<>();
-            for (Map<String, String> partial : accumulation) {
-                for (String value : candidates) {
-                    if (next.size() >= MAX_BOUNDARY_CASES) {
-                        break;
-                    }
-                    Map<String, String> copy = new LinkedHashMap<>(partial);
-                    copy.put(input.name(), value);
-                    next.add(copy);
-                }
-                if (next.size() >= MAX_BOUNDARY_CASES) {
-                    break;
-                }
-            }
-            accumulation = next;
-        }
-        return List.copyOf(accumulation.subList(0, Math.min(accumulation.size(), MAX_BOUNDARY_CASES)));
+    static List<Map<String, String>> boundaryCases(List<Scenario.Input> inputs) {
+        // One implementation, in support: fourteen copies of this existed and three of them
+        // truncated differently, which changes which experiments run and therefore what the
+        // same scenario verifies.
+        return dev.codewitness.support.generate.ScenarioCases.boundaryCases(inputs);
     }
 
     /**

@@ -471,29 +471,10 @@ public final class CppScenarioTestGenerator implements VerificationTools.TestGen
      *     scenario with many inputs from generating an exponential number of programs to compile.
      */
     static List<Map<String, String>> boundaryCases(List<Scenario.Input> inputs) {
-        List<Map<String, String>> cases = new ArrayList<>();
-        if (inputs.isEmpty()) {
-            return cases;
-        }
-        for (Scenario.Input input : inputs) {
-            if (input.boundaryValues().isEmpty()) {
-                return List.of();
-            }
-        }
-        List<Map<String, String>> accumulation = new ArrayList<>();
-        accumulation.add(new LinkedHashMap<>());
-        for (Scenario.Input input : inputs) {
-            List<Map<String, String>> next = new ArrayList<>();
-            for (Map<String, String> partial : accumulation) {
-                for (String value : input.boundaryValues()) {
-                    Map<String, String> copy = new LinkedHashMap<>(partial);
-                    copy.put(input.name(), value);
-                    next.add(copy);
-                }
-            }
-            accumulation = next;
-        }
-        return List.copyOf(accumulation.subList(0, Math.min(MAX_BOUNDARY_CASES, accumulation.size())));
+        // One implementation, in support: fourteen copies of this existed and three of them
+        // truncated differently, which changes which experiments run and therefore what the
+        // same scenario verifies.
+        return dev.codewitness.support.generate.ScenarioCases.boundaryCases(inputs);
     }
 
     // ------------------------------------------------------------------ text helpers

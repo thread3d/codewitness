@@ -1015,6 +1015,9 @@ codewitness/
 │   ├── io/                    isolated workspace and artifact store
 │   ├── config/                codewitness.yaml
 │   └── llm/                   advisory provider abstraction and prompt fencing
+├── codewitness-adapter-support/ helpers shared by more than one adapter: the tool-output tail, the
+│                              boundary-case enumeration every scenario generator uses, source mutation,
+│                              the mutation loop, and the Node toolchain
 ├── codewitness-adapter-java/  Java 17+ projects (module targets 25), Maven and Gradle, JUnit 5, PIT, JaCoCo
 ├── codewitness-adapter-python/ Python 3 projects: syntax build, pytest/unittest, heuristics, security,
 │                              coverage.py, AST mutation, dependency inventory; no third-party package required

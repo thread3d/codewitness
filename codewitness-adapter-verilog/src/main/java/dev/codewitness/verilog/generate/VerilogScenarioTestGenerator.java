@@ -317,30 +317,10 @@ public final class VerilogScenarioTestGenerator implements VerificationTools.Tes
 
     /** @return up to {@link #MAX_BOUNDARY_CASES} value combinations, the cartesian product of the candidates. */
     static List<Map<String, String>> boundaryCases(List<Scenario.Input> inputs) {
-        List<Map<String, String>> cases = new ArrayList<>();
-        if (inputs.isEmpty()) {
-            return cases;
-        }
-        cases.add(new LinkedHashMap<>());
-        for (Scenario.Input input : inputs) {
-            List<String> candidates = candidates(input);
-            List<Map<String, String>> expanded = new ArrayList<>();
-            for (Map<String, String> base : cases) {
-                for (String candidate : candidates) {
-                    if (expanded.size() >= MAX_BOUNDARY_CASES) {
-                        break;
-                    }
-                    Map<String, String> copy = new LinkedHashMap<>(base);
-                    copy.put(input.name(), candidate);
-                    expanded.add(copy);
-                }
-                if (expanded.size() >= MAX_BOUNDARY_CASES) {
-                    break;
-                }
-            }
-            cases = expanded;
-        }
-        return cases;
+        // One implementation, in support: fourteen copies of this existed and three of them
+        // truncated differently, which changes which experiments run and therefore what the
+        // same scenario verifies.
+        return dev.codewitness.support.generate.ScenarioCases.boundaryCases(inputs);
     }
 
     private static List<String> candidates(Scenario.Input input) {

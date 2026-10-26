@@ -448,39 +448,16 @@ public final class CSharpScenarioTestGenerator implements VerificationTools.Test
         return values;
     }
 
-    private static List<Map<String, String>> boundaryCases(List<Scenario.Input> inputs) {
-        List<Map<String, String>> cases = new ArrayList<>();
-        if (inputs.isEmpty()) {
-            return cases;
-        }
-        for (Scenario.Input input : inputs) {
-            if (input.boundaryValues().isEmpty()) {
-                return List.of();
-            }
-        }
-        List<Map<String, String>> accumulation = new ArrayList<>();
-        accumulation.add(new LinkedHashMap<>());
-        for (Scenario.Input input : inputs) {
-            List<Map<String, String>> next = new ArrayList<>();
-            for (Map<String, String> partial : accumulation) {
-                for (String value : input.boundaryValues()) {
-                    Map<String, String> copy = new LinkedHashMap<>(partial);
-                    copy.put(input.name(), value);
-                    next.add(copy);
-                    if (next.size() >= MAX_BOUNDARY_CASES * 4) {
-                        break;
-                    }
-                }
-            }
-            accumulation = next;
-        }
-        for (Map<String, String> values : accumulation) {
-            cases.add(values);
-            if (cases.size() >= MAX_BOUNDARY_CASES) {
-                break;
-            }
-        }
-        return cases;
+    static List<Map<String, String>> boundaryCases(List<Scenario.Input> inputs) {
+
+        // One implementation, in support: fourteen copies of this existed and three of them
+
+        // truncated differently, which changes which experiments run and therefore what the
+
+        // same scenario verifies.
+
+        return dev.codewitness.support.generate.ScenarioCases.boundaryCases(inputs);
+
     }
 
     private static String declaration(Scenario.Input input, String expression) {
