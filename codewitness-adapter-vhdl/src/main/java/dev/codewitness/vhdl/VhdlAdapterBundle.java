@@ -30,16 +30,6 @@ public final class VhdlAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new VhdlLanguageAdapter());
-
-        providers.register(new VhdlBuildProvider());
-        providers.register(new VhdlTestProvider());
-        providers.register(new VhdlMutationTester());
-        providers.register(new VhdlGeneratedTestRunner());
-        providers.register(new VhdlScenarioTestGenerator());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new VhdlHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new VhdlSecurityAnalyzer());
-        }
+        VhdlLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

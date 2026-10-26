@@ -1,5 +1,12 @@
 package dev.codewitness.pascal;
 
+import dev.codewitness.pascal.analysis.PascalHeuristicAnalyzer;
+import dev.codewitness.pascal.analysis.PascalSecurityAnalyzer;
+import dev.codewitness.pascal.generate.PascalGeneratedTestRunner;
+import dev.codewitness.pascal.generate.PascalScenarioTestGenerator;
+import dev.codewitness.pascal.mutation.PascalMutationTester;
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
@@ -7,7 +14,6 @@ import dev.codewitness.core.model.ModuleInfo;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.pascal.analysis.PascalHeuristicAnalyzer;
 
@@ -28,7 +34,28 @@ import java.util.Set;
  * attribute. A missing compiler is recorded rather than raised: the adapter has no evidence about code
  * it could not build, and the engine reports that as {@code BLOCKED}, not as a defect.
  */
-public final class PascalLanguageAdapter implements LanguageAdapter {
+public final class PascalLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new PascalBuildProvider())
+            .testRunner(new PascalTestProvider())
+            .mutation(new PascalMutationTester())
+            .executor(new PascalGeneratedTestRunner())
+            .generator(new PascalScenarioTestGenerator())
+            .staticAnalyzer(new PascalHeuristicAnalyzer())
+            .securityAnalyzer(new PascalSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public PascalLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -77,33 +104,5 @@ public final class PascalLanguageAdapter implements LanguageAdapter {
             builder.attribute(PascalTool.ATTR_PROBE_FAILURE, probe.failureReason());
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new PascalBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new PascalTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new PascalHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(
-                Capability.INSPECT,
-                Capability.BUILD,
-                Capability.TEST,
-                Capability.STATIC_ANALYSIS,
-                Capability.MUTATION,
-                Capability.PROPERTY_TESTING,
-                Capability.GENERATED_TESTS,
-                Capability.SECURITY_SCAN);
     }
 }

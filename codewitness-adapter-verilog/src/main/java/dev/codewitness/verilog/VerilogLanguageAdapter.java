@@ -1,12 +1,18 @@
 package dev.codewitness.verilog;
 
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
+import dev.codewitness.verilog.analysis.VerilogHeuristicAnalyzer;
+import dev.codewitness.verilog.analysis.VerilogSecurityAnalyzer;
+import dev.codewitness.verilog.generate.VerilogGeneratedTestRunner;
+import dev.codewitness.verilog.generate.VerilogScenarioTestGenerator;
+import dev.codewitness.verilog.mutation.VerilogMutationTester;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.verilog.analysis.VerilogHeuristicAnalyzer;
 
@@ -27,7 +33,28 @@ import java.util.Set;
  * package manager: the report then says coverage was not measured and dependencies were not analysed,
  * which is the honest statement rather than a zero the adapter cannot support.
  */
-public final class VerilogLanguageAdapter implements LanguageAdapter {
+public final class VerilogLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new VerilogBuildProvider())
+            .testRunner(new VerilogTestProvider())
+            .mutation(new VerilogMutationTester())
+            .executor(new VerilogGeneratedTestRunner())
+            .generator(new VerilogScenarioTestGenerator())
+            .staticAnalyzer(new VerilogHeuristicAnalyzer())
+            .securityAnalyzer(new VerilogSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public VerilogLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -71,30 +98,5 @@ public final class VerilogLanguageAdapter implements LanguageAdapter {
             builder.attribute("verilogProbeFailure", probe.failureReason());
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new VerilogBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new VerilogTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new VerilogHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        // No COVERAGE: Icarus Verilog exports no coverage data, so claiming the capability would make
-        // the engine schedule a phase this adapter cannot measure. No DEPENDENCY_SCAN: Verilog has no
-        // package manager and no advisory ecosystem, so there is nothing to inventory.
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.MUTATION, Capability.PROPERTY_TESTING, Capability.GENERATED_TESTS,
-                Capability.SECURITY_SCAN);
     }
 }

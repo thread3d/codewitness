@@ -30,16 +30,6 @@ public final class VerilogAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new VerilogLanguageAdapter());
-
-        providers.register(new VerilogBuildProvider());
-        providers.register(new VerilogTestProvider());
-        providers.register(new VerilogMutationTester());
-        providers.register(new VerilogGeneratedTestRunner());
-        providers.register(new VerilogScenarioTestGenerator());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new VerilogHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new VerilogSecurityAnalyzer());
-        }
+        VerilogLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

@@ -1,12 +1,18 @@
 package dev.codewitness.vhdl;
 
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
+import dev.codewitness.vhdl.analysis.VhdlHeuristicAnalyzer;
+import dev.codewitness.vhdl.analysis.VhdlSecurityAnalyzer;
+import dev.codewitness.vhdl.generate.VhdlGeneratedTestRunner;
+import dev.codewitness.vhdl.generate.VhdlScenarioTestGenerator;
+import dev.codewitness.vhdl.mutation.VhdlMutationTester;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.vhdl.analysis.VhdlHeuristicAnalyzer;
 
@@ -28,7 +34,28 @@ import java.util.Set;
  * dependencies were not analysed, which is the honest statement rather than a zero the adapter cannot
  * support.
  */
-public final class VhdlLanguageAdapter implements LanguageAdapter {
+public final class VhdlLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new VhdlBuildProvider())
+            .testRunner(new VhdlTestProvider())
+            .mutation(new VhdlMutationTester())
+            .executor(new VhdlGeneratedTestRunner())
+            .generator(new VhdlScenarioTestGenerator())
+            .staticAnalyzer(new VhdlHeuristicAnalyzer())
+            .securityAnalyzer(new VhdlSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public VhdlLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -70,30 +97,5 @@ public final class VhdlLanguageAdapter implements LanguageAdapter {
             builder.attribute("vhdlProbeFailure", probe.failureReason());
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new VhdlBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new VhdlTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new VhdlHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        // No COVERAGE: GHDL's coverage export is not a form this adapter can measure, so claiming the
-        // capability would make the engine schedule a phase this adapter cannot serve. No DEPENDENCY_SCAN:
-        // VHDL has no package manager and no advisory ecosystem, so there is nothing to inventory.
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.MUTATION, Capability.PROPERTY_TESTING, Capability.GENERATED_TESTS,
-                Capability.SECURITY_SCAN);
     }
 }

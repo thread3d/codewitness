@@ -32,16 +32,6 @@ public final class PascalAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new PascalLanguageAdapter());
-
-        providers.register(new PascalBuildProvider());
-        providers.register(new PascalTestProvider());
-        providers.register(new PascalMutationTester());
-        providers.register(new PascalGeneratedTestRunner());
-        providers.register(new PascalScenarioTestGenerator());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new PascalHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new PascalSecurityAnalyzer());
-        }
+        PascalLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

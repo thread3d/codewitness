@@ -10,12 +10,16 @@ closed it, so the list is also a short history of what was fixed and why.
 
 - **Nine of sixteen adapters use `AbstractLanguageAdapter` and `AdapterProviders` (1.0.3, 1.0.4).** The provider set
   is declared once, the bundle registers it, and `capabilities()` is derived from it rather than restated by hand.
-  Converted: Rust, Python, Go, TypeScript, JavaScript, C#, PHP, Ruby, Swift. **Seven remain**, and they are the ones
-  that do not fit the mechanical transform: Java (build-system selection), Kotlin (Maven and Gradle build systems
-  rather than a single build provider), C++ (CMake configure and build), SQL (schema and migration loading instead
-  of a build), and Verilog, VHDL and Pascal (no coverage provider and no dependency inventory, so their derived
-  capability sets will be *smaller* than the hand-written ones and each needs its behaviour checked, not just its
-  compilation).
+  Converted: Rust, Python, Go, TypeScript, JavaScript, C#, PHP, Ruby, Swift, Verilog, VHDL and Pascal — twelve of
+  sixteen. **Four remain**, and they are the ones that do not fit the mechanical transform: Java (build-system
+  selection), Kotlin (Maven and Gradle build systems rather than a single build provider), C++ (CMake configure and
+  build), and SQL (schema and migration loading instead of a build). Each needs its adapter read, not just its shape
+  matched.
+
+  `AdapterCapabilityTest` now records the resulting contract: the adapters with no dependency inventory are exactly
+  Pascal, SQL, Verilog and VHDL, and each of those claims exactly the eight phases it can serve. That test exists so
+  that a language gaining or losing an analyzer is a deliberate change rather than something noticed later in a
+  report — it caught its author assuming the list was three items long when it was four.
 - **The boundary-case enumeration truncates from the front.** With four inputs of six values, the twelve kept cases
   never vary the first two inputs. Every case is complete and valid, so nothing is mis-generated, but a scenario that
   expects all of its inputs exercised does not get that once the product exceeds the cap. Sampling one-at-a-time
