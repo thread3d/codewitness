@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "1.0.9";
+    public static final String VERSION = "1.0.10";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -454,88 +454,15 @@ public final class VerificationEngine {
         Map<String, List<String>> notesByRequirement = new LinkedHashMap<>();
 
         for (Requirement requirement : plannedSet.requirements()) {
-            List<ObligationOutcome> outcomes = new ArrayList<>();
-            List<Counterexample> counterexamples = new ArrayList<>();
-            List<String> notes = new ArrayList<>();
-            // The strategies for a requirement run against the language its code is written in, not
-            // against the union of every language in the tree. A test runner, a generator or a replay
-            // command is language specific, and handing a Python requirement Java's runner would produce a
-            // recipe for a command that cannot run.
-            Inspection owner = ownerOf(requirement, mapper, inspections);
-            Inspection running = owner != null ? owner : inspections.getFirst();
-            VerificationContext requirementContext = contextFor(scope, running, mapper);
-            if (inspections.size() > 1 && owner == null) {
-                notes.add("This requirement could not be attributed to any language in the project, so its "
-                        + "strategies ran against " + running.adapter().id()
-                        + ", the first adapter that claimed the project.");
-            }
-            for (VerificationStrategy strategy : strategies) {
-                if (!strategy.supports(requirementContext.projectInfo())) {
-                    continue;
-                }
-                try {
-                    StrategyOutcome outcome =
-                            strategy.verify(requirementContext, requirement, requirement.obligations());
-                    outcomes.addAll(outcome.obligations());
-                    counterexamples.addAll(outcome.counterexamples());
-                    notes.addAll(outcome.notes());
-                    for (String note : outcome.notes()) {
-                        listener.onEvent("verify", requirement.id() + ": " + note);
-                    }
-                    if (config.limits().failFastOnCounterexample() && !counterexamples.isEmpty()) {
-                        notes.add("Further strategies were skipped for " + requirement.id()
-                                + " because a counterexample was already found and fail-fast is enabled.");
-                        break;
-                    }
-                } catch (RuntimeException e) {
-                    notes.add("Strategy " + strategy.id() + " failed while verifying " + requirement.id()
-                            + ": " + e);
-                    state.note("strategy " + strategy.id() + " failed: " + e);
-                    recordIssue(SelfIssueCategory.STRATEGY_FAILURE, SelfIssueSeverity.HIGH,
-                            "Strategy \"" + strategy.id() + "\" failed while verifying "
-                                    + requirement.id() + ": " + e,
-                            e, runId, project,
-                            Map.of(SelfIssueRecord.PHASE, "requirements",
-                                    SelfIssueRecord.STRATEGY, strategy.id(),
-                                    SelfIssueRecord.REQUIREMENT, requirement.id(),
-                                    SelfIssueRecord.ADAPTER, running.adapter().id()));
-                }
-            }
-            // Defensive: an obligation with no outcome at all would let a report renderer invent a
-            // default, so the absence of evidence is recorded explicitly as an unverified outcome.
-            java.util.Set<String> recorded = new java.util.LinkedHashSet<>();
-            outcomes.forEach(outcome -> recorded.add(outcome.obligationId()));
-            for (VerificationObligation obligation : requirement.obligations()) {
-                if (!recorded.contains(obligation.id())) {
-                    outcomes.add(ObligationOutcome.unverified(obligation.id(),
-                            "No verification strategy produced an outcome for this obligation."));
-                }
-            }
-            outcomesByRequirement.put(requirement.id(), mergeOutcomes(outcomes));
-            counterexamplesByRequirement.put(requirement.id(), counterexamples);
-            notesByRequirement.put(requirement.id(), notes);
+            RequirementRun run = runStrategies(scope, strategies, requirement, inspections, mapper);
+            outcomesByRequirement.put(requirement.id(), run.outcomes());
+            counterexamplesByRequirement.put(requirement.id(), run.counterexamples());
+            notesByRequirement.put(requirement.id(), run.notes());
         }
 
         // ---------------------------------------------------------------- verdicts
-        List<RequirementVerdict> verdicts = new ArrayList<>();
-        for (Requirement requirement : plannedSet.requirements()) {
-            List<Evidence> requirementEvidence = ledger.forRequirement(requirement.id());
-            // Blocking is per language. A requirement written in a language that compiled is not blocked
-            // by a sibling language that did not: the two are different code, and one failing to build says
-            // nothing about the other.
-            Blocked blocked = blockedFor(requirement, mapper, inspections, builds, state.build());
-            RequirementVerdict verdict = VerdictCalculator.compute(
-                    requirement,
-                    requirement.obligations(),
-                    outcomesByRequirement.getOrDefault(requirement.id(), List.of()),
-                    requirementEvidence,
-                    counterexamplesByRequirement.getOrDefault(requirement.id(), List.of()),
-                    blocked.blocked(),
-                    blocked.blocked() ? blocked.reason() : null,
-                    notesByRequirement.getOrDefault(requirement.id(), List.of()));
-            verdicts.add(verdict);
-            listener.onEvent("verdict", requirement.id() + " -> " + verdict.status());
-        }
+        List<RequirementVerdict> verdicts = computeVerdicts(scope, plannedSet, mapper, inspections, builds,
+                outcomesByRequirement, counterexamplesByRequirement, notesByRequirement);
 
         // Suppression happens once, here, after every phase has contributed: findings are advisory, so a
         // suppressed one changes no verdict, and filtering at the point of collection would have to be
@@ -930,6 +857,139 @@ public final class VerificationEngine {
         return new PhaseOutcome(merged.analysed(),
                 merged.analysed() ? merged.totalDependencies() + " dependencies" : merged.note(),
                 List.copyOf(evidenceIds), merged.analysed() ? null : merged.note());
+    }
+
+    /**
+     * Computes one verdict per requirement from everything the run observed.
+     *
+     * <p>The loop is four lines of interest and one comment that matters: blocking is <em>per language</em>. A
+     * requirement written in a language that compiled is not blocked by a sibling language that did not — the two
+     * are different code, and one failing to build says nothing about the other. Keeping that next to the call that
+     * implements it, rather than inside a 400-line method, is the point of the extraction.
+     *
+     * @param scope          the run-wide facts
+     * @param plannedSet     the requirements and their planned obligations
+     * @param mapper         the requirement-to-code map
+     * @param inspections    every language the run claimed
+     * @param builds         the build result per language
+     * @param outcomes       obligation outcomes per requirement
+     * @param counterexamples counterexamples per requirement
+     * @param notes          strategy notes per requirement
+     * @return one verdict per requirement, in declaration order
+     */
+    private List<RequirementVerdict> computeVerdicts(
+            RunScope scope,
+            RequirementSet plannedSet,
+            RequirementCodeMapper mapper,
+            List<Inspection> inspections,
+            Map<String, BuildResult> builds,
+            Map<String, List<ObligationOutcome>> outcomes,
+            Map<String, List<Counterexample>> counterexamples,
+            Map<String, List<String>> notes) {
+        List<RequirementVerdict> verdicts = new ArrayList<>();
+        for (Requirement requirement : plannedSet.requirements()) {
+            Blocked blocked = blockedFor(requirement, mapper, inspections, builds, scope.state().build());
+            RequirementVerdict verdict = VerdictCalculator.compute(
+                    requirement,
+                    requirement.obligations(),
+                    outcomes.getOrDefault(requirement.id(), List.of()),
+                    scope.ledger().forRequirement(requirement.id()),
+                    counterexamples.getOrDefault(requirement.id(), List.of()),
+                    blocked.blocked(),
+                    blocked.blocked() ? blocked.reason() : null,
+                    notes.getOrDefault(requirement.id(), List.of()));
+            verdicts.add(verdict);
+            scope.listener().onEvent("verdict", requirement.id() + " -> " + verdict.status());
+        }
+        return List.copyOf(verdicts);
+    }
+
+    /**
+     * Runs every strategy against one requirement, and reports what they observed.
+     *
+     * <p>Three things here are the reason this is a method rather than a loop body. The strategies for a
+     * requirement run against the language its code is written in, not the union of every language in the tree —
+     * handing a Python requirement Java's test runner would produce a recipe for a command that cannot run. An
+     * obligation that no strategy touched is recorded as unverified rather than left absent, because a renderer
+     * that has to invent a default will invent a flattering one. And a strategy that throws is a fault in the
+     * strategy, not a finding about the project, so it becomes a note and a self-issue and the remaining strategies
+     * still run.
+     *
+     * @param scope       the run-wide facts
+     * @param strategies  the strategies this run will use, in registration order
+     * @param requirement the requirement being verified
+     * @param inspections every language the run claimed, used to pick the owner
+     * @param mapper      the requirement-to-code map, which says which language a requirement is written in
+     * @return what the strategies reported
+     */
+    private RequirementRun runStrategies(
+            RunScope scope,
+            List<VerificationStrategy> strategies,
+            Requirement requirement,
+            List<Inspection> inspections,
+            RequirementCodeMapper mapper) {
+        List<ObligationOutcome> outcomes = new ArrayList<>();
+        List<Counterexample> counterexamples = new ArrayList<>();
+        List<String> notes = new ArrayList<>();
+        Inspection owner = ownerOf(requirement, mapper, inspections);
+        Inspection running = owner != null ? owner : inspections.getFirst();
+        VerificationContext requirementContext = contextFor(scope, running, mapper);
+        if (inspections.size() > 1 && owner == null) {
+            notes.add("This requirement could not be attributed to any language in the project, so its "
+                    + "strategies ran against " + running.adapter().id()
+                    + ", the first adapter that claimed the project.");
+        }
+        for (VerificationStrategy strategy : strategies) {
+            if (!strategy.supports(requirementContext.projectInfo())) {
+                continue;
+            }
+            try {
+                StrategyOutcome outcome = strategy.verify(requirementContext, requirement, requirement.obligations());
+                outcomes.addAll(outcome.obligations());
+                counterexamples.addAll(outcome.counterexamples());
+                notes.addAll(outcome.notes());
+                for (String note : outcome.notes()) {
+                    scope.listener().onEvent("verify", requirement.id() + ": " + note);
+                }
+                if (scope.config().limits().failFastOnCounterexample() && !counterexamples.isEmpty()) {
+                    notes.add("Further strategies were skipped for " + requirement.id()
+                            + " because a counterexample was already found and fail-fast is enabled.");
+                    break;
+                }
+            } catch (RuntimeException e) {
+                notes.add("Strategy " + strategy.id() + " failed while verifying " + requirement.id() + ": " + e);
+                scope.state().note("strategy " + strategy.id() + " failed: " + e);
+                recordIssue(SelfIssueCategory.STRATEGY_FAILURE, SelfIssueSeverity.HIGH,
+                        "Strategy \"" + strategy.id() + "\" failed while verifying " + requirement.id() + ": " + e,
+                        e, scope.runId(), scope.project(),
+                        Map.of(SelfIssueRecord.PHASE, "requirements",
+                                SelfIssueRecord.STRATEGY, strategy.id(),
+                                SelfIssueRecord.REQUIREMENT, requirement.id(),
+                                SelfIssueRecord.ADAPTER, running.adapter().id()));
+            }
+        }
+        // Defensive: an obligation with no outcome at all would let a report renderer invent a default, so the
+        // absence of evidence is recorded explicitly as an unverified outcome.
+        java.util.Set<String> recorded = new java.util.LinkedHashSet<>();
+        outcomes.forEach(outcome -> recorded.add(outcome.obligationId()));
+        for (VerificationObligation obligation : requirement.obligations()) {
+            if (!recorded.contains(obligation.id())) {
+                outcomes.add(ObligationOutcome.unverified(obligation.id(),
+                        "No verification strategy produced an outcome for this obligation."));
+            }
+        }
+        return new RequirementRun(mergeOutcomes(outcomes), counterexamples, notes);
+    }
+
+    /**
+     * What the strategies reported for one requirement.
+     *
+     * @param outcomes       one outcome per obligation, never absent
+     * @param counterexamples the counterexamples observed, empty when none
+     * @param notes          explanations to carry into the verdict
+     */
+    private record RequirementRun(
+            List<ObligationOutcome> outcomes, List<Counterexample> counterexamples, List<String> notes) {
     }
 
     /**

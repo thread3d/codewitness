@@ -17,15 +17,23 @@ base class without a reason is visible rather than assumed.
 
 ### Verification engine decomposition
 
-**Complete for the phases.** All seven phase bodies are methods taking the `RunScope`; `verify()` is 433 lines,
-down from 670, and holds no inline phase body. What remains inside it is the per-requirement strategy loop and the
-report assembly — each a separate change, and each now readable without the phases in the way.
+**Complete for the phases and the two loops.** `verify()` is 360 lines, down from 670: all seven phase bodies are
+methods, and the per-requirement strategy loop and the verdict loop are too. What remains in the method is the
+sequence of phase guards, the suppression pass, the run-status derivation and an eleven-line builder chain that
+assembles the report.
 
-### Packaging
+That last part is deliberately not extracted. Replacing eleven lines of `builder().verdicts(...).evidence(...).build()`
+with a method taking twelve parameters would make the signature longer than the body and move the reader further from
+the data. A refactor has to leave something easier to read, not merely smaller to count.
 
-**Complete.** The README is a landing page and the reference material lives in `docs/`: languages, scenarios,
-configuration, findings in CI, reports and reproducibility, security, project layout, and the feature-by-feature
-status. The split moved text rather than rewriting it, and a link check confirms every relative link resolves.
+### Adapter duplication
+
+**Complete.** Fourteen of sixteen adapters extend `AbstractLanguageAdapter` and declare their providers once, so
+`capabilities()` is derived from what they register: every language except Java and Kotlin. Those two are not
+delegating adapters — their `build`, `runTests` and `analyze` select a build system for the project first (Maven or
+Gradle) and construct the provider around it — and forcing them through the base class would either hide that
+selection behind a per-project provider or drop it. `AdapterCapabilityTest` names them, so an adapter that skips the
+base class without a reason is visible rather than assumed.
 
 ### Features
 
