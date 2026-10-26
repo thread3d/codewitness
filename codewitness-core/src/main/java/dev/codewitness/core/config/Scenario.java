@@ -32,6 +32,10 @@ import java.util.Objects;
  * @param timeout     per-case wall-clock budget in seconds
  * @param command     argv for {@link Mode#PROCESS}, empty for the other modes
  * @param expect      what the process must print and return, or {@code null} for the other modes
+ * @param nativeTest  whether a {@link Mode#PROCESS} scenario should be turned into a test in the project's own
+ *     framework, so the assertion lives in the project's suite instead of being executed by CodeWitness. Off by
+ *     default: the engine can run a command for every language, while only some adapters can write a native test
+ *     for one, so the default has to be the one that always works.
  */
 public record Scenario(
         String id,
@@ -46,7 +50,8 @@ public record Scenario(
         long seed,
         int timeoutSeconds,
         List<String> command,
-        ProcessExpectation expect) {
+        ProcessExpectation expect,
+        boolean nativeTest) {
 
     public Scenario {
         Objects.requireNonNull(id, "id");
@@ -55,6 +60,11 @@ public record Scenario(
         mode = mode == null ? Mode.SINGLE : mode;
         steps = List.copyOf(steps == null ? List.of() : steps);
         command = List.copyOf(command == null ? List.of() : command);
+        if (nativeTest && mode != Mode.PROCESS) {
+            throw new IllegalArgumentException("scenario " + id + " sets native_test but its mode is "
+                    + mode.name().toLowerCase(java.util.Locale.ROOT) + "; only a process scenario can be turned into "
+                    + "a project-native test, because the other modes already are one");
+        }
         if (mode == Mode.PROCESS) {
             // A process scenario names a command and what it must produce; it has no step list, because there is no
             // API to call. Requiring one would force every process scenario to carry a fragment nobody reads.
@@ -102,7 +112,31 @@ public record Scenario(
             long seed,
             int timeoutSeconds) {
         this(id, requirement, description, mode, setup, steps, observation, invariant, cases, seed, timeoutSeconds,
-                List.of(), null);
+                List.of(), null, false);
+    }
+
+    /**
+     * A process scenario that was not asked to become a native test.
+     *
+     * <p>Kept so a caller written before {@code native_test} existed reads as it did: a command, its expectations, and
+     * no request for a test in the project's own framework.
+     */
+    public Scenario(
+            String id,
+            String requirement,
+            String description,
+            Mode mode,
+            String setup,
+            List<Step> steps,
+            String observation,
+            String invariant,
+            int cases,
+            long seed,
+            int timeoutSeconds,
+            List<String> command,
+            ProcessExpectation expect) {
+        this(id, requirement, description, mode, setup, steps, observation, invariant, cases, seed, timeoutSeconds,
+                command, expect, false);
     }
 
     /** How the declared steps are driven. */

@@ -362,6 +362,24 @@ scenarios:
   the other modes avoid that by evaluating their invariant in the project's own environment.
 - The command runs through the same sandbox as every other process — allow-listed environment, hard timeout, capped
   output — and with the isolated copy as its working directory.
+**Where the assertion lives.** By default CodeWitness runs the command itself, which is what makes process mode work
+for every language. Add `native_test: true` and the adapter generates a test in the project's own framework
+instead — a JUnit 5 class for Java, a `unittest` case for Python — that runs the same command, asserts the same
+things, and prints the same counterexample line on a violation:
+
+```yaml
+  - id: SC-EXIT
+    requirement: R-007
+    mode: process
+    native_test: true
+    command: ["./tool", "check"]
+    expect: { exit_code: 0, stdout_contains: ["ok"] }
+```
+
+The generated test lives in your suite and keeps working when CodeWitness is not there. The Java and Python adapters
+can write one; on any other language the engine runs the command as before, and `native_test` there means neither runs
+it — which the generated-tests phase reports rather than passing over in silence.
+
 - A violated expectation produces a counterexample carrying the argv, the observed exit code and the tails of both
   streams. A process that never started is `UNVERIFIED`, never a failure: a missing binary is not a defect in the
   code under verification.

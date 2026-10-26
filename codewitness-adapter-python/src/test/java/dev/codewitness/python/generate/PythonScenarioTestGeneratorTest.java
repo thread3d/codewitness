@@ -64,6 +64,55 @@ class PythonScenarioTestGeneratorTest {
         assertFalse(source.contains("${"), "no placeholder may survive into generated code:\n" + source);
     }
 
+
+    @Test
+    @DisplayName("a process scenario asked for as a native test becomes a runnable unittest case")
+    void rendersProcessScenarioAsNativeTest(@TempDir Path root, @TempDir Path runDirectory) {
+        Scenario scenario = new Scenario("SC-EXIT", "R-001", "usage error exits 3", Scenario.Mode.PROCESS,
+                null, List.of(), null, null, 1, 42L, 30, List.of("./tool", "check"),
+                new Scenario.ProcessExpectation(3, List.of("usage"), List.of("codewitness:")), true);
+        Requirement requirement = Requirement.builder("R-001", "exit codes").title("Exit codes").build();
+        VerificationObligation obligation = new VerificationObligation("OB-001", "R-001", "execute scenario",
+                ObligationKind.PROCESS, ObligationOrigin.USER_DECLARED, "SC-EXIT",
+                Map.of("scenario", "SC-EXIT"), false);
+        VerificationContext context = PythonTestContexts.context(root, runDirectory, List.of(scenario));
+
+        List<GeneratedTest> generated = new PythonScenarioTestGenerator()
+                .generate(context, requirement, List.of(obligation));
+
+        assertEquals(1, generated.size());
+        String source = generated.getFirst().sourceCode();
+        assertTrue(source.contains("import subprocess"), source);
+        assertTrue(source.contains("class Cw_sc_exit_ob_001(unittest.TestCase):"), source);
+        assertTrue(source.contains("CW_EXIT_CODE = 3"), source);
+        assertTrue(source.contains("[\"./tool\", \"check\"]"), source);
+        assertTrue(source.contains("CODEWITNESS_COUNTEREXAMPLE"), "a violation must carry data: " + source);
+        assertTrue(source.contains("part.replace(\"${project_root}\", os.getcwd())"),
+                "the project root resolves at run time, not generation time: " + source);
+        assertTrue(source.contains("for part in [\"./tool\", \"check\"]"),
+                "the declared command is a literal list, with no placeholder left inside it: " + source);
+    }
+
+    @Test
+    @DisplayName("a process scenario not asked for as a native test generates nothing, rather than a broken file")
+    void aProcessScenarioWithoutNativeTestIsNotGenerated(@TempDir Path root, @TempDir Path runDirectory) {
+        // Before this, the step-based renderer received a scenario with no steps and emitted a `try:` with an empty
+        // body: syntactically invalid Python that the runner then failed to import, reported as a generated test.
+        Scenario scenario = new Scenario("SC-EXIT", "R-001", "usage error exits 3", Scenario.Mode.PROCESS,
+                null, List.of(), null, null, 1, 42L, 30, List.of("./tool"),
+                new Scenario.ProcessExpectation(3, List.of(), List.of()), false);
+        Requirement requirement = Requirement.builder("R-001", "exit codes").title("Exit codes").build();
+        VerificationObligation obligation = new VerificationObligation("OB-001", "R-001", "execute scenario",
+                ObligationKind.PROCESS, ObligationOrigin.USER_DECLARED, "SC-EXIT",
+                Map.of("scenario", "SC-EXIT"), false);
+        VerificationContext context = PythonTestContexts.context(root, runDirectory, List.of(scenario));
+
+        List<GeneratedTest> generated = new PythonScenarioTestGenerator()
+                .generate(context, requirement, List.of(obligation));
+
+        assertTrue(generated.isEmpty(), "the engine runs it; the generator has nothing to add");
+    }
+
     @Test
     @DisplayName("a concurrent scenario gets its own module and a barrier-based worker")
     void rendersConcurrentScenario(@TempDir Path root, @TempDir Path runDirectory) {

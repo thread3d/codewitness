@@ -73,6 +73,13 @@ public final class ProcessScenarioStrategy implements VerificationStrategy {
         List<Scenario> declared = context.config().scenarios().stream()
                 .filter(scenario -> scenario.mode() == Scenario.Mode.PROCESS)
                 .filter(scenario -> scenario.requirement().equals(requirement.id()))
+                // A scenario the project asked to have as a native test is executed by that test, in the project's
+                // own runner. Running the command here as well would execute the same assertion twice and could
+                // produce two counterexamples for one violation.
+                // This only takes effect when an adapter actually generated the test; `native_test` on a language
+                // whose generator cannot write one is reported by the generated-tests phase, which then finds no
+                // scenario to run and says so, rather than by silence here.
+                .filter(scenario -> !scenario.nativeTest())
                 .toList();
         if (declared.isEmpty()) {
             // The obligation still needs an outcome, or the engine treats it as unattempted; UNVERIFIED is the

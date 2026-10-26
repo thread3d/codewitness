@@ -26,6 +26,40 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ConfigLoaderTest {
 
 
+
+    @Test
+    @DisplayName("native_test parses on a process scenario, and is rejected on any other mode")
+    void parsesNativeTest() {
+        // A native test moves the assertion into the project's own suite, so it is a deliberate choice about where the
+        // guarantee lives. On a non-process mode it would mean nothing, because those modes already generate a test.
+        ConfigLoader.Loaded loaded = load("""
+                scenarios:
+                  - id: SC-EXIT
+                    requirement: R-001
+                    mode: process
+                    native_test: true
+                    command: ["./tool"]
+                    expect:
+                      exit_code: 3
+                """);
+        assertTrue(loaded.config().scenarios().getFirst().nativeTest());
+
+        IllegalArgumentException rejected = assertThrows(IllegalArgumentException.class, () -> load("""
+                scenarios:
+                  - id: SC-ROLL
+                    requirement: R-001
+                    mode: single
+                    native_test: true
+                    steps:
+                      - call: "f(${a})"
+                        inputs:
+                          - {name: a, type: int, domain: integer, values: ["1"]}
+                    observation: "a"
+                    invariant: "observation == 1"
+                """));
+        assertTrue(rejected.getMessage().contains("native_test"), rejected.getMessage());
+    }
+
     @Test
     @DisplayName("findings.suppress parses a rule, an optional path and a reason")
     void parsesSuppressions() {

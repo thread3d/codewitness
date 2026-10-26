@@ -6,16 +6,9 @@ closed it, so the list is also a short history of what was fixed and why.
 
 ## Open
 
-Nothing. The four items this backlog opened with are closed, and so are the tail items that followed them. The one
-item below is the only work I know of that is not done.
-
-### Features
-
-- **Process scenarios in the per-language adapters.** `mode: process` is implemented in the engine — it runs a
-  command and asserts on the outcome — so it works for any project, in any language, today. What it does *not* yet
-  do is generate a language-native test from a process scenario the way the other modes do; a project that wants
-  its process assertions to live in its own test suite still writes them there. Adding generators for the Java and
-  Python adapters is the natural next step.
+Nothing. Every item this backlog has carried is closed, and the closed table below records what each release settled.
+A new item should be written here — with its reasoning — before it is worked, so the list stays the authority rather
+than a summary of what was done.
 
 ## Closed
 
@@ -23,6 +16,7 @@ Every release, newest first, with the item it closed.
 
 | Release | Item |
 | --- | --- |
+| 1.0.11 | Process scenarios can be generated as native JUnit and unittest tests (`native_test: true`), and the generator no longer emits a syntactically invalid test for a process scenario it cannot render. |
 | 1.0.10 | Engine decomposition finished: the strategy loop and the verdict loop are methods, `verify()` 670 → 360 lines; the report assembly is deliberately left as an eleven-line builder chain. |
 | 1.0.9 | Mutation testing of the verdict logic: 31 mutants, 31 killed, 100% — after the first run's survivor exposed an untested branch in the 1.0.5 verdict text. `mutation.target_classes` was documented and inert; it is now honoured. |
 | 1.0.8 | The README became a landing page and the reference material moved into `docs/` by moving text rather than rewriting it. |

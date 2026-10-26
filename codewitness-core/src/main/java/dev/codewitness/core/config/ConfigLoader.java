@@ -63,7 +63,7 @@ public final class ConfigLoader {
     /** Keys understood inside one entry of the {@code scenarios} list. */
     private static final Set<String> SCENARIO_KEYS = Set.of("id", "requirement", "description", "mode",
             "setup", "steps", "observation", "invariant", "cases", "seed", "timeout_seconds", "command",
-            "expect");
+            "expect", "native_test");
 
     /** Keys understood inside {@code expect} of a {@code process} scenario. */
     private static final Set<String> EXPECT_KEYS = Set.of("exit_code", "stdout_contains", "stderr_contains");
@@ -366,7 +366,8 @@ public final class ConfigLoader {
                     longValue(map, "seed", 42L),
                     integer(map, "timeout_seconds", 120),
                     command,
-                    expect);
+                    expect,
+                    bool(map, "native_test", false));
             scenarios.add(scenario);
         }
         return scenarios;
