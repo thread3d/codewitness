@@ -1078,7 +1078,7 @@ codewitness/
 │   ├── io/                    isolated workspace and artifact store
 │   ├── config/                codewitness.yaml
 │   └── llm/                   advisory provider abstraction and prompt fencing
-├── codewitness-adapter-support/ helpers shared by more than one adapter: the tool-output tail, the
+├── codewitness-adapter-support/ helpers shared by more than one adapter: the adapter base class, the
 │                              hardened XML loader, the boundary-case enumeration every scenario generator
 │                              uses, the security-phase forwarding, source mutation, the mutation loop, and
 │                              the Node toolchain

@@ -6,9 +6,16 @@ import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.rust.analysis.RustHeuristicAnalyzer;
+import dev.codewitness.rust.analysis.RustSecurityAnalyzer;
+import dev.codewitness.rust.coverage.RustCoverageProvider;
+import dev.codewitness.rust.dependency.RustDependencyAnalyzer;
+import dev.codewitness.rust.generate.RustGeneratedTestRunner;
+import dev.codewitness.rust.generate.RustScenarioTestGenerator;
+import dev.codewitness.rust.mutation.RustMutationTester;
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
 
 import java.util.List;
 import java.util.Set;
@@ -25,7 +32,33 @@ import java.util.Set;
  * built, tested, analysed and mutated by the toolchain the project already has, and optional tools
  * such as {@code cargo-llvm-cov} are used only when they are actually present.
  */
-public final class RustLanguageAdapter implements LanguageAdapter {
+public final class RustLanguageAdapter extends AbstractLanguageAdapter {
+
+    /**
+     * Declares the Cargo toolchain once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     *
+     * @return the Rust providers
+     */
+    public static AdapterProviders rustProviders() {
+        return AdapterProviders.builder()
+                .compiler(new RustBuildProvider())
+                .testRunner(new RustTestProvider())
+                .staticAnalyzer(new RustHeuristicAnalyzer())
+                .securityAnalyzer(new RustSecurityAnalyzer())
+                .coverage(new RustCoverageProvider())
+                .mutation(new RustMutationTester())
+                .dependencies(new RustDependencyAnalyzer())
+                .generator(new RustScenarioTestGenerator())
+                .executor(new RustGeneratedTestRunner())
+                .build();
+    }
+
+    /** Creates the adapter over its declared provider set. */
+    public RustLanguageAdapter() {
+        super(rustProviders());
+    }
 
     @Override
     public String id() {
@@ -71,25 +104,4 @@ public final class RustLanguageAdapter implements LanguageAdapter {
         return builder.build();
     }
 
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new RustBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new RustTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new RustHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.COVERAGE, Capability.MUTATION, Capability.PROPERTY_TESTING,
-                Capability.GENERATED_TESTS, Capability.SECURITY_SCAN, Capability.DEPENDENCY_SCAN);
-    }
 }

@@ -8,16 +8,16 @@ closed it, so the list is also a short history of what was fixed and why.
 
 ### Adapter duplication, remaining
 
-- **`AbstractLanguageAdapter` and the `*AdapterBundle` classes.** Fifteen bundles are 48 lines each and
-  structurally identical; fourteen adapters declare `build`/`runTests`/`analyze` as one-line delegations to the
-  providers they also register, and `capabilities()` restates the registration list by hand. A base class that
-  resolves providers and derives `capabilities()` from what was registered would remove ~1,000 lines. The
-  capability guard (0.1.15) makes the derivation safe to rely on: a mismatch is now reported rather than ignored.
-- **The boundary-case enumeration truncates from the front.** With four inputs of six values, the twelve kept
-  cases never vary the first two inputs. Every case is complete and valid, so nothing is mis-generated, but a
-  scenario that expects all of its inputs exercised does not get that once the product exceeds the cap. Sampling
-  one-at-a-time variation plus pairwise combinations is the usual reading of "boundary values" and would fix it;
-  it changes which experiments run, so the fixtures need re-baselining in the same change.
+- **`AbstractLanguageAdapter` and `AdapterProviders` exist and one adapter uses them (Rust, 1.0.3).** The provider
+  set is declared once, the bundle registers it, and `capabilities()` is derived from it rather than restated by
+  hand. **Fourteen adapters remain to convert**, one at a time or in families: the edit is mechanical (move each
+  provider into a builder chain, delete three one-line delegations and the hand-written capability list) and the
+  0.1.15 capability guard reports any adapter whose derived set disagrees with what it registered.
+- **The boundary-case enumeration truncates from the front.** With four inputs of six values, the twelve kept cases
+  never vary the first two inputs. Every case is complete and valid, so nothing is mis-generated, but a scenario that
+  expects all of its inputs exercised does not get that once the product exceeds the cap. Sampling one-at-a-time
+  variation plus pairwise combinations is the usual reading of "boundary values" and would fix it; it changes which
+  experiments run, so the fixtures need re-baselining in the same change.
 
 ### Verification engine decomposition
 
@@ -60,6 +60,7 @@ report assembly — each a separate change, and each now readable without the ph
 | 0.1.14 | One implementation of the security-phase forwarding; fourteen copies removed. |
 | 0.1.15 | An adapter that registers a provider for a phase it does not declare is reported. |
 | 0.1.16–0.1.21 | Engine decomposition: `RunScope`, then all seven phase bodies extracted as methods; `verify()` 670 → 433 lines. |
+| 1.0.3 | `AdapterProviders` + `AbstractLanguageAdapter`: one declaration feeds the adapter and its bundle, and `capabilities()` is derived from the providers instead of restated; Rust converted, fourteen to go. |
 | 1.0.2 | `mode: process` scenarios: a command is run and its exit code and streams asserted, so CodeWitness's own exit-code contract (CWR-007) is now `VERIFIED` by execution — every ground rule in the self-check is verified for the first time. |
 ## Closed
 

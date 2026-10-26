@@ -2,14 +2,6 @@ package dev.codewitness.rust;
 
 import dev.codewitness.core.spi.LanguageAdapterRegistry;
 import dev.codewitness.core.spi.VerificationProviderRegistry;
-import dev.codewitness.core.spi.VerificationTools;
-import dev.codewitness.rust.analysis.RustHeuristicAnalyzer;
-import dev.codewitness.rust.analysis.RustSecurityAnalyzer;
-import dev.codewitness.rust.coverage.RustCoverageProvider;
-import dev.codewitness.rust.dependency.RustDependencyAnalyzer;
-import dev.codewitness.rust.generate.RustGeneratedTestRunner;
-import dev.codewitness.rust.generate.RustScenarioTestGenerator;
-import dev.codewitness.rust.mutation.RustMutationTester;
 
 /**
  * Wires the Rust adapter and its providers into the verification core.
@@ -26,23 +18,20 @@ public final class RustAdapterBundle {
     private RustAdapterBundle() {
     }
 
-    /** Registers the Rust language adapter and every Rust verification provider. */
+    /**
+     * Registers the Rust language adapter and every Rust verification provider.
+     *
+     * <p>The providers come from the same declaration the adapter is built from, so what is registered and what the
+     * adapter says it can do are one list.
+     *
+     * @param languages       adapter registry
+     * @param providers       provider registry
+     * @param includeAnalysis whether to register the analysis providers
+     */
     public static void register(
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new RustLanguageAdapter());
-
-        providers.register(new RustBuildProvider());
-        providers.register(new RustTestProvider());
-        providers.register(new RustCoverageProvider());
-        providers.register(new RustMutationTester());
-        providers.register(new RustDependencyAnalyzer());
-        providers.register(new RustGeneratedTestRunner());
-        providers.register(new RustScenarioTestGenerator());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new RustHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new RustSecurityAnalyzer());
-        }
+        RustLanguageAdapter.rustProviders().registerInto(providers, includeAnalysis);
     }
 }
