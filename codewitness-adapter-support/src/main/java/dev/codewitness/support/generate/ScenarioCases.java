@@ -65,31 +65,58 @@ public final class ScenarioCases {
                 return List.of();
             }
         }
-        List<Map<String, String>> accumulation = new ArrayList<>();
-        accumulation.add(new LinkedHashMap<>());
-        for (Scenario.Input input : inputs) {
-            List<Map<String, String>> next = new ArrayList<>();
-            for (Map<String, String> partial : accumulation) {
-                for (String value : input.boundaryValues()) {
-                    Map<String, String> copy = new LinkedHashMap<>(partial);
-                    copy.put(input.name(), value);
-                    next.add(copy);
-                    // The working set is bounded as it grows, not only at the end: a scenario with eight inputs
-                    // and six values each would otherwise build 1.6 million maps to return twelve of them.
-                    if (next.size() >= MAX_BOUNDARY_CASES * 4) {
+        List<Map<String, String>> cases = new ArrayList<>();
+
+        // 1. The baseline: every input at its first declared value. A case that omits an input would not be the
+        // scenario, so this also guarantees that every case built afterwards is complete.
+        cases.add(atFirstValue(inputs, Map.of()));
+
+        // 2. Variation across the inputs in rounds: each round gives every input its next declared value, with the
+        // others at their first. Round-robin by value rather than by input is the whole point — an enumeration that
+        // gives one input all of its values first spends the budget before the later inputs move at all, so a
+        // scenario written to exercise a combination only ever exercised its first input.
+        int deepest = inputs.stream().mapToInt(input -> input.boundaryValues().size()).max().orElse(1);
+        for (int valueIndex = 1; valueIndex < deepest && cases.size() < MAX_BOUNDARY_CASES; valueIndex++) {
+            for (Scenario.Input input : inputs) {
+                if (valueIndex < input.boundaryValues().size()) {
+                    cases.add(atFirstValue(inputs, Map.of(input.name(), input.boundaryValues().get(valueIndex))));
+                    if (cases.size() >= MAX_BOUNDARY_CASES) {
                         break;
                     }
                 }
             }
-            accumulation = next;
         }
-        List<Map<String, String>> cases = new ArrayList<>();
-        for (Map<String, String> values : accumulation) {
-            cases.add(values);
-            if (cases.size() >= MAX_BOUNDARY_CASES) {
-                break;
+
+        // 3. If budget remains — few inputs, few values — spend it on pairs, because those are the combinations a
+        // scenario is usually written to catch: two inputs varying together is where an interaction shows up.
+        for (int i = 0; i < inputs.size() && cases.size() < MAX_BOUNDARY_CASES; i++) {
+            for (int j = i + 1; j < inputs.size() && cases.size() < MAX_BOUNDARY_CASES; j++) {
+                List<String> left = inputs.get(i).boundaryValues();
+                List<String> right = inputs.get(j).boundaryValues();
+                for (int a = 1; a < left.size() && cases.size() < MAX_BOUNDARY_CASES; a++) {
+                    for (int b = 1; b < right.size() && cases.size() < MAX_BOUNDARY_CASES; b++) {
+                        cases.add(atFirstValue(inputs, Map.of(
+                                inputs.get(i).name(), left.get(a),
+                                inputs.get(j).name(), right.get(b))));
+                    }
+                }
             }
         }
         return List.copyOf(cases);
+    }
+
+    /**
+     * Builds one complete case: every input at its first declared value, except those named in {@code overrides}.
+     *
+     * @param inputs    declared inputs, in scenario order
+     * @param overrides values to use instead of the first
+     * @return one case, with its inputs in declaration order
+     */
+    private static Map<String, String> atFirstValue(List<Scenario.Input> inputs, Map<String, String> overrides) {
+        Map<String, String> aCase = new LinkedHashMap<>();
+        for (Scenario.Input input : inputs) {
+            aCase.put(input.name(), overrides.getOrDefault(input.name(), input.boundaryValues().getFirst()));
+        }
+        return aCase;
     }
 }

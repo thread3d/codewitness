@@ -15,12 +15,6 @@ Gradle) and construct the provider around it — and forcing them through the ba
 selection behind a per-project provider or drop it. `AdapterCapabilityTest` names them, so an adapter that skips the
 base class without a reason is visible rather than assumed.
 
-- **The boundary-case enumeration truncates from the front.** With four inputs of six values, the twelve kept cases
-  never vary the first two inputs. Every case is complete and valid, so nothing is mis-generated, but a scenario that
-  expects all of its inputs exercised does not get that once the product exceeds the cap. Sampling one-at-a-time
-  variation plus pairwise combinations is the usual reading of "boundary values" and would fix it; it changes which
-  experiments run, so the fixtures need re-baselining in the same change.
-
 ### Verification engine decomposition
 
 **Complete for the phases.** All seven phase bodies are methods taking the `RunScope`; `verify()` is 433 lines,

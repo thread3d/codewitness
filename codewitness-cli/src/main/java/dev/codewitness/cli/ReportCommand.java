@@ -183,8 +183,14 @@ public final class ReportCommand implements Callable<Integer> {
             return 0;
         }
         try (var stream = Files.list(runsDirectory)) {
+            // A *total* order, not merely by time. Modification times tie whenever two runs are created inside the
+            // same clock tick, which a fast filesystem allows and a script can cause on purpose; with a partial
+            // order the surviving run then depends on the order the directory stream happens to return, so
+            // `--keep 1` could keep the older of two. The name is the tie-break, and it is stable everywhere.
             List<Path> directories = stream.filter(Files::isDirectory)
-                    .sorted(Comparator.comparing(ReportCommand::lastModified).reversed())
+                    .sorted(Comparator.comparingLong(ReportCommand::lastModified)
+                            .thenComparing(directory -> directory.getFileName().toString())
+                            .reversed())
                     .toList();
             List<String> deletedIds = new java.util.ArrayList<>();
             int deleted = 0;

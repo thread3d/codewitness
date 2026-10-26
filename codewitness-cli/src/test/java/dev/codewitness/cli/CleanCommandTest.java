@@ -140,6 +140,28 @@ class CleanCommandTest {
                 java.nio.file.attribute.FileTime.fromMillis(millis));
     }
 
+
+    @Test
+    @DisplayName("two runs written in the same clock tick keep a deterministic one, not whichever the filesystem lists")
+    void equalModificationTimesBreakByRunId() throws IOException {
+        // Modification times tie whenever two runs are created inside the same tick, which a fast filesystem allows
+        // and a script can cause deliberately. Before this was a total order, the survivor depended on the directory
+        // stream's order: CI kept the wrong run while a developer machine, whose clock is slower, kept the right one.
+        String lower = "CW-2026-10-06-AAAAA";
+        String higher = "CW-2026-10-06-CCCCC";
+        createRun(lower);
+        createRun(higher);
+        setModified(lower, 5_000L);
+        setModified(higher, 5_000L);
+
+        CliTestSupport.Result result = CliTestSupport.run("clean", tmp.toString(), "--keep", "1");
+
+        assertEquals(0, result.exitCode(), result.stdout() + result.stderr());
+        assertTrue(runs(tmp).resolve(higher).toFile().isDirectory(),
+                "with equal times the greater run id survives, so the outcome does not depend on the machine");
+        assertFalse(runs(tmp).resolve(lower).toFile().exists());
+    }
+
     private void createRun(String runId) throws IOException {
         write(tmp, ".codewitness/runs/" + runId + "/report.json", "{\"runId\":\"" + runId + "\"}");
         write(tmp, ".codewitness/runs/" + runId + "/artifacts/log.txt", "output");

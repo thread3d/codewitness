@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "1.0.6";
+    public static final String VERSION = "1.0.7";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =

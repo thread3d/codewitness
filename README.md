@@ -550,6 +550,11 @@ scenarios:
     invariant: "observation <= decimal.Decimal(\"1000\")"
 ```
 
+Boundary cases are enumerated in three passes: a baseline with every input at its first declared value, then
+variation across the inputs in rounds so that every input moves as early as the budget allows, and finally pairs
+once the budget is spare. A scenario with four inputs and six values each therefore varies all four, where an
+enumeration that gave one input all of its values first would spend the cap before the later inputs moved at all.
+
 The invariant is checked after every step. `mode: concurrent` releases eight threads simultaneously
 against one shared subject and then checks the invariant. Every failing case reports its exact inputs
 plus the seed and case index, which is what makes a counterexample reproducible. Python generated
