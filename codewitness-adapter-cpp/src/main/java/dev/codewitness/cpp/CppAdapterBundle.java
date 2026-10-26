@@ -33,18 +33,6 @@ public final class CppAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new CppLanguageAdapter());
-
-        providers.register(new CppBuildProvider());
-        providers.register(new CppTestProvider());
-        providers.register(new CppCoverageProvider());
-        providers.register(new CppMutationTester());
-        providers.register(new CppDependencyAnalyzer());
-        providers.register(new CppGeneratedTestRunner());
-        providers.register(new CppScenarioTestGenerator());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new CppHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new CppSecurityAnalyzer());
-        }
+        CppLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

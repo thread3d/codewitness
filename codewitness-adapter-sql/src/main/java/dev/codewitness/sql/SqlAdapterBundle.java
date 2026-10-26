@@ -29,20 +29,6 @@ public final class SqlAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new SqlLanguageAdapter());
-
-        providers.register(new SqlBuildProvider());
-        providers.register(new SqlTestProvider());
-        // The schema-derived probes are the experiment that can verify a SQL requirement: a declared
-        // constraint is tested by the row that violates it, and a constraint that does not fire is the
-        // defect.
-        providers.register(new SqlTestGenerator());
-        providers.register(new SqlGeneratedTestExecutor());
-        // Mutation judges how much of the schema's own rules the project's scripts actually constrain.
-        providers.register(new SqlMutationTester());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new SqlHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new SqlSecurityAnalyzer());
-        }
+        SqlLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

@@ -8,7 +8,7 @@
        CodeWitness reactor, exactly like the projects CodeWitness is pointed at in the real world. -->
   <groupId>com.example</groupId>
   <artifactId>off-by-one-boundary</artifactId>
-  <version>1.0.5</version>
+  <version>1.0.6</version>
   <packaging>jar</packaging>
 
   <name>off-by-one-boundary</name>

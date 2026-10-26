@@ -59,6 +59,24 @@ class AdapterCapabilityTest {
     }
 
     @Test
+    @DisplayName("the adapters whose phases are pure delegation share one base; the two that differ say so")
+    void onlyTheSelectionAdaptersBypassTheBaseClass() {
+        // AbstractLanguageAdapter implements build/runTests/analyze as calls into the declared providers. Java and
+        // Kotlin cannot: their phases select a build system for the project first (Maven or Gradle) and construct the
+        // provider around it. That is real logic, and forcing it through the base class would mean either hiding it
+        // behind a provider that resolves per project or dropping it. Naming the two here means a future adapter that
+        // skips the base class without a reason is visible.
+        List<String> notUsingTheBase = adapters().stream()
+                .filter(adapter -> !(adapter instanceof dev.codewitness.support.adapter.AbstractLanguageAdapter))
+                .map(LanguageAdapter::id)
+                .sorted()
+                .toList();
+
+        assertEquals(List.of("java", "kotlin"), notUsingTheBase,
+                "an adapter that does not extend AbstractLanguageAdapter must have a reason, and there are two");
+    }
+
+    @Test
     @DisplayName("the adapters with no dependency inventory are exactly the four that have none")
     void onlyTheExpectedAdaptersLackDependencies() {
         // SQL joins the HDL adapters and Pascal: it loads a schema rather than resolving packages, so there is no

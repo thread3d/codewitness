@@ -1,12 +1,15 @@
 package dev.codewitness.sql;
 
+import dev.codewitness.sql.analysis.SqlHeuristicAnalyzer;
+import dev.codewitness.sql.analysis.SqlSecurityAnalyzer;
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.sql.analysis.SqlHeuristicAnalyzer;
 
@@ -27,7 +30,28 @@ import java.util.Set;
  * says coverage was not measured and dependencies were not analysed, which is the truth rather than a
  * zero this adapter cannot support.
  */
-public final class SqlLanguageAdapter implements LanguageAdapter {
+public final class SqlLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new SqlBuildProvider())
+            .testRunner(new SqlTestProvider())
+            .generator(new SqlTestGenerator())
+            .executor(new SqlGeneratedTestExecutor())
+            .mutation(new SqlMutationTester())
+            .staticAnalyzer(new SqlHeuristicAnalyzer())
+            .securityAnalyzer(new SqlSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public SqlLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -59,32 +83,5 @@ public final class SqlLanguageAdapter implements LanguageAdapter {
                 ? "no schema script was found; only test scripts are present"
                 : "schema and migration scripts detected");
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new SqlBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new SqlTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new SqlHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        // No COVERAGE: statement coverage over a schema is not a measurement this adapter can make
-        // meaningfully, and reporting a number anyway would be worse than reporting none. No
-        // DEPENDENCY_SCAN: SQL has no package manager and no advisory ecosystem to consult.
-        // GENERATED_TESTS is what makes a requirement verifiable rather than only refutable: the
-        // schema-derived constraint probes are executed, and a constraint that does not fire fails.
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.SECURITY_SCAN, Capability.GENERATED_TESTS, Capability.PROPERTY_TESTING,
-                Capability.MUTATION);
     }
 }

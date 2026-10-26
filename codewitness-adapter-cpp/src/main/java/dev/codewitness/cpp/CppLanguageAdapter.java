@@ -1,12 +1,20 @@
 package dev.codewitness.cpp;
 
+import dev.codewitness.cpp.analysis.CppHeuristicAnalyzer;
+import dev.codewitness.cpp.analysis.CppSecurityAnalyzer;
+import dev.codewitness.cpp.coverage.CppCoverageProvider;
+import dev.codewitness.cpp.dependency.CppDependencyAnalyzer;
+import dev.codewitness.cpp.generate.CppGeneratedTestRunner;
+import dev.codewitness.cpp.generate.CppScenarioTestGenerator;
+import dev.codewitness.cpp.mutation.CppMutationTester;
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.cpp.analysis.CppHeuristicAnalyzer;
 
@@ -28,7 +36,30 @@ import java.util.Set;
  * by Meson is recognised by {@code CppLanguageDetector} and reported as present and not verified, which is
  * the honest answer for a build this adapter does not drive.
  */
-public final class CppLanguageAdapter implements LanguageAdapter {
+public final class CppLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new CppBuildProvider())
+            .testRunner(new CppTestProvider())
+            .coverage(new CppCoverageProvider())
+            .mutation(new CppMutationTester())
+            .dependencies(new CppDependencyAnalyzer())
+            .executor(new CppGeneratedTestRunner())
+            .generator(new CppScenarioTestGenerator())
+            .staticAnalyzer(new CppHeuristicAnalyzer())
+            .securityAnalyzer(new CppSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public CppLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -75,27 +106,5 @@ public final class CppLanguageAdapter implements LanguageAdapter {
         String ninja = CppBuildTools.resolveExecutable("ninja");
         builder.attribute(CppBuildTools.ATTR_GENERATOR, ninja == null ? "CMake default" : "Ninja");
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new CppBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new CppTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new CppHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.COVERAGE, Capability.MUTATION, Capability.PROPERTY_TESTING,
-                Capability.GENERATED_TESTS, Capability.SECURITY_SCAN, Capability.DEPENDENCY_SCAN);
     }
 }
