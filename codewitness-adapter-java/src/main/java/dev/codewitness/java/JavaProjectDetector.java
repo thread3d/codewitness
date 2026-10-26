@@ -436,31 +436,12 @@ public final class JavaProjectDetector {
      * @throws ParserConfigurationException when the parser cannot be configured securely
      */
     public static Document parseReportXml(Path file) throws IOException, SAXException, ParserConfigurationException {
-        String content = Files.readString(file, StandardCharsets.UTF_8);
-        String withoutDoctype = content.replaceAll("(?s)<!DOCTYPE[^>]*>", "");
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-        factory.setExpandEntityReferences(false);
-        factory.setXIncludeAware(false);
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-        return factory.newDocumentBuilder()
-                .parse(new org.xml.sax.InputSource(new java.io.StringReader(withoutDoctype)));
+        return dev.codewitness.support.XmlDocuments.parse(file);
     }
 
     /** Parses XML with external entity resolution disabled: build files are untrusted input. */
     public static Document parseXml(Path file) throws IOException, SAXException, ParserConfigurationException {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        factory.setExpandEntityReferences(false);
-        factory.setXIncludeAware(false);
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        try (var stream = Files.newInputStream(file)) {
-            return builder.parse(stream);
-        }
+        return dev.codewitness.support.XmlDocuments.parse(file);
     }
 
     private static List<Path> existing(Path directory) {

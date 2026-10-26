@@ -973,6 +973,10 @@ CodeWitness executes project code, so it treats the project as hostile:
   dropped. `MAVEN_OPTS` is explicitly removed, but `JAVA_TOOL_OPTIONS` is forwarded and routinely
   carries proxy settings such as `-Dhttps.proxyHost`, so a proxy variable can still reach the build.
   There is also an isolated working directory, capped output and hard timeouts;
+- every XML file a project produces — test reports, coverage reports, build files — is parsed through one
+  hardened loader (`XmlDocuments` in `codewitness-adapter-support`): DOCTYPE declarations are removed and
+  refused, external general and parameter entities are off, XInclude is off and external DTD/schema access is
+  emptied. It was nine copies across seven adapters before this, which is nine places to miss a hardening fix;
 - the project is copied into the run workspace by default, so generated tests and build output never
   touch your working tree. Symbolic links are neither followed nor copied: following one would copy data
   from outside the project into a run directory that is kept on disk and travels with a bug report, so a

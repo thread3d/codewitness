@@ -513,11 +513,7 @@ public final class KotlinProjectDetector {
 
     /** Parses XML with external entity resolution disabled: build files are untrusted input. */
     public static Document parseXml(Path file) throws IOException, SAXException, ParserConfigurationException {
-        DocumentBuilderFactory factory = secureFactory();
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        try (var stream = Files.newInputStream(file)) {
-            return factory.newDocumentBuilder().parse(stream);
-        }
+        return dev.codewitness.support.XmlDocuments.parse(file);
     }
 
     private static DocumentBuilderFactory secureFactory() throws ParserConfigurationException {

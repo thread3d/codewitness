@@ -37,21 +37,10 @@ public final class CppXml {
      * @throws Exception when the file cannot be read or is not well formed
      */
     public static Document parse(Path file) throws Exception {
-        String content = Files.readString(file, StandardCharsets.UTF_8);
-        if (!content.isEmpty() && content.charAt(0) == '\uFEFF') {
-            content = content.substring(1);
-        }
-        // Security: strip any DOCTYPE before parsing as well as disallowing it, because a document that
-        // declares internal entities is exactly the billion-laughs shape this guard exists for.
-        String withoutDoctype = content.replaceAll("(?s)<!DOCTYPE[^>]*>", "");
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        factory.setExpandEntityReferences(false);
-        factory.setXIncludeAware(false);
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-        return factory.newDocumentBuilder().parse(new InputSource(new StringReader(withoutDoctype)));
+        // One hardened loader for every adapter: nine copies of this existed, and they were not
+        // identical - a defence against entity expansion that must be fixed nine times has nine
+        // chances to be missed.
+        return dev.codewitness.support.XmlDocuments.parse(file);
     }
 
     /** @return the attribute's value, or {@code null} when it is absent or empty. */

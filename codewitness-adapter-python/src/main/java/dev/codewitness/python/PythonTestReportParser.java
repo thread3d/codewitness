@@ -159,18 +159,7 @@ public final class PythonTestReportParser {
     }
 
     private static Document parseXml(Path file) throws Exception {
-        String content = Files.readString(file, StandardCharsets.UTF_8);
-        // Security: strip any DOCTYPE and disable external entity resolution, because the report is
-        // produced from a project that CodeWitness treats as hostile.
-        String withoutDoctype = content.replaceAll("(?s)<!DOCTYPE[^>]*>", "");
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        factory.setExpandEntityReferences(false);
-        factory.setXIncludeAware(false);
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-        return factory.newDocumentBuilder().parse(new InputSource(new StringReader(withoutDoctype)));
+        return dev.codewitness.support.XmlDocuments.parse(file);
     }
 
     private static String attribute(Element element, String name) {

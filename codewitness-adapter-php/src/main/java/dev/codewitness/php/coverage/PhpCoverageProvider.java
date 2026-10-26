@@ -314,23 +314,7 @@ public final class PhpCoverageProvider implements VerificationTools.CoverageProv
     }
 
     private static Document parseXml(Path file) throws Exception {
-        String content = Files.readString(file, StandardCharsets.UTF_8);
-        // Security: strip any DOCTYPE and disable external entity resolution, because the report is
-        // produced from a project CodeWitness treats as hostile.
-        String withoutDoctype = content.replaceAll("(?s)<!DOCTYPE[^>]*>", "");
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        factory.setExpandEntityReferences(false);
-        factory.setXIncludeAware(false);
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        // A report this provider refuses is reported to the caller, not printed to the console: a library
-        // writes to the report, and the default handler would put "[Fatal Error]" on the stderr of a run
-        // whose result already says what happened.
-        builder.setErrorHandler(REPORT_ERRORS);
-        return builder.parse(new InputSource(new StringReader(withoutDoctype)));
+        return dev.codewitness.support.XmlDocuments.parse(file);
     }
 
     private static int integer(Element element, String attribute) {
