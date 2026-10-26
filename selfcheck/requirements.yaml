@@ -58,7 +58,7 @@ requirements:
     title: Durations parse with documented suffixes and fall back safely
     description: >-
       Duration text such as "10m" parses to the documented duration, and a value that cannot be
-      parsed falls back to the supplied default instead of failing the run. README "Configuration".
+      parsed falls back to the supplied default instead of failing the run. docs/configuration.md.
     paths:
       - codewitness-core/src/main/java/dev/codewitness/core/config/DurationParser.java
 

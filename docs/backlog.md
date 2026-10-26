@@ -21,11 +21,11 @@ base class without a reason is visible rather than assumed.
 down from 670, and holds no inline phase body. What remains inside it is the per-requirement strategy loop and the
 report assembly — each a separate change, and each now readable without the phases in the way.
 
-### Report and packaging
+### Packaging
 
-- **The README is ~2,300 lines**, including a status section longer than the reference material it follows. It
-  wants splitting into `docs/` with a landing page that fits on a screen.
-- **The README split** is the last packaging item; the release workflow landed in 1.0.1.
+**Complete.** The README is a landing page and the reference material lives in `docs/`: languages, scenarios,
+configuration, findings in CI, reports and reproducibility, security, project layout, and the feature-by-feature
+status. The split moved text rather than rewriting it, and a link check confirms every relative link resolves.
 
 ### Features
 

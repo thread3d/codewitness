@@ -215,3 +215,44 @@ CodeWitness is a tool for evaluating untrusted code, so a sandbox escape or a pr
 that reaches a verdict is a serious bug. Please report it privately rather than in a public issue, and
 include the project or configuration that demonstrates it. Until a fix ships, the workaround is
 `mode: docker`.
+
+## Security summary from the README
+
+CodeWitness executes project code, so it treats the project as hostile:
+
+- all execution goes through one sandbox abstraction. The child does not inherit the host
+  environment: only an allow-list is forwarded (`PATH`, `JAVA_HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`,
+  `HOME`, `GRADLE_USER_HOME`, `JAVA_TOOL_OPTIONS`, `SDKMAN_DIR`), so credentials and tokens are
+  dropped. `MAVEN_OPTS` is explicitly removed, but `JAVA_TOOL_OPTIONS` is forwarded and routinely
+  carries proxy settings such as `-Dhttps.proxyHost`, so a proxy variable can still reach the build.
+  There is also an isolated working directory, capped output and hard timeouts;
+- every XML file a project produces — test reports, coverage reports, build files — is parsed through one
+  hardened loader (`XmlDocuments` in `codewitness-adapter-support`): DOCTYPE declarations are removed and
+  refused, external general and parameter entities are off, XInclude is off and external DTD/schema access is
+  emptied. It was nine copies across seven adapters before this, which is nine places to miss a hardening fix;
+- the project is copied into the run workspace by default, so generated tests and build output never
+  touch your working tree. Symbolic links are neither followed nor copied: following one would copy data
+  from outside the project into a run directory that is kept on disk and travels with a bug report, so a
+  repository containing `.env -> ~/.aws/credentials` would have had the user's credentials copied into
+  `.codewitness/runs/<id>/workspace/`. Every link that is skipped is listed in the run's limitations, so a
+  project that needs one fails visibly instead of being verified against a different tree;
+- `sandbox.mode: docker` runs everything in a container with no network and dropped capabilities;
+- the local-process sandbox is a **resource-safety** boundary, not a security boundary, and every
+  report says so instead of overstating it.
+
+One security rule is deliberately cross-language, because the defect is: **a database query assembled
+from a value** rather than sent with parameters. Every adapter whose language builds queries carries
+its own version of it — `CW-SEC-002` (Java), `CW-KT-SEC-004` (Kotlin), `CW-PY-SEC-008` (Python),
+`CW-GO-SEC-006` (Go), `CW-RS-SEC-007` (Rust), `CW-JS-SEC-004` (JavaScript), `CW-TS-SEC-004`
+(TypeScript), `CW-CS-SEC-003` (C#), `CW-CPP-SEC-012` (C and C++), `CW-PHP-SEC-009` (PHP),
+`CW-RB-SEC-004` (Ruby) and `CW-SWIFT-SEC-007` (Swift) — and the SQL adapter contributes the SQL-side
+rule, `sql-dynamic-sql-concatenation`, for a statement assembled inside the database itself. Each rule
+reads a literal-aware view of the source, so it sees the concatenation or interpolation in a string and
+not the same words in a comment. Every one of them is advisory: a regular expression recognises the
+shape of a query built from a value, not an exploitable one, so a match is recorded as a hint and a
+requirement is never failed on the rule's word alone. Neither Verilog nor VHDL has such a rule because an
+HDL design does not build queries.
+
+See [`docs/security.md`](security.md).
+
+---
