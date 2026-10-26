@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "0.1.16";
+    public static final String VERSION = "0.1.17";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -325,7 +325,7 @@ public final class VerificationEngine {
         // Built once, after the last run-wide fact exists: the phases below derive a per-language context from
         // it, and a run-wide fact added later becomes one field here instead of an edit in eight call sites.
         RunScope scope = new RunScope(runId, project, config, workspace, artifacts, budget, requirements, llm,
-                scoped, sandbox, state, ledger, startedAt, database);
+                scoped, sandbox, state, ledger, startedAt, database, providers);
 
         // An adapter that registers a provider for a phase but does not declare the matching capability has that
         // phase skipped without a word, because the engine schedules phases from the declared capabilities. That
@@ -455,50 +455,8 @@ public final class VerificationEngine {
         // ---------------------------------------------------------------- static analysis
         if (config.staticAnalysis().enabled() && withinBudget(budget)) {
             List<Inspection> analysable = analysable(inspections, builds);
-            phases.add(runPhase("static-analysis", runId, project, listener, () -> {
-                List<String> evidenceIds = new ArrayList<>();
-                List<Finding> findings = new ArrayList<>();
-                for (Inspection inspection : analysable) {
-                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
-                    // Registered providers are the extension point, and every bundled adapter registers
-                    // one. Calling adapter.analyze() as well ran the whole pass twice - including a second
-                    // -Xlint:all compile - for findings that were then deduplicated away. The adapter level
-                    // entry point is kept as a fallback for an adapter that registers no provider.
-                    List<Finding> found = new ArrayList<>();
-                    var analyzers = providers.staticAnalyzers(inspection.info());
-                    if (analyzers.isEmpty()) {
-                        found.addAll(inspection.adapter().analyze(languageContext));
-                    } else {
-                        for (var analyzer : analyzers) {
-                            found.addAll(analyzer.analyze(languageContext));
-                        }
-                    }
-                    // The adapter and the registered providers may report the same rule through different
-                    // paths; a finding is reported once, keyed by analyzer, rule, location and message.
-                    found = deduplicateFindings(found);
-                    findings.addAll(found);
-                    state.addFindings(found);
-                    Path report = artifacts.write("static-analysis/" + inspection.adapter().id() + "-findings.json",
-                            renderFindings(found));
-                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.STATIC_ANALYSIS)
-                            .description("Static analysis (" + inspection.adapter().id() + "): "
-                                    + found.size() + " finding(s)")
-                            .source("static-analysis")
-                            .confidence(EvidenceConfidence.DETERMINISTIC)
-                            .status(found.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
-                            .result(summariseFindings(found))
-                            .metadata("adapter", inspection.adapter().id())
-                            .metadata("bySeverity", summariseSeverity(found))
-                            .artifact(report)
-                            .build());
-                    evidenceIds.add(evidence.id());
-                }
-                // Record that the phase ran, not just what it found: a clean run and a run where nothing
-                // could execute must not look the same to the strategies.
-                state.staticAnalysisRan(!analysable.isEmpty());
-                return new PhaseOutcome(!analysable.isEmpty(), summariseFindings(findings),
-                        List.copyOf(evidenceIds), null);
-            }));
+            phases.add(runPhase("static-analysis", runId, project, listener,
+                    () -> staticAnalysisPhase(scope, analysable)));
         }
 
         if (config.security().enabled() && withinBudget(budget)) {
@@ -924,6 +882,63 @@ public final class VerificationEngine {
      * @param startedAt  when the run started
      * @param database   the prepared database fixture, or a disabled one
      */
+    /**
+     * The static-analysis phase: one pass over every language that built.
+     *
+     * <p>Extracted from the 670-line {@code verify()} where it was one of seven inline lambdas sharing a skeleton
+     * — loop over the languages, build a context, call the providers, record evidence, merge the outcome — with
+     * enough variation between them that reading any one meant reading all seven. It takes the run scope and the
+     * languages to analyse and nothing else, which is what the scope exists to make possible.
+     *
+     * @param scope      the run-wide facts
+     * @param analysable the languages whose build succeeded
+     * @return the phase outcome recorded in the run
+     */
+    private PhaseOutcome staticAnalysisPhase(RunScope scope, List<Inspection> analysable) {
+        List<String> evidenceIds = new ArrayList<>();
+        List<Finding> findings = new ArrayList<>();
+        for (Inspection inspection : analysable) {
+            VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
+            // Registered providers are the extension point, and every bundled adapter registers one. Calling
+            // adapter.analyze() as well ran the whole pass twice - including a second -Xlint:all compile - for
+            // findings that were then deduplicated away. The adapter level entry point is kept as a fallback for
+            // an adapter that registers no provider.
+            List<Finding> found = new ArrayList<>();
+            var analyzers = scope.providers().staticAnalyzers(inspection.info());
+            if (analyzers.isEmpty()) {
+                found.addAll(inspection.adapter().analyze(languageContext));
+            } else {
+                for (var analyzer : analyzers) {
+                    found.addAll(analyzer.analyze(languageContext));
+                }
+            }
+            // The adapter and the registered providers may report the same rule through different paths; a
+            // finding is reported once, keyed by analyzer, rule, location and message.
+            found = deduplicateFindings(found);
+            findings.addAll(found);
+            scope.state().addFindings(found);
+            Path report = scope.artifacts().write(
+                    "static-analysis/" + inspection.adapter().id() + "-findings.json", renderFindings(found));
+            Evidence evidence = scope.ledger().add(scope.ledger().newEvidence(EvidenceType.STATIC_ANALYSIS)
+                    .description("Static analysis (" + inspection.adapter().id() + "): " + found.size()
+                            + " finding(s)")
+                    .source("static-analysis")
+                    .confidence(EvidenceConfidence.DETERMINISTIC)
+                    .status(found.isEmpty() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
+                    .result(summariseFindings(found))
+                    .metadata("adapter", inspection.adapter().id())
+                    .metadata("bySeverity", summariseSeverity(found))
+                    .artifact(report)
+                    .build());
+            evidenceIds.add(evidence.id());
+        }
+        // Record that the phase ran, not just what it found: a clean run and a run where nothing could execute
+        // must not look the same to the strategies.
+        scope.state().staticAnalysisRan(!analysable.isEmpty());
+        return new PhaseOutcome(!analysable.isEmpty(), summariseFindings(findings),
+                List.copyOf(evidenceIds), null);
+    }
+
     private record RunScope(
             RunId runId,
             ProjectRef project,
@@ -938,7 +953,8 @@ public final class VerificationEngine {
             RunState state,
             EvidenceLedger ledger,
             Instant startedAt,
-            PreparedDatabase database) {
+            PreparedDatabase database,
+            VerificationProviderRegistry providers) {
     }
 
     private record Inspection(LanguageAdapter adapter, ProjectInfo info) {
