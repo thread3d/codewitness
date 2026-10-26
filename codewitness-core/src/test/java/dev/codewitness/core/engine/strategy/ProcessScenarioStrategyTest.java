@@ -139,6 +139,26 @@ class ProcessScenarioStrategyTest {
         assertEquals(RequirementStatus.UNVERIFIED, outcome.obligations().getFirst().status());
     }
 
+
+    @Test
+    @DisplayName("a scenario the project asked to have as a native test is left to that test, and says so when none exists")
+    void aNativeTestScenarioIsNotExecutedHere(@TempDir Path root) {
+        // `native_test` moves the assertion into the project's own suite, and only the Java and Python adapters can
+        // write one. On any other language the engine stands aside and the generator has nothing to generate, so the
+        // scenario is not executed at all - and the requirement must come out unverified with that said, not silently
+        // passing. This pins the sharp edge the reference documents.
+        Scenario nativeTest = new Scenario("SC-NATIVE", "R-001", "a command", Scenario.Mode.PROCESS, null,
+                List.of(), null, null, 1, 42L, 30, List.of("/bin/true"),
+                new Scenario.ProcessExpectation(0, List.of(), List.of()), true);
+
+        StrategyOutcome outcome = new ProcessScenarioStrategy().verify(
+                context(root, nativeTest), requirement("R-001"), List.of(obligation("R-001", "SC-NATIVE")));
+
+        assertTrue(outcome.evidence().isEmpty(), "the engine must not run a command a native test owns");
+        assertFalse(outcome.notes().isEmpty(), "the absence of an execution must be stated");
+        assertEquals(RequirementStatus.UNVERIFIED, outcome.obligations().getFirst().status());
+    }
+
     private static Requirement requirement(String id) {
         return Requirement.builder(id, "A command exits with the documented code.").title("Exit code")
                 .build();

@@ -284,11 +284,14 @@ Adding to any of those is a minor release. Renaming or removing is a major one. 
 structure, artefact layout under `.codewitness/runs/`, the wording of a limitation — may change in a minor
 release, because those are implementation, and calling them an interface would freeze mistakes.
 
-**What 1.0 is not.** It is not a claim that verification is complete. The tool's own self-check still reports one
-requirement `UNVERIFIED` — the exit-code contract, because a scenario cannot yet assert anything about a
-*process* — and that is the honest answer rather than a failure. Findings from heuristic rules are advisory and
-never fail a requirement. The `local-process` sandbox is a resource boundary, not a security boundary, and every
-report says so. The open work is in [`docs/backlog.md`](docs/backlog.md), with the reasoning.
+**What 1.0 is not.** It is not a claim that verification is complete, or that every language is verified to the
+same depth, or that a clean report means the code is correct. Findings from heuristic rules are advisory and never
+fail a requirement. The `local-process` sandbox is a resource boundary, not a security boundary, and every report
+says so. What *is* true is that the tool applies its rules to itself: its self-check verifies all seven of its own
+ground rules by execution — including the exit-code contract, which is checked by running the built jar and
+observing what it returns — and its verdict logic is mutation-tested by itself (31 mutants, 31 killed). The status of
+every feature, claimed and observed, is in [`docs/status.md`](docs/status.md); what is known to be missing is in
+[`docs/backlog.md`](docs/backlog.md), which is currently empty.
 
 ---
 

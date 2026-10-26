@@ -16,6 +16,7 @@ Every release, newest first, with the item it closed.
 
 | Release | Item |
 | --- | --- |
+| 1.0.12 | Documentation correction: the landing page no longer claims a requirement it can verify is unverifiable, the status document describes the four scenario modes and where `native_test` stops, and the sharp edge in `native_test` is pinned by a test. |
 | 1.0.11 | Process scenarios can be generated as native JUnit and unittest tests (`native_test: true`), and the generator no longer emits a syntactically invalid test for a process scenario it cannot render. |
 | 1.0.10 | Engine decomposition finished: the strategy loop and the verdict loop are methods, `verify()` 670 → 360 lines; the report assembly is deliberately left as an eleven-line builder chain. |
 | 1.0.9 | Mutation testing of the verdict logic: 31 mutants, 31 killed, 100% — after the first run's survivor exposed an untested branch in the 1.0.5 verdict text. `mutation.target_classes` was documented and inert; it is now honoured. |

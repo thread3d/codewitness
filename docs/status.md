@@ -1,5 +1,27 @@
 # Honest status
 
+## Scenario modes
+
+A requirement is executed by a declared scenario, and a scenario has four modes:
+
+- **`single`, `sequence`, `concurrent`** — generate a test in the project's own framework (JUnit 5, pytest or
+  `unittest`, `cargo test`, Go's own runner, `node:test`, xUnit, PHPUnit, RSpec, XCTest, an fpcunit program, an
+  Icarus or GHDL testbench, a Pascal program). The test is compiled and run by the project's own toolchain, and its
+  failure becomes a counterexample. All sixteen adapters do this.
+- **`process`** — runs a command and asserts its exit code, standard output and standard error. This is the only
+  mode that can say anything about a program's own interface: the other three call code *inside* the project's test
+  framework and cannot observe what a caller of the built program sees. It is executed by CodeWitness itself, which
+  is what makes it work for every language.
+- **`process` with `native_test: true`** — the adapter writes the equivalent test into the project's own suite
+  instead (JUnit 5 for Java, `unittest` for Python), so the assertion survives without CodeWitness being present.
+  **This is implemented for Java and Python only.** On any other language, `native_test` means the generated-tests
+  phase finds nothing to generate and the engine skips the scenario, so it is reported as not executed rather than
+  silently passing; that is a known gap, not an accident.
+
+Boundary cases are enumerated in three passes — a baseline, round-robin variation so every input moves, then pairs —
+and capped at twelve per scenario. A scenario whose product exceeds the cap therefore does not exercise every
+combination; it exercises every *input*, which is the property the enumeration guarantees.
+
 Implemented and exercised end to end:
 
 - detection of Java 17+ projects, including Java 25, using Maven or Gradle, with multi-module layouts;
