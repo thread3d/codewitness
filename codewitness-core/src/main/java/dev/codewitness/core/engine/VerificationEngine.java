@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "0.1.20";
+    public static final String VERSION = "0.1.21";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -374,49 +374,8 @@ public final class VerificationEngine {
             List<Inspection> testable = capable(inspections, Capability.TEST).stream()
                     .filter(inspection -> builtSuccessfully(builds.get(inspection.adapter().id())))
                     .toList();
-            phases.add(runPhase("tests", runId, project, listener, () -> {
-                List<String> evidenceIds = new ArrayList<>();
-                List<TestResult> results = new ArrayList<>();
-                for (Inspection inspection : testable) {
-                    // Recorded per language as well as merged: mutation testing needs a suite to mutate
-                    // against, and a language whose suite did not run is not one to spend mutant budget on.
-
-                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
-                    Optional<VerificationTools.TestRunner> testRunner = firstTestRunner(languageContext);
-                    TestResult tests = testRunner
-                            .map(runner -> runner.runTests(languageContext))
-                            .orElseGet(() -> inspection.adapter().runTests(languageContext));
-                    // Evidence must name the command that produced it. The build command is not that
-                    // command: it compiles without running tests, so recording it would describe an
-                    // invocation that cannot have yielded the result below.
-                    List<String> testCommand = testRunner.map(r -> r.testCommand(languageContext)).orElseGet(List::of);
-                    results.add(tests);
-                    testsByAdapter.put(inspection.adapter().id(), tests);
-                    // describeWithNote, not describe: the note is how the runner says that what it parsed is
-                    // not the whole story, and this record is what the report shows.
-                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.TEST)
-                            .description("Existing tests (" + inspection.adapter().id() + "): "
-                                    + tests.describeWithNote())
-                            .command(testCommand)
-                            .confidence(EvidenceConfidence.DETERMINISTIC)
-                            .status(!tests.executed() ? EvidenceStatus.INCONCLUSIVE
-                                    : (tests.anyFailure() ? EvidenceStatus.REFUTES : EvidenceStatus.SUPPORTS))
-                            .result(tests.describeWithNote())
-                            .output(tail(renderFailures(tests), 8000))
-                            .metadata("adapter", inspection.adapter().id())
-                            .metadata("reports", tests.reports().stream().map(Path::toString).toList())
-                            .build());
-                    evidenceIds.add(evidence.id());
-                    if (!tests.executed()) {
-                        state.note("existing tests not executed for " + inspection.adapter().id() + ": "
-                                + tests.note());
-                    }
-                }
-                TestResult merged = mergeTests(results);
-                state.existingTests(merged);
-                return new PhaseOutcome(merged.executed(), merged.describe(), List.copyOf(evidenceIds),
-                        merged.executed() ? null : merged.note());
-            }));
+            phases.add(runPhase("tests", runId, project, listener,
+                    () -> testsPhase(scope, testable, testsByAdapter)));
         }
 
         // ---------------------------------------------------------------- static analysis
@@ -442,45 +401,8 @@ public final class VerificationEngine {
             List<Inspection> coverable = capable(inspections, Capability.COVERAGE).stream()
                     .filter(inspection -> builtSuccessfully(builds.get(inspection.adapter().id())))
                     .toList();
-            phases.add(runPhase("coverage", runId, project, listener, () -> {
-                List<String> evidenceIds = new ArrayList<>();
-                List<CoverageReport> results = new ArrayList<>();
-                for (Inspection inspection : coverable) {
-                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
-                    List<VerificationTools.CoverageProvider> coverageProviders =
-                            providers.coverageProviders(inspection.info());
-                    CoverageReport coverage = coverageProviders.isEmpty()
-                            ? CoverageReport.notMeasured("none", "no coverage provider registered for "
-                                    + inspection.adapter().id())
-                            : coverageProviders.getFirst().measure(languageContext);
-                    results.add(coverage);
-                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.COVERAGE)
-                            .description("Coverage (" + inspection.adapter().id() + "): " + coverage.describe())
-                            .confidence(EvidenceConfidence.DETERMINISTIC)
-                            .status(coverage.measured() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
-                            .result(coverage.describe())
-                            .metadata("adapter", inspection.adapter().id())
-                            .metadata("lineCoveragePercent", coverage.lineCoveragePercent())
-                            .metadata("branchCoveragePercent", coverage.branchCoveragePercent())
-                            .artifacts(coverage.reports())
-                            .build());
-                    evidenceIds.add(evidence.id());
-                    if (!coverage.measured()) {
-                        state.note("coverage not measured for " + inspection.adapter().id() + ": "
-                                + coverage.note());
-                    }
-                }
-                CoverageReport merged = mergeCoverage(results);
-                if (!merged.measured() && results.isEmpty()) {
-                    String reason = noBuildSucceeded(builds);
-                    if (reason != null) {
-                        merged = CoverageReport.notMeasured("none", reason + ", so coverage was not measured");
-                    }
-                }
-                state.coverage(merged);
-                return new PhaseOutcome(merged.measured(), merged.describe(), List.copyOf(evidenceIds),
-                        merged.measured() ? null : merged.note());
-            }));
+            phases.add(runPhase("coverage", runId, project, listener,
+                    () -> coveragePhase(scope, coverable, builds)));
         }
 
         // ---------------------------------------------------------------- mutation
@@ -492,42 +414,8 @@ public final class VerificationEngine {
                         return tests != null && tests.executed();
                     })
                     .toList();
-            phases.add(runPhase("mutation", runId, project, listener, () -> {
-                List<String> evidenceIds = new ArrayList<>();
-                List<MutationReport> results = new ArrayList<>();
-                for (Inspection inspection : mutable) {
-                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
-                    List<VerificationTools.MutationTester> testers = providers.mutationTesters(inspection.info());
-                    MutationReport report = testers.isEmpty()
-                            ? MutationReport.notMeasured("none", "no mutation tester registered for "
-                                    + inspection.adapter().id())
-                            : testers.getFirst().analyse(languageContext);
-                    results.add(report);
-                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.MUTATION_TEST)
-                            .description("Mutation testing (" + inspection.adapter().id() + "): "
-                                    + report.describe())
-                            .confidence(EvidenceConfidence.DETERMINISTIC)
-                            .status(!report.measured() ? EvidenceStatus.INCONCLUSIVE
-                                    : (report.survivors().isEmpty() ? EvidenceStatus.SUPPORTS
-                                            : EvidenceStatus.INCONCLUSIVE))
-                            .result(report.describe())
-                            .metadata("adapter", inspection.adapter().id())
-                            .metadata("scorePercent", report.scorePercent())
-                            .metadata("survivors", report.survivors().stream().limit(50)
-                                    .map(SurvivingMutant::location).toList())
-                            .artifacts(report.reports())
-                            .build());
-                    evidenceIds.add(evidence.id());
-                    if (!report.measured()) {
-                        state.note("mutation testing did not run for " + inspection.adapter().id() + ": "
-                                + report.note());
-                    }
-                }
-                MutationReport merged = mergeMutation(results);
-                state.mutation(merged);
-                return new PhaseOutcome(merged.measured(), merged.describe(), List.copyOf(evidenceIds),
-                        merged.measured() ? null : truncate(merged.note(), 240));
-            }));
+            phases.add(runPhase("mutation", runId, project, listener,
+                    () -> mutationPhase(scope, mutable)));
         }
 
         // ---------------------------------------------------------------- plan obligations
@@ -764,6 +652,160 @@ public final class VerificationEngine {
      * @param startedAt  when the run started
      * @param database   the prepared database fixture, or a disabled one
      */
+    /**
+     * The mutation phase: mutate each language's sources and ask its suite whether it noticed.
+     *
+     * <p>The last of the seven. A surviving mutant is recorded as a limitation on the requirement rather than as an
+     * unmet obligation - the phase reports how strong the tests are, not whether the code is correct - and that
+     * distinction is why the evidence status is {@code INCONCLUSIVE} on survival rather than {@code REFUTES}.
+     *
+     * @param scope   the run-wide facts
+     * @param mutable the languages whose suite ran, which are the only ones worth mutating
+     * @return the phase outcome recorded in the run
+     */
+    private PhaseOutcome mutationPhase(RunScope scope, List<Inspection> mutable) {
+        List<String> evidenceIds = new ArrayList<>();
+        List<MutationReport> results = new ArrayList<>();
+        for (Inspection inspection : mutable) {
+            VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
+            List<VerificationTools.MutationTester> testers = scope.providers().mutationTesters(inspection.info());
+            MutationReport report = testers.isEmpty()
+                    ? MutationReport.notMeasured("none", "no mutation tester registered for "
+                            + inspection.adapter().id())
+                    : testers.getFirst().analyse(languageContext);
+            results.add(report);
+            Evidence evidence = scope.ledger().add(scope.ledger().newEvidence(EvidenceType.MUTATION_TEST)
+                    .description("Mutation testing (" + inspection.adapter().id() + "): " + report.describe())
+                    .confidence(EvidenceConfidence.DETERMINISTIC)
+                    .status(!report.measured() ? EvidenceStatus.INCONCLUSIVE
+                            : (report.survivors().isEmpty() ? EvidenceStatus.SUPPORTS
+                                    : EvidenceStatus.INCONCLUSIVE))
+                    .result(report.describe())
+                    .metadata("adapter", inspection.adapter().id())
+                    .metadata("scorePercent", report.scorePercent())
+                    .metadata("survivors", report.survivors().stream().limit(50)
+                            .map(SurvivingMutant::location).toList())
+                    .artifacts(report.reports())
+                    .build());
+            evidenceIds.add(evidence.id());
+            if (!report.measured()) {
+                scope.state().note("mutation testing did not run for " + inspection.adapter().id() + ": "
+                        + report.note());
+            }
+        }
+        MutationReport merged = mergeMutation(results);
+        scope.state().mutation(merged);
+        return new PhaseOutcome(merged.measured(), merged.describe(), List.copyOf(evidenceIds),
+                merged.measured() ? null : truncate(merged.note(), 240));
+    }
+
+    /**
+     * The coverage phase: measure each language that has a provider for it and built.
+     *
+     * <p>It carries the same ambiguity as the dependency phase, and the same guard: an empty selection can mean no
+     * adapter declares a coverage provider or that nothing built, and reporting the first when it is the second
+     * states a configuration fact that is false.
+     *
+     * @param scope     the run-wide facts
+     * @param coverable the languages that declare a coverage capability and built
+     * @param builds    the build result per language, used to explain an empty selection
+     * @return the phase outcome recorded in the run
+     */
+    private PhaseOutcome coveragePhase(
+            RunScope scope, List<Inspection> coverable, Map<String, BuildResult> builds) {
+        List<String> evidenceIds = new ArrayList<>();
+        List<CoverageReport> results = new ArrayList<>();
+        for (Inspection inspection : coverable) {
+            VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
+            List<VerificationTools.CoverageProvider> coverageProviders =
+                    scope.providers().coverageProviders(inspection.info());
+            CoverageReport coverage = coverageProviders.isEmpty()
+                    ? CoverageReport.notMeasured("none", "no coverage provider registered for "
+                            + inspection.adapter().id())
+                    : coverageProviders.getFirst().measure(languageContext);
+            results.add(coverage);
+            Evidence evidence = scope.ledger().add(scope.ledger().newEvidence(EvidenceType.COVERAGE)
+                    .description("Coverage (" + inspection.adapter().id() + "): " + coverage.describe())
+                    .confidence(EvidenceConfidence.DETERMINISTIC)
+                    .status(coverage.measured() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
+                    .result(coverage.describe())
+                    .metadata("adapter", inspection.adapter().id())
+                    .metadata("lineCoveragePercent", coverage.lineCoveragePercent())
+                    .metadata("branchCoveragePercent", coverage.branchCoveragePercent())
+                    .artifacts(coverage.reports())
+                    .build());
+            evidenceIds.add(evidence.id());
+            if (!coverage.measured()) {
+                scope.state().note("coverage not measured for " + inspection.adapter().id() + ": "
+                        + coverage.note());
+            }
+        }
+        CoverageReport merged = mergeCoverage(results);
+        if (!merged.measured() && results.isEmpty()) {
+            String reason = noBuildSucceeded(builds);
+            if (reason != null) {
+                merged = CoverageReport.notMeasured("none", reason + ", so coverage was not measured");
+            }
+        }
+        scope.state().coverage(merged);
+        return new PhaseOutcome(merged.measured(), merged.describe(), List.copyOf(evidenceIds),
+                merged.measured() ? null : merged.note());
+    }
+
+    /**
+     * The tests phase: run each language's existing suite and record what it said.
+     *
+     * <p>Two things here are easy to lose when the body lives inside a bigger method: the evidence records the
+     * command that produced the result rather than the build command (which compiles without running tests), and
+     * it keeps the runner's note, because the note is how a runner says that what it parsed is not the whole story.
+     * Both are asserted by name in the tests, so they survive the move.
+     *
+     * @param scope          the run-wide facts
+     * @param testable       the languages that declare a test step
+     * @param testsByAdapter receives the per-language result, which mutation testing consults
+     * @return the phase outcome recorded in the run
+     */
+    private PhaseOutcome testsPhase(
+            RunScope scope, List<Inspection> testable, Map<String, TestResult> testsByAdapter) {
+        List<String> evidenceIds = new ArrayList<>();
+        List<TestResult> results = new ArrayList<>();
+        for (Inspection inspection : testable) {
+            // Recorded per language as well as merged: mutation testing needs a suite to mutate against, and a
+            // language whose suite did not run is not one to spend mutant budget on.
+            VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
+            Optional<VerificationTools.TestRunner> testRunner = firstTestRunner(languageContext);
+            TestResult tests = testRunner
+                    .map(runner -> runner.runTests(languageContext))
+                    .orElseGet(() -> inspection.adapter().runTests(languageContext));
+            // Evidence must name the command that produced it. The build command is not that command: it compiles
+            // without running tests, so recording it would describe an invocation that cannot have yielded the
+            // result below.
+            List<String> testCommand = testRunner.map(r -> r.testCommand(languageContext)).orElseGet(List::of);
+            results.add(tests);
+            testsByAdapter.put(inspection.adapter().id(), tests);
+            Evidence evidence = scope.ledger().add(scope.ledger().newEvidence(EvidenceType.TEST)
+                    .description("Existing tests (" + inspection.adapter().id() + "): " + tests.describeWithNote())
+                    .command(testCommand)
+                    .confidence(EvidenceConfidence.DETERMINISTIC)
+                    .status(!tests.executed() ? EvidenceStatus.INCONCLUSIVE
+                            : (tests.anyFailure() ? EvidenceStatus.REFUTES : EvidenceStatus.SUPPORTS))
+                    .result(tests.describeWithNote())
+                    .output(tail(renderFailures(tests), 8000))
+                    .metadata("adapter", inspection.adapter().id())
+                    .metadata("reports", tests.reports().stream().map(Path::toString).toList())
+                    .build());
+            evidenceIds.add(evidence.id());
+            if (!tests.executed()) {
+                scope.state().note("existing tests not executed for " + inspection.adapter().id() + ": "
+                        + tests.note());
+            }
+        }
+        TestResult merged = mergeTests(results);
+        scope.state().existingTests(merged);
+        return new PhaseOutcome(merged.executed(), merged.describe(), List.copyOf(evidenceIds),
+                merged.executed() ? null : merged.note());
+    }
+
     /**
      * The build phase: compile every language that claims the project, and record what happened.
      *

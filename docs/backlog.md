@@ -19,13 +19,11 @@ closed it, so the list is also a short history of what was fixed and why.
   one-at-a-time variation plus pairwise combinations is the usual reading of "boundary values" and would fix it;
   it changes which experiments run, so the fixtures need re-baselining in the same change.
 
-### Verification engine decomposition, remaining
+### Verification engine decomposition
 
-`verify()` is 545 lines, down from 670, with four of its seven inline phase lambdas extracted as methods (build,
-static analysis, security, dependencies). The remaining three — **tests, coverage, mutation** — follow the same
-shape: take the `RunScope` and the languages to analyse, return a `PhaseOutcome`. Once all seven are out, the
-per-requirement strategy loop and the report assembly are the two things left in the method, and each is a
-separate change.
+**Complete for the phases.** All seven phase bodies are methods taking the `RunScope`; `verify()` is 433 lines,
+down from 670, and holds no inline phase body. What remains inside it is the per-requirement strategy loop and the
+report assembly — each a separate change, and each now readable without the phases in the way.
 
 ### Report and packaging
 
@@ -62,4 +60,4 @@ separate change.
 | 0.1.13 | Release notes moved into the repository. |
 | 0.1.14 | One implementation of the security-phase forwarding; fourteen copies removed. |
 | 0.1.15 | An adapter that registers a provider for a phase it does not declare is reported. |
-| 0.1.16–0.1.19 | Engine decomposition: `RunScope`, then the build, static-analysis, security and dependency phases extracted; `verify()` 670 → 578 lines. |
+| 0.1.16–0.1.21 | Engine decomposition: `RunScope`, then all seven phase bodies extracted as methods; `verify()` 670 → 433 lines. |
