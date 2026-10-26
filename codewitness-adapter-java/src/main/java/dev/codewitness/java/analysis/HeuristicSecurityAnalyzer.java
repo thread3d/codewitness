@@ -1,36 +1,28 @@
 package dev.codewitness.java.analysis;
 
 import dev.codewitness.core.model.Finding;
-import dev.codewitness.core.model.ProjectInfo;
+import dev.codewitness.core.model.LanguageId;
 import dev.codewitness.core.spi.VerificationContext;
-import dev.codewitness.core.spi.VerificationTools;
+import dev.codewitness.support.DelegatingSecurityAnalyzer;
 
 import java.util.List;
 
 /**
- * Security rules, expressed as a separate provider from the general static analyzer.
+ * Security oriented analysis for Java.
  *
- * <p>The split matters for honesty in the report: a security finding is reported in its own section
- * and is not diluted by style findings. Both providers share the same rule table, so a rule is
- * written once.
+ * <p>The rules are the heuristic table's security entries, filtered out of the same scan the static-analysis
+ * phase runs, so a rule is defined once and a finding can never be counted twice under two different
+ * definitions. What is left here is the filter; the registration ceremony around it belongs to
+ * {@link DelegatingSecurityAnalyzer}, because fourteen adapters needed the same three methods.
  */
-public final class HeuristicSecurityAnalyzer implements VerificationTools.SecurityAnalyzer {
+public final class HeuristicSecurityAnalyzer extends DelegatingSecurityAnalyzer {
 
-    private final HeuristicSourceAnalyzer delegate = new HeuristicSourceAnalyzer();
-
-    @Override
-    public String id() {
-        return "heuristics-security";
+    public HeuristicSecurityAnalyzer() {
+        super("heuristics-security", LanguageId.JAVA, HeuristicSecurityAnalyzer::securityFindings);
     }
 
-    @Override
-    public boolean supports(ProjectInfo project) {
-        return project.language().equals(dev.codewitness.core.model.LanguageId.JAVA);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return delegate.findAll(context).stream()
+    private static List<Finding> securityFindings(VerificationContext context) {
+        return new HeuristicSourceAnalyzer().findAll(context).stream()
                 .filter(finding -> HeuristicSourceAnalyzer.isSecurityRule(finding.ruleId()))
                 .toList();
     }
