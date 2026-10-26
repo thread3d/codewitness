@@ -29,11 +29,6 @@ status. The split moved text rather than rewriting it, and a link check confirms
 
 ### Features
 
-- **Mutation testing of CodeWitness's own core.** The engine's verdict and merge logic is pure, static and
-  I/O-free, which makes it the cheapest place to apply the tool's own strongest technique. Mutation is currently
-  off in the self-check (PIT over five modules is slow), so the project does not measure the strength of the tests
-  that protect its own guarantees.
-
 - **Process scenarios in the per-language adapters.** `mode: process` is implemented in the engine — it runs a
   command and asserts on the outcome — so it works for any project, in any language, today. What it does *not* yet
   do is generate a language-native test from a process scenario the way the other modes do; a project that wants

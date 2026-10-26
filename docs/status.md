@@ -1183,3 +1183,26 @@ Not implemented (deliberately out of MVP scope): formal verification, symbolic e
 distributed or cloud execution, IDE or VCS integration, autonomous repair.
 
 Where CodeWitness cannot verify something, it says `UNVERIFIED` and explains why. That is a feature.
+
+## Mutation testing of CodeWitness's own verdict logic
+
+The project applies its own strongest technique to the logic that decides everyone else's verdicts. Scoped to
+`VerdictCalculator` and `BudgetUsage` — 31 mutants — the suite kills **31 of 31 (100%)**.
+
+That number is the second attempt. The first reported **96.8%**, with one survivor: a negated conditional at
+`VerdictCalculator:81`, in the branch added in 1.0.5 so that a counterexample observed alongside a failed build is
+named in the verdict rather than discarded. The surviving mutant emitted "An executed experiment did record 0
+counterexample(s)" when there were none — a fabricated observation inside the one report whose value is that it only
+says what it saw. The test suite covered the has-a-counterexample case and not the has-none case, so the gap was in
+the direction that matters more. A test now pins it.
+
+Two things were needed to make the measurement possible, and both are worth knowing:
+
+- The project declares `pitest-maven` with `pitest-junit5-plugin` in its own `pom.xml`. The tool's Java adapter
+  deliberately does not modify the project under verification, so PIT refuses to run against JUnit 5 tests without
+  that dependency; the adapter says so and names the fix rather than guessing.
+- `mutation.target_classes` was documented and **inert**: the adapter derived its PIT target from the project's
+  `rootPackages` attribute and never read the configuration, so a run that asked to mutate two classes mutated the
+  whole reactor (2,538 mutants, 73.5%). It is read now. The defect was found by pointing the tool at itself with a
+  scoped target and reading the count it reported back.
+

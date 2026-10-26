@@ -43,10 +43,18 @@ security:
     source: osv
     timeout: 30s
 
-# Mutation testing is off: PIT over five modules is far beyond what this self-check needs, and the
-# rule under test here is the verdict logic, not test strength.
+# Mutation testing, scoped to the logic that decides everyone else's verdicts. The question is not "what
+# is this project's mutation score" — over 22 modules that would take longer than the rest of the run —
+# but "do the tests that protect the verdict rules actually constrain them". A mutant that survives in
+# VerdictCalculator is a rule nothing checks, which is the most consequential kind of gap this project
+# can have.
 mutation:
-  enabled: false
+  enabled: true
+  tool: pitest
+  timeout: 15m
+  target_classes:
+    - dev.codewitness.core.engine.VerdictCalculator
+    - dev.codewitness.core.result.BudgetUsage
 
 report:
   html: true

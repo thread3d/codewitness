@@ -356,6 +356,10 @@ rather than failed when its toolchain is absent.
 
 ---
 
+The project applies its own strongest technique to itself: `selfcheck/codewitness.yaml` scopes PIT to the verdict
+logic, and the suite kills 31 of 31 mutants. The measurement, and the gap the first run exposed, are in
+[`docs/status.md`](docs/status.md#mutation-testing-of-codewitnesss-own-verdict-logic).
+
 ## Documentation
 
 Everything that is reference rather than introduction lives in its own file, so this page stays something a person can

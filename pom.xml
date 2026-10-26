@@ -6,7 +6,7 @@
 
   <groupId>dev.codewitness</groupId>
   <artifactId>codewitness-parent</artifactId>
-  <version>1.0.8</version>
+  <version>1.0.9</version>
   <packaging>pom</packaging>
 
   <name>CodeWitness</name>
@@ -254,6 +254,27 @@
                a literal instead would silently override the agent and make coverage unmeasurable. -->
           <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
         </configuration>
+      </plugin>
+
+      <!-- Mutation testing, declared so the project can be mutated by its own tool.
+
+           CodeWitness's Java adapter invokes org.pitest:pitest-maven by coordinates and deliberately does not
+           modify the project under verification. PIT refuses to run against JUnit 5 tests unless the junit5
+           plugin is a dependency of the plugin itself, so without this block the tool can only tell the user to
+           add it. This project applies its own strongest technique to its own verdict logic, so it declares the
+           dependency. The plugin is never bound to a lifecycle phase: it runs only when a goal is asked for,
+           which is what both `selfcheck/codewitness.yaml` and the tool's own adapter do. -->
+      <plugin>
+        <groupId>org.pitest</groupId>
+        <artifactId>pitest-maven</artifactId>
+        <version>1.30.0</version>
+        <dependencies>
+          <dependency>
+            <groupId>org.pitest</groupId>
+            <artifactId>pitest-junit5-plugin</artifactId>
+            <version>1.2.3</version>
+          </dependency>
+        </dependencies>
       </plugin>
     </plugins>
   </build>

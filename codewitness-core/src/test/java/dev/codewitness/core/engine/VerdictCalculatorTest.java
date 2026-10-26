@@ -137,6 +137,28 @@ class VerdictCalculatorTest {
         assertFalse(verdict.status().isFailure());
     }
 
+
+    @Test
+    @DisplayName("a failed build with nothing observed says nothing about counterexamples")
+    void aBlockedBuildWithNoCounterexampleDoesNotClaimOne() {
+        // The counterpart of the test above, and the direction that matters more. When a build fails and no
+        // experiment recorded anything, the rationale must not claim an executed experiment found something: that
+        // would be a fabricated observation inside the one report whose value is that it only says what it saw.
+        // Mutation testing found this gap - negating the emptiness check in VerdictCalculator survived the suite.
+        RequirementVerdict verdict = VerdictCalculator.compute(requirement(R),
+                List.of(obligation("OB-001", ObligationKind.BOUNDARY_VALUE)),
+                List.of(),
+                List.of(),
+                List.of(),
+                true,
+                "mvn test exited with code 1",
+                List.of());
+
+        assertEquals(RequirementStatus.BLOCKED, verdict.status());
+        assertFalse(verdict.rationale().contains("did record"), verdict.rationale());
+        assertTrue(verdict.counterexampleIds().isEmpty(), verdict.counterexampleIds().toString());
+    }
+
     @Test
     @DisplayName("no evidence at all yields UNVERIFIED, never VERIFIED")
     void noEvidenceAtAllYieldsUnverified() {

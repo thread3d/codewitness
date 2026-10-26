@@ -85,7 +85,7 @@ public final class PitMutationTester implements VerificationTools.MutationTester
         goals.add("-DmutationThreshold=0");
         goals.add("-DfailWhenNoMutations=false");
         goals.add("-Djunit5PluginVersion=" + PIT_JUNIT5_PLUGIN_VERSION);
-        String targetClasses = targetClasses(project);
+        String targetClasses = targetClasses(project, context);
         if (targetClasses != null) {
             goals.add("-DtargetClasses=" + targetClasses);
         }
@@ -109,7 +109,7 @@ public final class PitMutationTester implements VerificationTools.MutationTester
                         + "<version>" + PIT_JUNIT5_PLUGIN_VERSION + "</version></dependency></dependencies></plugin>";
             } else if (output.contains("No mutations found")) {
                 hint = " PIT found no classes to mutate: check that targetClasses covers the project's "
-                        + "packages (" + String.valueOf(targetClasses(project)) + ").";
+                        + "packages (" + String.valueOf(targetClasses(project, context)) + ").";
             }
             return MutationReport.notMeasured(id(), "PIT produced no XML report ("
                     + result.describeOutcome() + ")." + hint + " Last output: " + tail(output, 800));
@@ -117,7 +117,24 @@ public final class PitMutationTester implements VerificationTools.MutationTester
         return parse(reports);
     }
 
-    private static String targetClasses(ProjectInfo project) {
+    /**
+     * The classes PIT should mutate: what the configuration asked for, else the project's own roots.
+     *
+     * <p>{@code mutation.target_classes} was documented and inert — the adapter derived its target from the
+     * project's {@code rootPackages} attribute and never read the configuration, so a run that asked PIT to mutate
+     * two classes mutated the whole reactor instead. That is a documented key that does nothing, which is the class
+     * of defect this project treats as a lie: it was found by pointing the tool at itself with a scoped target and
+     * reading the count it reported.
+     *
+     * @param project the project being verified
+     * @param context the run — the only place the configured target list lives
+     * @return a PIT {@code targetClasses} expression, or {@code null} to let PIT use its default
+     */
+    private static String targetClasses(ProjectInfo project, VerificationContext context) {
+        List<String> configured = context.config().mutation().targetClasses();
+        if (!configured.isEmpty()) {
+            return String.join(",", configured);
+        }
         String packages = project.attributes().getOrDefault("rootPackages", "");
         if (packages.isBlank()) {
             return null;
