@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "0.1.15";
+    public static final String VERSION = "0.1.16";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -322,6 +322,10 @@ public final class VerificationEngine {
                 inspected, List.copyOf(inspectionEvidence), null));
 
         LlmProvider llm = llm(config);
+        // Built once, after the last run-wide fact exists: the phases below derive a per-language context from
+        // it, and a run-wide fact added later becomes one field here instead of an edit in eight call sites.
+        RunScope scope = new RunScope(runId, project, config, workspace, artifacts, budget, requirements, llm,
+                scoped, sandbox, state, ledger, startedAt, database);
 
         // An adapter that registers a provider for a phase but does not declare the matching capability has that
         // phase skipped without a word, because the engine schedules phases from the declared capabilities. That
@@ -351,9 +355,7 @@ public final class VerificationEngine {
                 List<String> evidenceIds = new ArrayList<>();
                 List<BuildResult> results = new ArrayList<>();
                 for (Inspection inspection : builders) {
-                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty(), database);
+                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
                     BuildResult build = firstCompiler(languageContext)
                             .map(compiler -> compiler.build(languageContext))
                             .orElseGet(() -> inspection.adapter().build(languageContext));
@@ -412,9 +414,7 @@ public final class VerificationEngine {
                     // Recorded per language as well as merged: mutation testing needs a suite to mutate
                     // against, and a language whose suite did not run is not one to spend mutant budget on.
 
-                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty(), database);
+                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
                     Optional<VerificationTools.TestRunner> testRunner = firstTestRunner(languageContext);
                     TestResult tests = testRunner
                             .map(runner -> runner.runTests(languageContext))
@@ -459,9 +459,7 @@ public final class VerificationEngine {
                 List<String> evidenceIds = new ArrayList<>();
                 List<Finding> findings = new ArrayList<>();
                 for (Inspection inspection : analysable) {
-                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty(), database);
+                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
                     // Registered providers are the extension point, and every bundled adapter registers
                     // one. Calling adapter.analyze() as well ran the whole pass twice - including a second
                     // -Xlint:all compile - for findings that were then deduplicated away. The adapter level
@@ -509,9 +507,7 @@ public final class VerificationEngine {
                 List<String> evidenceIds = new ArrayList<>();
                 List<Finding> findings = new ArrayList<>();
                 for (Inspection inspection : analysable) {
-                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty(), database);
+                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
                     var analyzers = providers.securityAnalyzers(inspection.info());
                     List<Finding> found = new ArrayList<>();
                     for (var analyzer : analyzers) {
@@ -541,9 +537,7 @@ public final class VerificationEngine {
                 List<String> evidenceIds = new ArrayList<>();
                 List<LanguageInventory> inventories = new ArrayList<>();
                 for (Inspection inspection : analysable(inspections, builds)) {
-                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty(), database);
+                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
                     List<VerificationTools.DependencyAnalyzer> analyzers =
                             providers.dependencyAnalyzers(inspection.info());
                     DependencyReport report = analyzers.isEmpty()
@@ -612,9 +606,7 @@ public final class VerificationEngine {
                 List<String> evidenceIds = new ArrayList<>();
                 List<CoverageReport> results = new ArrayList<>();
                 for (Inspection inspection : coverable) {
-                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty(), database);
+                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
                     List<VerificationTools.CoverageProvider> coverageProviders =
                             providers.coverageProviders(inspection.info());
                     CoverageReport coverage = coverageProviders.isEmpty()
@@ -664,9 +656,7 @@ public final class VerificationEngine {
                 List<String> evidenceIds = new ArrayList<>();
                 List<MutationReport> results = new ArrayList<>();
                 for (Inspection inspection : mutable) {
-                    VerificationContext languageContext = contextFor(inspection, runId, project, config, workspace,
-                            artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt,
-                            RequirementCodeMap.empty(), database);
+                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
                     List<VerificationTools.MutationTester> testers = providers.mutationTesters(inspection.info());
                     MutationReport report = testers.isEmpty()
                             ? MutationReport.notMeasured("none", "no mutation tester registered for "
@@ -745,9 +735,7 @@ public final class VerificationEngine {
             // recipe for a command that cannot run.
             Inspection owner = ownerOf(requirement, mapper, inspections);
             Inspection running = owner != null ? owner : inspections.getFirst();
-            VerificationContext requirementContext = contextFor(running, runId, project, config, workspace,
-                    artifacts, budget, requirements, llm, scoped, sandbox, state, ledger, startedAt, mapper,
-                    database);
+            VerificationContext requirementContext = contextFor(scope, running, mapper);
             if (inspections.size() > 1 && owner == null) {
                 notes.add("This requirement could not be attributed to any language in the project, so its "
                         + "strategies ran against " + running.adapter().id()
@@ -912,6 +900,47 @@ public final class VerificationEngine {
      * inspection's own {@link ProjectInfo}. That is what keeps a polyglot run from handing a Python
      * analyzer a Java project, or vice versa.
      */
+    /**
+     * The parts of a run that do not change from language to language.
+     *
+     * <p>Every phase built one {@link VerificationContext} per language by passing sixteen arguments, seven times
+     * over, with an identical tail. The arguments were not sixteen different facts — fourteen of them are fixed
+     * for the whole run and only the inspection and the requirement-to-code map vary — so the signature said
+     * "sixteen things may differ here" when two could. This record carries the invariant part, which makes a new
+     * run-wide fact one field instead of an edit in seven call sites.
+     *
+     * @param runId      the run
+     * @param project    the project under verification
+     * @param config     the configuration this run is executing
+     * @param workspace  the isolated copy everything runs against
+     * @param artifacts  the artefact store
+     * @param budget     the budget tracker
+     * @param requirements the declarations being verified
+     * @param llm        the advisory provider, or {@code null} when it is disabled
+     * @param listener   the progress listener
+     * @param sandbox    the sandbox every process goes through
+     * @param state      the mutable run state phases accumulate into
+     * @param ledger     the evidence ledger
+     * @param startedAt  when the run started
+     * @param database   the prepared database fixture, or a disabled one
+     */
+    private record RunScope(
+            RunId runId,
+            ProjectRef project,
+            VerificationConfig config,
+            WorkspaceManager.Workspace workspace,
+            ArtifactStore artifacts,
+            BudgetUsage.Tracker budget,
+            RequirementSet requirements,
+            LlmProvider llm,
+            ProgressListener listener,
+            ExecutionSandbox sandbox,
+            RunState state,
+            EvidenceLedger ledger,
+            Instant startedAt,
+            PreparedDatabase database) {
+    }
+
     private record Inspection(LanguageAdapter adapter, ProjectInfo info) {
     }
 
@@ -1027,25 +1056,11 @@ public final class VerificationEngine {
     }
 
     /** @return a context bound to one language's project description but to the run's shared state. */
-    private VerificationContext contextFor(
-            Inspection inspection,
-            RunId runId,
-            ProjectRef project,
-            VerificationConfig config,
-            WorkspaceManager.Workspace workspace,
-            ArtifactStore artifacts,
-            BudgetUsage.Tracker budget,
-            RequirementSet requirements,
-            LlmProvider llm,
-            ProgressListener listener,
-            ExecutionSandbox sandbox,
-            RunState state,
-            EvidenceLedger ledger,
-            Instant startedAt,
-            RequirementCodeMap codeMap,
-            PreparedDatabase database) {
-        return context(runId, project, inspection.info(), config, workspace, artifacts, budget, requirements, llm,
-                listener, sandbox, state, ledger, startedAt, codeMap, database);
+    private static VerificationContext contextFor(
+            RunScope scope, Inspection inspection, RequirementCodeMap codeMap) {
+        return context(scope.runId(), scope.project(), inspection.info(), scope.config(), scope.workspace(),
+                scope.artifacts(), scope.budget(), scope.requirements(), scope.llm(), scope.listener(),
+                scope.sandbox(), scope.state(), scope.ledger(), scope.startedAt(), codeMap, scope.database());
     }
 
     /**
@@ -1527,7 +1542,7 @@ public final class VerificationEngine {
         return ProjectInfo.builder(project).build();
     }
 
-    private VerificationContext context(
+    private static VerificationContext context(
             RunId runId,
             ProjectRef project,
             ProjectInfo info,

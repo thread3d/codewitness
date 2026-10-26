@@ -1031,7 +1031,7 @@ codewitness/
 │   ├── requirements/          requirement parsing, properties, obligations
 │   ├── result/                verdicts, counterexamples, report, budget, run record
 │   ├── spi/                   LanguageAdapter, VerificationTools, registries, context
-│   ├── engine/                the pipeline, verdict calculator, strategies
+│   ├── engine/                the pipeline, verdict calculator, strategies, the finding baseline
 │   ├── exec/                  sandbox and process execution
 │   ├── io/                    isolated workspace and artifact store
 │   ├── config/                codewitness.yaml
