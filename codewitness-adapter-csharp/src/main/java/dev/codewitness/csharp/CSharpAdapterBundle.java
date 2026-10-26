@@ -32,18 +32,6 @@ public final class CSharpAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new CSharpLanguageAdapter());
-
-        providers.register(new CSharpBuildProvider());
-        providers.register(new CSharpTestProvider());
-        providers.register(new CSharpCoverageProvider());
-        providers.register(new CSharpMutationTester());
-        providers.register(new CSharpDependencyAnalyzer());
-        providers.register(new CSharpGeneratedTestRunner());
-        providers.register(new CSharpScenarioTestGenerator());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new CSharpHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new CSharpSecurityAnalyzer());
-        }
+        CSharpLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

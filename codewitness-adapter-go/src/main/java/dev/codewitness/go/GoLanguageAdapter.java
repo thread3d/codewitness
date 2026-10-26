@@ -1,12 +1,20 @@
 package dev.codewitness.go;
 
+import dev.codewitness.go.analysis.GoHeuristicAnalyzer;
+import dev.codewitness.go.analysis.GoSecurityAnalyzer;
+import dev.codewitness.go.coverage.GoCoverageProvider;
+import dev.codewitness.go.dependency.GoDependencyAnalyzer;
+import dev.codewitness.go.generate.GoGeneratedTestRunner;
+import dev.codewitness.go.generate.GoScenarioTestGenerator;
+import dev.codewitness.go.mutation.GoMutationTester;
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.go.analysis.GoHeuristicAnalyzer;
 
@@ -25,7 +33,30 @@ import java.util.Set;
  * built, tested, analysed and mutated by the toolchain the project already has, and coverage comes
  * from {@code go test -coverprofile} rather than from an external tool.
  */
-public final class GoLanguageAdapter implements LanguageAdapter {
+public final class GoLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new GoBuildProvider())
+            .testRunner(new GoTestProvider())
+            .coverage(new GoCoverageProvider())
+            .mutation(new GoMutationTester())
+            .dependencies(new GoDependencyAnalyzer())
+            .executor(new GoGeneratedTestRunner())
+            .generator(new GoScenarioTestGenerator())
+            .staticAnalyzer(new GoHeuristicAnalyzer())
+            .securityAnalyzer(new GoSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public GoLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -66,27 +97,5 @@ public final class GoLanguageAdapter implements LanguageAdapter {
             builder.attribute("goProbeFailure", probe.failureReason());
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new GoBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new GoTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new GoHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.COVERAGE, Capability.MUTATION, Capability.PROPERTY_TESTING,
-                Capability.GENERATED_TESTS, Capability.SECURITY_SCAN, Capability.DEPENDENCY_SCAN);
     }
 }

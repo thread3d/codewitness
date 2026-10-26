@@ -1,12 +1,20 @@
 package dev.codewitness.swift;
 
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
+import dev.codewitness.swift.analysis.SwiftHeuristicAnalyzer;
+import dev.codewitness.swift.analysis.SwiftSecurityAnalyzer;
+import dev.codewitness.swift.coverage.SwiftCoverageProvider;
+import dev.codewitness.swift.dependency.SwiftDependencyAnalyzer;
+import dev.codewitness.swift.generate.SwiftGeneratedTestRunner;
+import dev.codewitness.swift.generate.SwiftScenarioTestGenerator;
+import dev.codewitness.swift.mutation.SwiftMutationTester;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 
 import java.nio.file.Path;
@@ -25,7 +33,30 @@ import java.util.Set;
  * A package with no external dependencies needs no network to build or test either, because XCTest
  * ships with the toolchain.
  */
-public final class SwiftLanguageAdapter implements LanguageAdapter {
+public final class SwiftLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new SwiftBuildProvider())
+            .testRunner(new SwiftTestProvider())
+            .coverage(new SwiftCoverageProvider())
+            .dependencies(new SwiftDependencyAnalyzer())
+            .mutation(new SwiftMutationTester())
+            .generator(new SwiftScenarioTestGenerator())
+            .executor(new SwiftGeneratedTestRunner())
+            .staticAnalyzer(new SwiftHeuristicAnalyzer())
+            .securityAnalyzer(new SwiftSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public SwiftLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -73,42 +104,5 @@ public final class SwiftLanguageAdapter implements LanguageAdapter {
             builder.attribute(SwiftToolchain.ATTR_PROBE_FAILURE, probe.failureReason());
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new SwiftBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new SwiftTestProvider().runTests(context);
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * <p>Delegates to the adapter's own rule table, exactly as the Ruby and PHP adapters do. The engine
-     * consults this method only when no registered analyzer claims the project, so this is the answer for
-     * a caller that wired the adapter without its providers; the registered
-     * {@link dev.codewitness.swift.analysis.SwiftHeuristicAnalyzer} is what normally runs.
-     */
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new dev.codewitness.swift.analysis.SwiftHeuristicAnalyzer().analyze(context);
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * <p>Only the phases this adapter can actually carry out are claimed, so the engine leaves the rest
-     * unclaimed instead of scheduling them against nothing. Every capability listed here is one
-     * {@link SwiftAdapterBundle} registers a provider for when it is asked for analysis as well.
-     */
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.SECURITY_SCAN, Capability.COVERAGE, Capability.DEPENDENCY_SCAN,
-                Capability.MUTATION, Capability.GENERATED_TESTS, Capability.PROPERTY_TESTING);
     }
 }

@@ -1,12 +1,20 @@
 package dev.codewitness.python;
 
+import dev.codewitness.python.analysis.PythonHeuristicAnalyzer;
+import dev.codewitness.python.analysis.PythonSecurityAnalyzer;
+import dev.codewitness.python.coverage.PythonCoverageProvider;
+import dev.codewitness.python.dependency.PythonDependencyAnalyzer;
+import dev.codewitness.python.generate.PythonGeneratedTestRunner;
+import dev.codewitness.python.generate.PythonScenarioTestGenerator;
+import dev.codewitness.python.mutation.PythonMutationTester;
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.python.analysis.PythonHeuristicAnalyzer;
 
@@ -26,7 +34,30 @@ import java.util.Set;
  * detected source layout can be syntax-checked, tested, analysed and mutated by the interpreter it
  * already has.
  */
-public final class PythonLanguageAdapter implements LanguageAdapter {
+public final class PythonLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new PythonBuildProvider())
+            .testRunner(new PythonTestProvider())
+            .coverage(new PythonCoverageProvider())
+            .mutation(new PythonMutationTester())
+            .dependencies(new PythonDependencyAnalyzer())
+            .executor(new PythonGeneratedTestRunner())
+            .generator(new PythonScenarioTestGenerator())
+            .staticAnalyzer(new PythonHeuristicAnalyzer())
+            .securityAnalyzer(new PythonSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public PythonLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -74,27 +105,5 @@ public final class PythonLanguageAdapter implements LanguageAdapter {
             builder.attribute("interpreterProbeFailure", probe.failureReason());
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new PythonBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new PythonTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new PythonHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.COVERAGE, Capability.MUTATION, Capability.PROPERTY_TESTING,
-                Capability.GENERATED_TESTS, Capability.SECURITY_SCAN, Capability.DEPENDENCY_SCAN);
     }
 }

@@ -1,12 +1,20 @@
 package dev.codewitness.javascript;
 
+import dev.codewitness.javascript.analysis.JavaScriptHeuristicAnalyzer;
+import dev.codewitness.javascript.analysis.JavaScriptSecurityAnalyzer;
+import dev.codewitness.javascript.coverage.JavaScriptCoverageProvider;
+import dev.codewitness.javascript.dependency.JavaScriptDependencyAnalyzer;
+import dev.codewitness.javascript.generate.JavaScriptGeneratedTestRunner;
+import dev.codewitness.javascript.generate.JavaScriptScenarioTestGenerator;
+import dev.codewitness.javascript.mutation.JavaScriptMutationTester;
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.javascript.analysis.JavaScriptHeuristicAnalyzer;
 
@@ -29,7 +37,30 @@ import java.util.Set;
  * <p>This adapter refuses a project that has a {@code tsconfig.json} or TypeScript sources, leaving it
  * to {@code codewitness-adapter-typescript}.
  */
-public final class JavaScriptLanguageAdapter implements LanguageAdapter {
+public final class JavaScriptLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new JavaScriptBuildProvider())
+            .testRunner(new JavaScriptTestProvider())
+            .coverage(new JavaScriptCoverageProvider())
+            .mutation(new JavaScriptMutationTester())
+            .dependencies(new JavaScriptDependencyAnalyzer())
+            .executor(new JavaScriptGeneratedTestRunner())
+            .generator(new JavaScriptScenarioTestGenerator())
+            .staticAnalyzer(new JavaScriptHeuristicAnalyzer())
+            .securityAnalyzer(new JavaScriptSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public JavaScriptLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -79,27 +110,5 @@ public final class JavaScriptLanguageAdapter implements LanguageAdapter {
             }
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new JavaScriptBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new JavaScriptTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new JavaScriptHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.COVERAGE, Capability.MUTATION, Capability.PROPERTY_TESTING,
-                Capability.GENERATED_TESTS, Capability.SECURITY_SCAN, Capability.DEPENDENCY_SCAN);
     }
 }

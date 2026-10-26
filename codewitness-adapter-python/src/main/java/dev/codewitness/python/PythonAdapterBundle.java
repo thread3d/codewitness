@@ -32,18 +32,6 @@ public final class PythonAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new PythonLanguageAdapter());
-
-        providers.register(new PythonBuildProvider());
-        providers.register(new PythonTestProvider());
-        providers.register(new PythonCoverageProvider());
-        providers.register(new PythonMutationTester());
-        providers.register(new PythonDependencyAnalyzer());
-        providers.register(new PythonGeneratedTestRunner());
-        providers.register(new PythonScenarioTestGenerator());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new PythonHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new PythonSecurityAnalyzer());
-        }
+        PythonLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

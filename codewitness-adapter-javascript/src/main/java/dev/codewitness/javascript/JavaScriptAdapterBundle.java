@@ -31,18 +31,6 @@ public final class JavaScriptAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new JavaScriptLanguageAdapter());
-
-        providers.register(new JavaScriptBuildProvider());
-        providers.register(new JavaScriptTestProvider());
-        providers.register(new JavaScriptCoverageProvider());
-        providers.register(new JavaScriptMutationTester());
-        providers.register(new JavaScriptDependencyAnalyzer());
-        providers.register(new JavaScriptGeneratedTestRunner());
-        providers.register(new JavaScriptScenarioTestGenerator());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new JavaScriptHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new JavaScriptSecurityAnalyzer());
-        }
+        JavaScriptLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

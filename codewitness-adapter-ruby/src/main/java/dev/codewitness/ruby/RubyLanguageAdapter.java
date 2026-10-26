@@ -1,12 +1,20 @@
 package dev.codewitness.ruby;
 
+import dev.codewitness.ruby.analysis.RubyHeuristicAnalyzer;
+import dev.codewitness.ruby.analysis.RubySecurityAnalyzer;
+import dev.codewitness.ruby.coverage.RubyCoverageProvider;
+import dev.codewitness.ruby.dependency.RubyDependencyAnalyzer;
+import dev.codewitness.ruby.generate.RubyGeneratedTestRunner;
+import dev.codewitness.ruby.generate.RubyScenarioTestGenerator;
+import dev.codewitness.ruby.mutation.RubyMutationTester;
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 
 import java.nio.file.Path;
@@ -27,7 +35,30 @@ import java.util.Set;
  * exist only after the build has run {@code bundle install}. The probe records what it saw as a hint, and
  * {@link RubyTestProvider} resolves the runner again when it runs.
  */
-public final class RubyLanguageAdapter implements LanguageAdapter {
+public final class RubyLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new RubyBuildProvider())
+            .testRunner(new RubyTestProvider())
+            .coverage(new RubyCoverageProvider())
+            .dependencies(new RubyDependencyAnalyzer())
+            .mutation(new RubyMutationTester())
+            .generator(new RubyScenarioTestGenerator())
+            .executor(new RubyGeneratedTestRunner())
+            .staticAnalyzer(new RubyHeuristicAnalyzer())
+            .securityAnalyzer(new RubySecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public RubyLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -87,42 +118,5 @@ public final class RubyLanguageAdapter implements LanguageAdapter {
             builder.attribute(RubyInterpreter.ATTR_PROBE_FAILURE, probe.failureReason());
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new RubyBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new RubyTestProvider().runTests(context);
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * <p>Delegates to the adapter's own rule table, exactly as the PHP and Python adapters do. The engine
-     * consults this method only when no registered analyzer claims the project, so this is the answer for
-     * a caller that wired the adapter without its providers; the registered
-     * {@link dev.codewitness.ruby.analysis.RubyHeuristicAnalyzer} is what normally runs.
-     */
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new dev.codewitness.ruby.analysis.RubyHeuristicAnalyzer().analyze(context);
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * <p>Only the phases this adapter can actually carry out are claimed, so the engine leaves the rest
-     * unclaimed instead of scheduling them against nothing. Every capability listed here is one
-     * {@link RubyAdapterBundle} registers a provider for when it is asked for analysis as well.
-     */
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.SECURITY_SCAN, Capability.COVERAGE, Capability.DEPENDENCY_SCAN,
-                Capability.MUTATION, Capability.GENERATED_TESTS, Capability.PROPERTY_TESTING);
     }
 }

@@ -37,7 +37,7 @@ public abstract class AbstractLanguageAdapter implements LanguageAdapter {
     }
 
     /** @return the providers this adapter declared. */
-    protected final AdapterProviders providers() {
+    protected final AdapterProviders declaredProviders() {
         return providers;
     }
 

@@ -32,18 +32,6 @@ public final class GoAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new GoLanguageAdapter());
-
-        providers.register(new GoBuildProvider());
-        providers.register(new GoTestProvider());
-        providers.register(new GoCoverageProvider());
-        providers.register(new GoMutationTester());
-        providers.register(new GoDependencyAnalyzer());
-        providers.register(new GoGeneratedTestRunner());
-        providers.register(new GoScenarioTestGenerator());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new GoHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new GoSecurityAnalyzer());
-        }
+        GoLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

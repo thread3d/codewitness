@@ -41,18 +41,6 @@ public final class SwiftAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new SwiftLanguageAdapter());
-
-        providers.register(new SwiftBuildProvider());
-        providers.register(new SwiftTestProvider());
-        providers.register(new SwiftCoverageProvider());
-        providers.register(new SwiftDependencyAnalyzer());
-        providers.register(new SwiftMutationTester());
-        providers.register(new SwiftScenarioTestGenerator());
-        providers.register(new SwiftGeneratedTestRunner());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new SwiftHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new SwiftSecurityAnalyzer());
-        }
+        SwiftLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

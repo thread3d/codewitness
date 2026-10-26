@@ -8,11 +8,14 @@ closed it, so the list is also a short history of what was fixed and why.
 
 ### Adapter duplication, remaining
 
-- **`AbstractLanguageAdapter` and `AdapterProviders` exist and one adapter uses them (Rust, 1.0.3).** The provider
-  set is declared once, the bundle registers it, and `capabilities()` is derived from it rather than restated by
-  hand. **Fourteen adapters remain to convert**, one at a time or in families: the edit is mechanical (move each
-  provider into a builder chain, delete three one-line delegations and the hand-written capability list) and the
-  0.1.15 capability guard reports any adapter whose derived set disagrees with what it registered.
+- **Nine of sixteen adapters use `AbstractLanguageAdapter` and `AdapterProviders` (1.0.3, 1.0.4).** The provider set
+  is declared once, the bundle registers it, and `capabilities()` is derived from it rather than restated by hand.
+  Converted: Rust, Python, Go, TypeScript, JavaScript, C#, PHP, Ruby, Swift. **Seven remain**, and they are the ones
+  that do not fit the mechanical transform: Java (build-system selection), Kotlin (Maven and Gradle build systems
+  rather than a single build provider), C++ (CMake configure and build), SQL (schema and migration loading instead
+  of a build), and Verilog, VHDL and Pascal (no coverage provider and no dependency inventory, so their derived
+  capability sets will be *smaller* than the hand-written ones and each needs its behaviour checked, not just its
+  compilation).
 - **The boundary-case enumeration truncates from the front.** With four inputs of six values, the twelve kept cases
   never vary the first two inputs. Every case is complete and valid, so nothing is mis-generated, but a scenario that
   expects all of its inputs exercised does not get that once the product exceeds the cap. Sampling one-at-a-time

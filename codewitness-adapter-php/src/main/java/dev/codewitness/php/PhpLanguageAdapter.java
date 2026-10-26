@@ -1,12 +1,20 @@
 package dev.codewitness.php;
 
+import dev.codewitness.php.analysis.PhpHeuristicAnalyzer;
+import dev.codewitness.php.analysis.PhpSecurityAnalyzer;
+import dev.codewitness.php.coverage.PhpCoverageProvider;
+import dev.codewitness.php.dependency.PhpDependencyAnalyzer;
+import dev.codewitness.php.generate.PhpGeneratedTestRunner;
+import dev.codewitness.php.generate.PhpScenarioTestGenerator;
+import dev.codewitness.php.mutation.PhpMutationTester;
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 
 import java.nio.file.Path;
@@ -27,7 +35,30 @@ import java.util.Set;
  * exists only after the build has created {@code vendor/}. The probe records what it saw as a hint, and
  * {@link PhpTestProvider} resolves the runner again when it runs.
  */
-public final class PhpLanguageAdapter implements LanguageAdapter {
+public final class PhpLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new PhpBuildProvider())
+            .testRunner(new PhpTestProvider())
+            .coverage(new PhpCoverageProvider())
+            .dependencies(new PhpDependencyAnalyzer())
+            .mutation(new PhpMutationTester())
+            .generator(new PhpScenarioTestGenerator())
+            .executor(new PhpGeneratedTestRunner())
+            .staticAnalyzer(new PhpHeuristicAnalyzer())
+            .securityAnalyzer(new PhpSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public PhpLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -87,42 +118,5 @@ public final class PhpLanguageAdapter implements LanguageAdapter {
             builder.attribute(PhpInterpreter.ATTR_PROBE_FAILURE, probe.failureReason());
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new PhpBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new PhpTestProvider().runTests(context);
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * <p>Delegates to the adapter's own rule table, exactly as the Python adapter does. The engine
-     * consults this method only when no registered analyzer claims the project, so this is the answer
-     * for a caller that wired the adapter without its providers; the registered
-     * {@link dev.codewitness.php.analysis.PhpHeuristicAnalyzer} is what normally runs.
-     */
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new dev.codewitness.php.analysis.PhpHeuristicAnalyzer().analyze(context);
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * <p>Only the phases this adapter can actually carry out are claimed, so the engine leaves the rest
-     * unclaimed instead of scheduling them against nothing. Every capability listed here is one
-     * {@link PhpAdapterBundle} registers a provider for when it is asked for analysis as well.
-     */
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.SECURITY_SCAN, Capability.COVERAGE, Capability.DEPENDENCY_SCAN,
-                Capability.MUTATION, Capability.GENERATED_TESTS, Capability.PROPERTY_TESTING);
     }
 }

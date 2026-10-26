@@ -1,12 +1,20 @@
 package dev.codewitness.typescript;
 
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
+import dev.codewitness.typescript.analysis.TypeScriptHeuristicAnalyzer;
+import dev.codewitness.typescript.analysis.TypeScriptSecurityAnalyzer;
+import dev.codewitness.typescript.coverage.TypeScriptCoverageProvider;
+import dev.codewitness.typescript.dependency.TypeScriptDependencyAnalyzer;
+import dev.codewitness.typescript.generate.TypeScriptGeneratedTestRunner;
+import dev.codewitness.typescript.generate.TypeScriptScenarioTestGenerator;
+import dev.codewitness.typescript.mutation.TypeScriptMutationTester;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.typescript.analysis.TypeScriptHeuristicAnalyzer;
 
@@ -26,7 +34,30 @@ import java.util.Set;
  * that pins its own TypeScript compiler is type checked with it; a project that does not is checked with
  * the runtime's own parser, and the difference is reported rather than hidden.
  */
-public final class TypeScriptLanguageAdapter implements LanguageAdapter {
+public final class TypeScriptLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new TypeScriptBuildProvider())
+            .testRunner(new TypeScriptTestProvider())
+            .coverage(new TypeScriptCoverageProvider())
+            .mutation(new TypeScriptMutationTester())
+            .dependencies(new TypeScriptDependencyAnalyzer())
+            .executor(new TypeScriptGeneratedTestRunner())
+            .generator(new TypeScriptScenarioTestGenerator())
+            .staticAnalyzer(new TypeScriptHeuristicAnalyzer())
+            .securityAnalyzer(new TypeScriptSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public TypeScriptLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -78,27 +109,5 @@ public final class TypeScriptLanguageAdapter implements LanguageAdapter {
             builder.attribute(NodeRuntime.ATTR_TSC_SOURCE, "none");
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new TypeScriptBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new TypeScriptTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new TypeScriptHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.COVERAGE, Capability.MUTATION, Capability.PROPERTY_TESTING,
-                Capability.GENERATED_TESTS, Capability.SECURITY_SCAN, Capability.DEPENDENCY_SCAN);
     }
 }

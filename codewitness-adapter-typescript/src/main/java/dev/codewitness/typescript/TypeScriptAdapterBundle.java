@@ -31,18 +31,6 @@ public final class TypeScriptAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new TypeScriptLanguageAdapter());
-
-        providers.register(new TypeScriptBuildProvider());
-        providers.register(new TypeScriptTestProvider());
-        providers.register(new TypeScriptCoverageProvider());
-        providers.register(new TypeScriptMutationTester());
-        providers.register(new TypeScriptDependencyAnalyzer());
-        providers.register(new TypeScriptGeneratedTestRunner());
-        providers.register(new TypeScriptScenarioTestGenerator());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new TypeScriptHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new TypeScriptSecurityAnalyzer());
-        }
+        TypeScriptLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

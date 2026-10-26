@@ -41,18 +41,6 @@ public final class PhpAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new PhpLanguageAdapter());
-
-        providers.register(new PhpBuildProvider());
-        providers.register(new PhpTestProvider());
-        providers.register(new PhpCoverageProvider());
-        providers.register(new PhpDependencyAnalyzer());
-        providers.register(new PhpMutationTester());
-        providers.register(new PhpScenarioTestGenerator());
-        providers.register(new PhpGeneratedTestRunner());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new PhpHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new PhpSecurityAnalyzer());
-        }
+        PhpLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }

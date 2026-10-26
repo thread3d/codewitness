@@ -1,12 +1,20 @@
 package dev.codewitness.csharp;
 
+import dev.codewitness.csharp.analysis.CSharpHeuristicAnalyzer;
+import dev.codewitness.csharp.analysis.CSharpSecurityAnalyzer;
+import dev.codewitness.csharp.coverage.CSharpCoverageProvider;
+import dev.codewitness.csharp.dependency.CSharpDependencyAnalyzer;
+import dev.codewitness.csharp.generate.CSharpGeneratedTestRunner;
+import dev.codewitness.csharp.generate.CSharpScenarioTestGenerator;
+import dev.codewitness.csharp.mutation.CSharpMutationTester;
+import dev.codewitness.support.adapter.AbstractLanguageAdapter;
+import dev.codewitness.support.adapter.AdapterProviders;
 import dev.codewitness.core.model.BuildResult;
 import dev.codewitness.core.model.Capability;
 import dev.codewitness.core.model.Finding;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.model.ProjectRef;
 import dev.codewitness.core.model.TestResult;
-import dev.codewitness.core.spi.LanguageAdapter;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.csharp.analysis.CSharpHeuristicAnalyzer;
 
@@ -26,7 +34,30 @@ import java.util.Set;
  * required by the adapter itself: the fixture projects need xUnit because they are xUnit projects, not
  * because CodeWitness does.
  */
-public final class CSharpLanguageAdapter implements LanguageAdapter {
+public final class CSharpLanguageAdapter extends AbstractLanguageAdapter {
+
+
+    /**
+     * This language's tools, declared once, for both the adapter and the bundle that registers it.
+     *
+     * <p>One list, so the phases this adapter runs and the capabilities it advertises cannot drift apart.
+     */
+    public static final AdapterProviders PROVIDERS = AdapterProviders.builder()
+            .compiler(new CSharpBuildProvider())
+            .testRunner(new CSharpTestProvider())
+            .coverage(new CSharpCoverageProvider())
+            .mutation(new CSharpMutationTester())
+            .dependencies(new CSharpDependencyAnalyzer())
+            .executor(new CSharpGeneratedTestRunner())
+            .generator(new CSharpScenarioTestGenerator())
+            .staticAnalyzer(new CSharpHeuristicAnalyzer())
+            .securityAnalyzer(new CSharpSecurityAnalyzer())
+            .build();
+
+    /** Creates the adapter over its declared provider set. */
+    public CSharpLanguageAdapter() {
+        super(PROVIDERS);
+    }
 
     @Override
     public String id() {
@@ -69,27 +100,5 @@ public final class CSharpLanguageAdapter implements LanguageAdapter {
             builder.attribute("dotnetProbeFailure", probe.failureReason());
         }
         return builder.build();
-    }
-
-    @Override
-    public BuildResult build(VerificationContext context) {
-        return new CSharpBuildProvider().build(context);
-    }
-
-    @Override
-    public TestResult runTests(VerificationContext context) {
-        return new CSharpTestProvider().runTests(context);
-    }
-
-    @Override
-    public List<Finding> analyze(VerificationContext context) {
-        return new CSharpHeuristicAnalyzer().analyze(context);
-    }
-
-    @Override
-    public Set<Capability> capabilities() {
-        return Set.of(Capability.INSPECT, Capability.BUILD, Capability.TEST, Capability.STATIC_ANALYSIS,
-                Capability.COVERAGE, Capability.MUTATION, Capability.PROPERTY_TESTING,
-                Capability.GENERATED_TESTS, Capability.SECURITY_SCAN, Capability.DEPENDENCY_SCAN);
     }
 }

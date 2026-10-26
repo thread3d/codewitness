@@ -41,18 +41,6 @@ public final class RubyAdapterBundle {
             LanguageAdapterRegistry languages, VerificationProviderRegistry providers, boolean includeAnalysis) {
 
         languages.register(new RubyLanguageAdapter());
-
-        providers.register(new RubyBuildProvider());
-        providers.register(new RubyTestProvider());
-        providers.register(new RubyCoverageProvider());
-        providers.register(new RubyDependencyAnalyzer());
-        providers.register(new RubyMutationTester());
-        providers.register(new RubyScenarioTestGenerator());
-        providers.register(new RubyGeneratedTestRunner());
-
-        if (includeAnalysis) {
-            providers.register((VerificationTools.StaticAnalyzer) new RubyHeuristicAnalyzer());
-            providers.register((VerificationTools.SecurityAnalyzer) new RubySecurityAnalyzer());
-        }
+        RubyLanguageAdapter.PROVIDERS.registerInto(providers, includeAnalysis);
     }
 }
