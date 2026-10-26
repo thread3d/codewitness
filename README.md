@@ -1113,6 +1113,14 @@ Nothing in core names a language it cannot already verify.
 
 ---
 
+## Backlog
+
+What is known to be wrong or worth doing next lives in [`docs/backlog.md`](docs/backlog.md), together with the
+release that closed each completed item. It is in the repository rather than in somebody's head because a backlog
+that lives in a conversation expires with the conversation.
+
+---
+
 ## Releasing
 
 Release notes live in the repository: [`docs/release-notes/<version>.md`](docs/release-notes), backfilled to

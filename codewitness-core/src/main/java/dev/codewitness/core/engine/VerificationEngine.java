@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "0.1.19";
+    public static final String VERSION = "0.1.20";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -351,41 +351,8 @@ public final class VerificationEngine {
             phases.add(new PhaseRecord("build", false, true, Duration.ZERO,
                     "the run budget was already exhausted, so no build was attempted", List.of(), "skipped"));
         } else {
-            phases.add(runPhase("build", runId, project, listener, () -> {
-                List<String> evidenceIds = new ArrayList<>();
-                List<BuildResult> results = new ArrayList<>();
-                for (Inspection inspection : builders) {
-                    VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
-                    BuildResult build = firstCompiler(languageContext)
-                            .map(compiler -> compiler.build(languageContext))
-                            .orElseGet(() -> inspection.adapter().build(languageContext));
-                    builds.put(inspection.adapter().id(), build);
-                    results.add(build);
-                    state.addFindings(diagnosticsToFindings(build));
-                    Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.COMPILER)
-                            .description("Build (" + inspection.adapter().id() + "): " + build.describe())
-                            .command(build.command())
-                            .confidence(EvidenceConfidence.DETERMINISTIC)
-                            .status(build.success() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
-                            .result(build.describe())
-                            .output(tail(build.output(), 8000))
-                            .metadata("adapter", inspection.adapter().id())
-                            .metadata("exitCode", build.exitCode())
-                            .metadata("errors", build.errors().size())
-                            .metadata("warnings", build.warnings().size())
-                            .metadata("artifacts", build.artifacts().stream().map(Path::toString).toList())
-                            .build());
-                    evidenceIds.add(evidence.id());
-                    if (!build.attempted()) {
-                        state.note("build not attempted for " + inspection.adapter().id() + ": "
-                                + build.failureReason());
-                    }
-                }
-                BuildResult merged = mergeBuilds(results);
-                state.build(merged);
-                return new PhaseOutcome(merged.success(), merged.describe(), List.copyOf(evidenceIds),
-                        merged.success() ? null : merged.failureReason());
-            }));
+            phases.add(runPhase("build", runId, project, listener,
+                    () -> buildPhase(scope, builders, builds)));
         }
 
         boolean buildBlocked = !state.build().success();
@@ -797,6 +764,55 @@ public final class VerificationEngine {
      * @param startedAt  when the run started
      * @param database   the prepared database fixture, or a disabled one
      */
+    /**
+     * The build phase: compile every language that claims the project, and record what happened.
+     *
+     * <p>It is the one phase whose lambda writes into state later phases read — the per-language build results and
+     * the merged build — so extracting it needed those to be passed in rather than captured. Making that ownership
+     * explicit is the reason this one was worth doing on its own: a phase that mutates state another phase reads is
+     * exactly what a reader needs to see at a glance.
+     *
+     * @param scope    the run-wide facts
+     * @param builders the languages that declare a build step
+     * @param builds   receives the build result per language, for the phases that consult it
+     * @return the phase outcome recorded in the run
+     */
+    private PhaseOutcome buildPhase(RunScope scope, List<Inspection> builders, Map<String, BuildResult> builds) {
+        List<String> evidenceIds = new ArrayList<>();
+        List<BuildResult> results = new ArrayList<>();
+        for (Inspection inspection : builders) {
+            VerificationContext languageContext = contextFor(scope, inspection, RequirementCodeMap.empty());
+            BuildResult build = firstCompiler(languageContext)
+                    .map(compiler -> compiler.build(languageContext))
+                    .orElseGet(() -> inspection.adapter().build(languageContext));
+            builds.put(inspection.adapter().id(), build);
+            results.add(build);
+            scope.state().addFindings(diagnosticsToFindings(build));
+            Evidence evidence = scope.ledger().add(scope.ledger().newEvidence(EvidenceType.COMPILER)
+                    .description("Build (" + inspection.adapter().id() + "): " + build.describe())
+                    .command(build.command())
+                    .confidence(EvidenceConfidence.DETERMINISTIC)
+                    .status(build.success() ? EvidenceStatus.SUPPORTS : EvidenceStatus.INCONCLUSIVE)
+                    .result(build.describe())
+                    .output(tail(build.output(), 8000))
+                    .metadata("adapter", inspection.adapter().id())
+                    .metadata("exitCode", build.exitCode())
+                    .metadata("errors", build.errors().size())
+                    .metadata("warnings", build.warnings().size())
+                    .metadata("artifacts", build.artifacts().stream().map(Path::toString).toList())
+                    .build());
+            evidenceIds.add(evidence.id());
+            if (!build.attempted()) {
+                scope.state().note("build not attempted for " + inspection.adapter().id() + ": "
+                        + build.failureReason());
+            }
+        }
+        BuildResult merged = mergeBuilds(results);
+        scope.state().build(merged);
+        return new PhaseOutcome(merged.success(), merged.describe(), List.copyOf(evidenceIds),
+                merged.success() ? null : merged.failureReason());
+    }
+
     /**
      * The dependency phase: an inventory per language, plus the advisory scan that may follow it.
      *
