@@ -79,6 +79,15 @@ jobs:
         with:
           python-version: '3.x'
 
+      # coverage.py is not part of the Python distribution, and the adapter reports coverage as not
+      # measured - never as zero - when the interpreter cannot import it. Without this step the Python
+      # coverage phase would be reported but never exercised, which is how it went unnoticed until 1.0.18:
+      # a regression that made the provider always decline would have passed the whole suite. pytest is
+      # deliberately *not* installed here, so the fixture keeps running on the standard-library unittest
+      # runner the adapter falls back to and that fallback stays exercised end to end.
+      - name: Install coverage.py for the Python fixture
+        run: python3 -m pip install coverage
+
       # Pinned to the commit at the tip of dtolnay/rust-toolchain's `stable` branch, which is what
       # `@stable` resolved to. That branch is a moving ref: pinning freezes the toolchain at the
       # Rust release current on 2026-10-01, so a rustc upgrade from here on is a deliberate pin
@@ -209,6 +218,10 @@ jobs:
           mvn -v
           mvn -v | grep -q '3\.9\.16'
           python3 --version
+          # The Python adapter reports coverage as not measured when the interpreter cannot import
+          # coverage.py, and its end-to-end coverage test skips itself for the same reason; assert the
+          # driver is importable so that phase is exercised rather than silently declined.
+          python3 -c 'import coverage; print("coverage.py", coverage.__version__)'
           cargo --version
           go version
           node --version

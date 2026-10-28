@@ -131,7 +131,12 @@ is used when it exists and actually claims the project, and otherwise the run fa
 auto-detection — an unknown id is silently ignored rather than reported.
 
 Python support needs only an interpreter: it uses `pytest` when the project has it and the standard library `unittest` runner
-otherwise, so a project with no third-party packages can still be verified. Rust support needs only
+otherwise, so a project with no third-party packages can still be verified. Coverage needs `coverage.py`
+importable by that same interpreter, because the suite is re-run under it; when it is not importable the
+report says coverage was not measured and names the reason, so a project without it is verified exactly as
+thoroughly in every other phase. CI installs `coverage.py` and asserts it, so the phase is exercised rather
+than merely reported — the arrangement PHP's Xdebug driver has, and the one Python lacked until 1.0.18.
+Rust support needs only
 `cargo`: a dependency-free crate is built, tested, analysed and mutated by the toolchain it already
 has, and generated scenarios become ordinary Cargo integration tests. Go support needs only the `go`
 tool: a dependency-free module is built,

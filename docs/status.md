@@ -50,7 +50,11 @@ The Python adapter is implemented and exercised end to end as well (`fixtures/py
   `unittest` runner that writes the same JUnit XML when it cannot - so no third-party package is
   required;
 - heuristic correctness rules and a separate security rule set for Python;
-- coverage through `coverage.py`, reported as not measured when it is absent;
+- coverage through `coverage.py`, reported as not measured when it is absent; the suite is re-run under
+  `coverage run` and the numbers are read from `coverage json`, and CI installs `coverage.py` and asserts
+  it is importable, so the phase is exercised end to end rather than only reported. Branch coverage is not
+  measured - the run does not enable `--branch` - so the report carries an empty `0/0` for branches rather
+  than a figure nobody collected;
 - mutation testing through the standard library `ast` module, with a bounded operator set, a mutant
   cap and a wall-clock budget;
 - a dependency inventory from the project's manifests, resolved from `poetry.lock` or from requirements
@@ -65,7 +69,9 @@ Python support is new, and the honest limits are:
 - mutation uses a small, documented operator set (arithmetic, comparison boundaries, boolean
   operators and boolean constants) rather than a dedicated framework such as mutmut or cosmic-ray;
 - coverage and pytest are used when present and reported as unavailable when not: CodeWitness never
-  installs anything;
+  installs anything. Whether a given machine can measure a Python project's coverage is therefore an
+  environmental fact, and the end-to-end coverage test skips rather than fails when `coverage.py` is
+  absent — CI installs it and asserts it, so the skip cannot hide a regression there;
 - the heuristic rule table is intentionally small and has a known false-positive profile, exactly
   like the Java one.
 

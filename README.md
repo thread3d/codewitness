@@ -352,7 +352,10 @@ declares no dependencies, so its sandbox config sets `allow_network: false` and 
 elaborates, simulates, analyses and mutates offline with nothing installed by hand. The Pascal fixture is the same
 case again: Free Pascal is a compiler and fpcunit ships inside the same distribution, so its sandbox
 config sets `allow_network: false` and the run compiles, tests, analyses and mutates offline with
-nothing installed by hand. An end-to-end test is skipped
+nothing installed by hand. The Python fixture needs nothing installed by hand either — it is run by the
+interpreter on `PATH` — but its coverage phase needs `coverage.py` importable by that interpreter, so CI
+installs it before the end-to-end suite: a phase that is reported but never exercised is what 1.0.18 fixed.
+An end-to-end test is skipped
 rather than failed when its toolchain is absent.
 
 ---

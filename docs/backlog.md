@@ -16,6 +16,7 @@ Every release, newest first, with the item it closed.
 
 | Release | Item |
 | --- | --- |
+| 1.0.18 | The Python coverage phase is exercised rather than merely reported: CI installs coverage.py and asserts it is importable, an end-to-end test measures `fixtures/python-withdrawal-ledger` through the provider (36/37 statements) and skips only when the driver is genuinely absent, and a unit test pins the absent-driver branch — including that it runs nothing. |
 | 1.0.17 | The self-check's own README describes the check that exists: its table, quoted run and findings section were from before 1.0.2/1.0.13 (`CWR-007` "no scenario", 1,671 tests, ten findings), and now state the process scenario, the current run and the five suppressed findings with their reasons. |
 | 1.0.16 | No limitation note denies a scenario that exists: the generated-tests phase no longer says "No executable scenario is declared" for a requirement whose process scenario ran and verified it, and the process phase no longer says "No process scenario was declared" for one that asks for a native test. |
 | 1.0.15 | An existing-tests record no longer claims support when the mapped test class ran no case: `SUPPORTS` became `INCONCLUSIVE` for the self-check's `@Tag("e2e")` test class, which the default suite never runs. |
