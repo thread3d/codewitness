@@ -173,9 +173,12 @@ The TypeScript adapter is implemented and exercised end to end as well
 
 The honest limits of TypeScript support are:
 
-- TypeScript is executed by Node's type stripper, so only erasable syntax is supported: `enum`,
-  `namespace` with a runtime value and parameter properties cannot be run (and `.tsx` cannot be checked
-  or executed) without a compiler; the adapter reports that rather than pretending otherwise;
+- TypeScript is executed by Node's type stripper when no compiler is present, so only erasable syntax is
+  supported: `enum`, `namespace` with a runtime value and **parameter properties** (`constructor(private x:
+  T)`) fail with "TypeScript parameter property is not supported in strip-only mode"; a project that uses
+  these features should add a pinned TypeScript compiler and `tsconfig.json`, which makes CodeWitness use
+  `tsc --noEmit` for full type checking; `.tsx` files also cannot be checked or executed without a
+  compiler; the adapter reports these limitations rather than pretending otherwise;
 - tests run through Node's built-in runner, so a project whose tests are written for Jest or Vitest is
   detected and reported, but those runners are not installed or invoked;
 - mutation uses a deliberately small operator set rather than Stryker, and only operators surrounded by

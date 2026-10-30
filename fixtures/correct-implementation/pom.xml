@@ -6,7 +6,7 @@
 
   <groupId>com.example</groupId>
   <artifactId>correct-implementation</artifactId>
-  <version>1.0.18</version>
+  <version>1.0.19</version>
   <packaging>jar</packaging>
 
   <name>correct-implementation</name>
