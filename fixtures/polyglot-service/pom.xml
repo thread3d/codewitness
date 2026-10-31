@@ -10,7 +10,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.example</groupId>
   <artifactId>polyglot-service</artifactId>
-  <version>1.0.19</version>
+  <version>1.0.20</version>
   <packaging>jar</packaging>
   <properties>
     <maven.compiler.release>25</maven.compiler.release>
