@@ -37,7 +37,9 @@ Implemented and exercised end to end:
   and concurrent execution;
 - counterexample extraction from structured failure messages, with replayable reproduction commands;
 - requirement → evidence mapping, conservative verdict computation;
-- SQLite persistence, canonical JSON and self-contained HTML reports, console reporting;
+- SQLite persistence, canonical JSON and self-contained HTML reports, console reporting; the SQLite
+  driver's native library is covered by the `Enable-Native-Access: ALL-UNNAMED` attribute in the shipped
+  jar's manifest, so a `java -jar` run reports nothing on `stderr` that the tool did not write itself;
 - a CLI with `verify`, `inspect`, `test`, `report`, `reproduce`, `clean`, `init`, `version`.
 
 The Python adapter is implemented and exercised end to end as well (`fixtures/python-withdrawal-ledger`):

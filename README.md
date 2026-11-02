@@ -55,6 +55,12 @@ The launcher is `./codewitness` in the repository root. `./build.sh` builds the 
 not install a `codewitness` command on `PATH`, so run it from the checkout (or set `CODEWITNESS_JAR`
 and call it by path).
 
+The built jar is self-contained and can be started directly with `java -jar`. It carries
+`Enable-Native-Access: ALL-UNNAMED` in its manifest, because the bundled SQLite driver loads a native
+library that JDK 24 made a restricted operation: without the attribute every run would print four lines
+of JVM warning on `stderr` before its own output, and a later JDK would refuse the load. The launcher
+also passes the equivalent option, so a jar built before this attribute existed still runs quietly.
+
 Every language is detected and verified the same way. The per-language quick starts, and what each adapter
 needs installed, are in [`docs/languages.md`](docs/languages.md).
 

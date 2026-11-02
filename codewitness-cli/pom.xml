@@ -6,7 +6,7 @@
   <parent>
     <groupId>dev.codewitness</groupId>
     <artifactId>codewitness-parent</artifactId>
-    <version>1.0.20</version>
+    <version>1.0.21</version>
   </parent>
 
   <artifactId>codewitness-cli</artifactId>
@@ -139,6 +139,18 @@
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                   <mainClass>dev.codewitness.cli.Main</mainClass>
+                  <!--
+                    Native access is a property of the artifact, not of the command line that starts it. The
+                    bundled SQLite driver loads a native library through JNI, which JDK 24 made restricted
+                    (JEP 472); without this attribute every "java -jar" run prints four lines of JDK warning to
+                    stderr before any output, and a future JDK blocks the load outright. Only the repository's
+                    own launcher passes the enable-native-access option, so an editor run configuration, a CI
+                    step or the installed launcher saw the noise. JDKs older than 24 ignore an unknown main
+                    attribute, so the same jar still runs there; PackagingNativeAccessTest pins this entry.
+                  -->
+                  <manifestEntries>
+                    <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
+                  </manifestEntries>
                 </transformer>
               </transformers>
               <filters>
