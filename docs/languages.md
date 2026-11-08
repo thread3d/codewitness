@@ -104,7 +104,9 @@ runs **every** adapter that claims part of the tree — a Java service with a Ty
 verifiable projects, and one of them being read is not a reason for the other to disappear. Phases that
 belong to a language run once per language against that language's own description; a language whose build
 fails blocks only the requirements written in it, and the run is `BLOCKED` only when that failure actually
-stopped one from being verified.
+stopped one from being verified. A requirement no file attributes to a language is the one case that needs
+a rule: it is blocked only when *nothing* in the tree built, because with something built the evidence that
+exists may well be about it, and the verdict then names the languages it could not draw on.
 
 JavaScript and TypeScript coexist in one tree. They own disjoint extensions — `js`/`mjs`/`cjs` against
 `ts`/`tsx`/`mts`/`cts` — so the split is at the file level, and a TypeScript frontend next to plain
@@ -138,7 +140,9 @@ thoroughly in every other phase. CI installs `coverage.py` and asserts it, so th
 than merely reported — the arrangement PHP's Xdebug driver has, and the one Python lacked until 1.0.18.
 Rust support needs only
 `cargo`: a dependency-free crate is built, tested, analysed and mutated by the toolchain it already
-has, and generated scenarios become ordinary Cargo integration tests. Go support needs only the `go`
+has, generated scenarios become ordinary Cargo integration tests, and the crate's `Cargo.toml` may sit
+below the project root — it is found by a bounded search and named to every Cargo command with
+`--manifest-path`, because Cargo resolves no manifest above its working directory. Go support needs only the `go`
 tool: a dependency-free module is built,
 tested, analysed and mutated by the toolchain it already has, coverage comes from
 `go test -coverprofile`, and generated scenarios become ordinary `_test.go` files in the package

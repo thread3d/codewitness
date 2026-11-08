@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "1.0.23";
+    public static final String VERSION = "1.0.24";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -355,18 +355,40 @@ public final class VerificationEngine {
                     () -> buildPhase(scope, builders, builds)));
         }
 
+        // Whether the run's build as a whole fell short — a language that failed, or a language nobody could
+        // build. It decides the run's status further down; the limitation text below separates the two,
+        // because "failed to build" and "no build was attempted" are different statements about a language.
         boolean buildBlocked = !state.build().success();
-        if (buildBlocked) {
-            List<String> failed = builds.entrySet().stream().filter(entry -> !entry.getValue().success())
-                    .map(Map.Entry::getKey).toList();
+        List<String> failedBuilds = builds.entrySet().stream()
+                .filter(entry -> entry.getValue().attempted() && !entry.getValue().success())
+                .map(Map.Entry::getKey).toList();
+        List<String> neverAttempted = builds.entrySet().stream()
+                .filter(entry -> !entry.getValue().attempted())
+                .map(Map.Entry::getKey).toList();
+        if (!failedBuilds.isEmpty()) {
             limitations.add((inspections.size() > 1
                     ? "Not every language in this project could be built: "
                     : "The project could not be built, so nothing could be verified: ")
                     + state.build().describe() + ". A failed or impossible build is reported as BLOCKED, "
                     + "not as a code defect."
-                    + (failed.isEmpty() ? "" : " The language(s) whose build failed: " + failed + ".")
+                    + " The language(s) whose build failed: " + failedBuilds + "."
+                    // A language nobody attempted to build is not a language that failed to build, and saying
+                    // a failed build was recorded for it contradicted that language's own build note.
+                    + (neverAttempted.isEmpty() ? "" : " No build was attempted for " + neverAttempted + ".")
                     + (inspections.size() > 1
                             ? " Requirements written in a language that did build were still verified." : ""));
+        } else if (!neverAttempted.isEmpty()) {
+            limitations.add("No build was attempted for " + neverAttempted + ", so nothing written in "
+                    + (neverAttempted.size() == 1 ? "that language" : "those languages")
+                    + " was built, tested, mutated or measured. It is reported as not attempted rather than as a "
+                    + "failed build, and requirements that depend on it stay unverified."
+                    + (inspections.size() > 1
+                            ? " Requirements written in a language that did build were still verified." : ""));
+        } else if (!state.build().success()) {
+            // No per-language result exists at all — no adapter declared BUILD, or the phase was skipped.
+            limitations.add("The project could not be built, so nothing could be verified: "
+                    + state.build().describe() + ". A failed or impossible build is reported as BLOCKED, not as "
+                    + "a code defect.");
         }
 
         // ---------------------------------------------------------------- existing tests
@@ -889,6 +911,25 @@ public final class VerificationEngine {
         List<RequirementVerdict> verdicts = new ArrayList<>();
         for (Requirement requirement : plannedSet.requirements()) {
             Blocked blocked = blockedFor(requirement, mapper, inspections, builds, scope.state().build());
+            List<String> requirementNotes = new ArrayList<>(notes.getOrDefault(requirement.id(), List.of()));
+            if (!blocked.blocked() && languagesFor(requirement, mapper, inspections).isEmpty()) {
+                List<String> notBuilt = new ArrayList<>();
+                for (Map.Entry<String, BuildResult> entry : builds.entrySet()) {
+                    if (builtSuccessfully(entry.getValue())) {
+                        continue;
+                    }
+                    notBuilt.add(entry.getKey() + (entry.getValue().attempted()
+                            ? " (build failed)" : " (no build attempted)"));
+                }
+                if (!notBuilt.isEmpty()) {
+                    // The requirement is not blocked, so the reader has to be told what its verdict does and
+                    // does not cover: nothing in the languages that did not build contributed to it.
+                    requirementNotes.add("No source file attributes this requirement to a language, and "
+                            + notBuilt + " did not build, so this verdict reflects only what the language(s) "
+                            + "that did build could establish. Give the requirement a `paths` attribute or "
+                            + "mention its id in the files that implement it to have it judged per language.");
+                }
+            }
             RequirementVerdict verdict = VerdictCalculator.compute(
                     requirement,
                     requirement.obligations(),
@@ -897,7 +938,7 @@ public final class VerificationEngine {
                     counterexamples.getOrDefault(requirement.id(), List.of()),
                     blocked.blocked(),
                     blocked.blocked() ? blocked.reason() : null,
-                    notes.getOrDefault(requirement.id(), List.of()));
+                    requirementNotes);
             verdicts.add(verdict);
             scope.listener().onEvent("verdict", requirement.id() + " -> " + verdict.status());
         }
@@ -1162,13 +1203,16 @@ public final class VerificationEngine {
             List<LanguageDetectorRegistry.Detection> uncovered) {
         List<VerificationReport.LanguageSummary> summaries = new ArrayList<>();
         for (Inspection inspection : inspections) {
+            BuildResult build = builds.get(inspection.adapter().id());
             summaries.add(new VerificationReport.LanguageSummary(
                     inspection.adapter().id(),
                     inspection.info().language(),
                     inspection.info().buildSystem(),
                     inspection.info().modules().size(),
-                    builds.containsKey(inspection.adapter().id()),
-                    builtSuccessfully(builds.get(inspection.adapter().id())),
+                    // The language's own record decides: reporting attempted because a result was stored for
+                    // the adapter said "build attempted" about a build nobody ran.
+                    build != null && build.attempted(),
+                    builtSuccessfully(build),
                     ""));
         }
         for (LanguageDetectorRegistry.Detection detection : uncovered) {
@@ -1274,19 +1318,16 @@ public final class VerificationEngine {
      */
     private Blocked blockedFor(Requirement requirement, RequirementCodeMapper mapper,
             List<Inspection> inspections, Map<String, BuildResult> builds, BuildResult mergedBuild) {
-        Set<String> languages = new java.util.LinkedHashSet<>();
-        for (String file : mapper.filesFor(requirement.id())) {
-            String extension = extensionOf(file);
-            for (Inspection inspection : inspections) {
-                if (inspection.info().sourceExtensions().contains(extension)) {
-                    languages.add(inspection.adapter().id());
-                }
-            }
-        }
+        Set<String> languages = languagesFor(requirement, mapper, inspections);
         if (languages.isEmpty()) {
-            // Nothing identifies which language this requirement's code is written in, so the honest
-            // fallback is the whole run's build outcome rather than a guess.
-            return new Blocked(!mergedBuild.success(), mergedBuild.success() ? null : mergedBuild.describe());
+            // Nothing identifies which language this requirement's code is written in. Blocking it on the
+            // merged build was an aggregate gate: on a tree with a Python half that built and a Rust half that
+            // did not, every prosaic requirement — "The Python front-end suite passes" among them — came back
+            // BLOCKED, contradicting the report's own statement that a language which did build was verified.
+            // It is blocked only when nothing in the tree built at all, which is the one case in which no
+            // language could have established anything about it.
+            boolean somethingBuilt = builds.values().stream().anyMatch(VerificationEngine::builtSuccessfully);
+            return new Blocked(!somethingBuilt, somethingBuilt ? null : mergedBuild.describe());
         }
         List<String> failed = languages.stream().filter(language -> !builtSuccessfully(builds.get(language))).toList();
         if (failed.isEmpty()) {
@@ -1296,29 +1337,53 @@ public final class VerificationEngine {
                 + "be built, so nothing about it could be established");
     }
 
+    /** @return the adapters whose language a requirement is written in, according to the code map. */
+    private static Set<String> languagesFor(
+            Requirement requirement, RequirementCodeMapper mapper, List<Inspection> inspections) {
+        Set<String> languages = new java.util.LinkedHashSet<>();
+        for (String file : mapper.filesFor(requirement.id())) {
+            String extension = extensionOf(file);
+            for (Inspection inspection : inspections) {
+                if (inspection.info().sourceExtensions().contains(extension)) {
+                    languages.add(inspection.adapter().id());
+                }
+            }
+        }
+        return languages;
+    }
+
     /**
      * @return one result standing for every language's build.
      *
      * <p>It succeeds only when every build that ran succeeded, so the run-level summary can never claim a
-     * project built when one of its languages did not. The failing language's command, exit code and
-     * output are the ones kept, because they are the ones a reader needs; every language's own record
-     * stays in the evidence ledger, named by adapter.
+     * project built when one of its languages did not. A language whose build was <em>never attempted</em> is
+     * not a language whose build failed: counting it as one made the run say "build failed with exit code -1"
+     * while that language's own record said "build not attempted", and it forced {@code attempted(true)} on a
+     * result for which nothing was ever run. The failing language's command, exit code and output are the
+     * ones kept, because they are the ones a reader needs; every language's own record stays in the evidence
+     * ledger, named by adapter.
      */
     private static BuildResult mergeBuilds(List<BuildResult> results) {
         if (results.isEmpty()) {
             return BuildResult.notAttempted("no build was attempted");
         }
+        List<BuildResult> attempted = results.stream().filter(BuildResult::attempted).toList();
+        if (attempted.isEmpty()) {
+            BuildResult first = results.getFirst();
+            return BuildResult.notAttempted(
+                    first.failureReason() != null ? first.failureReason() : first.describe());
+        }
         if (results.size() == 1) {
             return results.getFirst();
         }
-        boolean success = results.stream().allMatch(BuildResult::success);
-        BuildResult reported = results.stream().filter(result -> !result.success()).findFirst()
-                .orElse(results.getFirst());
+        boolean success = attempted.stream().allMatch(BuildResult::success);
+        BuildResult reported = attempted.stream().filter(result -> !result.success()).findFirst()
+                .orElse(attempted.getFirst());
         List<CompilerDiagnostic> diagnostics = new ArrayList<>();
         List<Path> artifacts = new ArrayList<>();
         StringBuilder output = new StringBuilder();
         Duration duration = Duration.ZERO;
-        for (BuildResult result : results) {
+        for (BuildResult result : attempted) {
             diagnostics.addAll(result.diagnostics());
             artifacts.addAll(result.artifacts());
             if (!result.output().isBlank()) {
@@ -1335,7 +1400,7 @@ public final class VerificationEngine {
                 .output(output.toString())
                 .diagnostics(diagnostics)
                 .artifacts(artifacts)
-                .timedOut(results.stream().anyMatch(BuildResult::timedOut))
+                .timedOut(attempted.stream().anyMatch(BuildResult::timedOut))
                 .failureReason(success ? null
                         : "one or more languages failed to build; see the per-language build evidence")
                 .build();

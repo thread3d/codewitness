@@ -60,7 +60,9 @@ public final class RustGeneratedTestRunner implements VerificationTools.Generate
             return GeneratedTestExecution.notExecuted(tests,
                     "no Cargo.toml was found, so generated tests cannot be compiled against the crate");
         }
-        Path testRoot = context.projectRoot().resolve("tests");
+        // Cargo discovers integration tests under the crate's own tests/ directory, which is not the
+        // project root when the crate lives in a subdirectory.
+        Path testRoot = Cargo.crateRoot(context).resolve("tests");
         List<Path> written = new ArrayList<>();
         List<Path> artifacts = new ArrayList<>();
         try {
@@ -75,7 +77,9 @@ public final class RustGeneratedTestRunner implements VerificationTools.Generate
             Long seed = tests.stream().map(GeneratedTest::seed).filter(java.util.Objects::nonNull)
                     .findFirst().orElse(null);
             String cargo = Cargo.cargo(context.projectInfo(), context);
-            List<String> command = new ArrayList<>(List.of(cargo, "test", "--no-fail-fast"));
+            List<String> command = new ArrayList<>(List.of(cargo, "test"));
+            command.addAll(Cargo.manifestArguments(context));
+            command.add("--no-fail-fast");
             for (GeneratedTest test : tests) {
                 command.add("--test");
                 command.add(test.className());
@@ -140,6 +144,7 @@ public final class RustGeneratedTestRunner implements VerificationTools.Generate
         }
         command.add(cargo);
         command.add("test");
+        command.addAll(Cargo.manifestArguments(context));
         for (GeneratedTest test : tests) {
             command.add("--test");
             command.add(test.className());

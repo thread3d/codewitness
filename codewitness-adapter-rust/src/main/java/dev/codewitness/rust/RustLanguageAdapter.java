@@ -17,6 +17,7 @@ import dev.codewitness.rust.mutation.RustMutationTester;
 import dev.codewitness.support.adapter.AbstractLanguageAdapter;
 import dev.codewitness.support.adapter.AdapterProviders;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -101,7 +102,46 @@ public final class RustLanguageAdapter extends AbstractLanguageAdapter {
         if (!probe.available()) {
             builder.attribute("cargoProbeFailure", probe.failureReason());
         }
-        return builder.build();
+        ProjectInfo info = builder.build();
+        noteManifestLocation(context, info);
+        return info;
+    }
+
+    /**
+     * Records which crate the run builds from, and — when the tree holds several — which were not built.
+     *
+     * <p>A crate whose manifest sits below the checkout root is ordinary, and the tool now builds it
+     * instead of refusing. What it must not do is let that read as "the whole tree was verified": with
+     * more than one manifest only one crate is compiled and tested, so the others are named as a
+     * limitation rather than silently dropped.
+     */
+    static void noteManifestLocation(VerificationContext context, ProjectInfo info) {
+        String manifest = info.attributes().get(RustProjectDetector.ATTR_MANIFEST);
+        if (manifest == null || manifest.isBlank()) {
+            return;
+        }
+        String detectedCrate = info.attributes().get(RustProjectDetector.ATTR_CRATE_NAME);
+        String crateName = detectedCrate == null || detectedCrate.isBlank() ? "the crate" : detectedCrate;
+        if (!"Cargo.toml".equals(manifest)) {
+            context.state().note("The Cargo manifest is not at the project root: " + crateName
+                    + " is built from " + manifest + ", and every Cargo command this run executes names "
+                    + "that manifest explicitly (--manifest-path) rather than running in the project root.");
+        }
+        String manifests = info.attributes().get(RustProjectDetector.ATTR_MANIFESTS);
+        if (manifests != null && !manifests.isBlank()) {
+            List<String> others = new ArrayList<>();
+            for (String found : manifests.split(",")) {
+                if (!found.isBlank() && !found.equals(manifest)) {
+                    others.add(found);
+                }
+            }
+            if (!others.isEmpty()) {
+                context.state().note("The tree holds " + (others.size() + 1) + " Cargo manifests and none is "
+                        + "at the project root; only " + manifest + " (" + crateName + ") was built, tested and "
+                        + "mutated, so the evidence in this report is about that crate alone and not about "
+                        + String.join(", ", others) + ".");
+            }
+        }
     }
 
 }

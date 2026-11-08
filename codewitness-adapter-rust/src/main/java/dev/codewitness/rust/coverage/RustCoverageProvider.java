@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -71,7 +72,9 @@ public final class RustCoverageProvider implements VerificationTools.CoveragePro
                     "cannot prepare the coverage report directory: " + e);
         }
         String cargo = Cargo.cargo(project, context);
-        List<String> command = List.of(cargo, "llvm-cov", "--json", "--output-path", report.toString(), "--quiet");
+        List<String> command = new ArrayList<>(List.of(cargo, "llvm-cov"));
+        command.addAll(Cargo.manifestArguments(context));
+        command.addAll(List.of("--json", "--output-path", report.toString(), "--quiet"));
         ProcessResult result = context.runner().run(ProcessSpec.builder(command, context.projectRoot())
                 .environment(Cargo.environment(context))
                 .timeout(context.config().limits().timeout())

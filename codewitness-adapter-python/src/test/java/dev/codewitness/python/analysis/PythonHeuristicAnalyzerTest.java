@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The Python heuristic and security rule table. */
@@ -121,5 +122,127 @@ class PythonHeuristicAnalyzerTest {
         assertTrue(Severity.CRITICAL == PythonHeuristicAnalyzer.severityOf("CW-PY-SEC-001"));
         assertTrue(Severity.HIGH == PythonHeuristicAnalyzer.severityOf("CW-PY-SEC-002"));
         assertTrue(PythonHeuristicAnalyzer.ruleIds().contains("CW-PY-SEC-010"));
+    }
+
+    @Test
+    @DisplayName("a method named eval is a definition, not a call to the eval builtin")
+    void doesNotReportDefinitionsNamedEval(@TempDir Path root, @TempDir Path runDirectory) throws IOException {
+        // Nine HIGH security findings on one real project, every one of them a `def eval(self, ...)` header and
+        // not one of them a call: a definition of a method called eval reads exactly like the builtin call.
+        PythonTestContexts.write(root, "kernel.py", """
+                class Kernel:
+                    def eval(self, text, steps=False):
+                        return {"text": text}
+
+                    async def exec(self, text):
+                        return text
+
+
+                def eval(text):
+                    return text
+
+
+                class eval:
+                    pass
+
+
+                def caller(expression):
+                    return eval(expression)
+                """);
+        VerificationContext context = PythonTestContexts.context(root, runDirectory);
+
+        List<Finding> security = new PythonHeuristicAnalyzer().analyzeSecurity(context);
+        List<Finding> evalFindings = security.stream()
+                .filter(finding -> "CW-PY-SEC-002".equals(finding.ruleId())).toList();
+
+        assertEquals(1, evalFindings.size(),
+                "only the real call to the builtin is a finding: " + evalFindings);
+        assertEquals(18, evalFindings.getFirst().line(),
+                "the finding must be the call, not a definition: " + evalFindings);
+    }
+
+    @Test
+    @DisplayName("docstring prose and identity checks against True/False are not defects")
+    void doesNotReportProseOrBooleanIdentity(@TempDir Path root, @TempDir Path runDirectory) throws IOException {
+        // Five MEDIUM findings on one real project: three were English sentences in docstrings ("a decimal that
+        // terminates is 1 and 2.5 is 5/2", "... is 0") and two were `x is False` identity checks, which PEP 8
+        // recommends. Only `is` against a number or a string is the defect the rule is about.
+        PythonTestContexts.write(root, "lean.py", """
+                \"\"\"Exact rationals.
+
+                `1.0` is 1 and `2.5` is 5/2 - a decimal that terminates is a rational.
+                A root with an imaginary part is dropped: the sqrt of a negative is 0.
+                eval() is never called from this module.
+                \"\"\"
+
+
+                def classify(width):
+                    if width is False:
+                        return None
+                    return width
+
+
+                MESSAGE = "a decimal that terminates is 1, and eval() is not called"
+
+
+                class Checker:
+                    def check(self, value):
+                        self.assertIs(value, False)
+
+
+                def literal_identity(value):
+                    return value is 1
+                """);
+        VerificationContext context = PythonTestContexts.context(root, runDirectory);
+
+        List<Finding> findings = new PythonHeuristicAnalyzer().analyze(context);
+        List<Finding> identity = findings.stream()
+                .filter(finding -> "CW-PY-BUG-002".equals(finding.ruleId())).toList();
+
+        assertEquals(1, identity.size(),
+                "only the comparison against a number is a finding: " + identity);
+        assertEquals(24, identity.getFirst().line(),
+                "the finding must be the numeric identity comparison, not prose: " + identity);
+        assertTrue(findings.stream().noneMatch(finding -> "CW-PY-SEC-002".equals(finding.ruleId())),
+                "eval() mentioned inside a docstring or a message is text, not a call: " + findings);
+    }
+
+    @Test
+    @DisplayName("prose in a comment is not code either")
+    void ignoresRulesInsideComments(@TempDir Path root, @TempDir Path runDirectory) throws IOException {
+        PythonTestContexts.write(root, "notes.py", """
+                VALUE = 1  # the documented example is 1 and eval() is not used here
+                """);
+        VerificationContext context = PythonTestContexts.context(root, runDirectory);
+
+        List<Finding> findings = new PythonHeuristicAnalyzer().findAll(context);
+
+        assertTrue(findings.stream().noneMatch(finding -> "CW-PY-BUG-002".equals(finding.ruleId())),
+                "a trailing comment is not code: " + findings);
+        assertTrue(findings.stream().noneMatch(finding -> "CW-PY-SEC-002".equals(finding.ruleId())),
+                "a trailing comment is not a call: " + findings);
+    }
+
+    @Test
+    @DisplayName("a real eval call, a real is-literal comparison and a real secret are still reported")
+    void keepsTheTruePositives(@TempDir Path root, @TempDir Path runDirectory) throws IOException {
+        // The guard for the guard: precision work must not turn the rule table off.
+        PythonTestContexts.write(root, "risky.py", """
+                API_KEY = "sk-live-abcdef123456"
+
+
+                def run(command):
+                    result = eval(command)
+                    if result is "ok":
+                        return True
+                    return result
+                """);
+        VerificationContext context = PythonTestContexts.context(root, runDirectory);
+
+        List<Finding> all = new PythonHeuristicAnalyzer().findAll(context);
+
+        assertTrue(hasRule(all, "CW-PY-SEC-001"), "a credential literal is still a credential: " + all);
+        assertTrue(hasRule(all, "CW-PY-SEC-002"), "a real eval() call is still a finding: " + all);
+        assertTrue(hasRule(all, "CW-PY-BUG-002"), "identity against a string literal is still a finding: " + all);
     }
 }

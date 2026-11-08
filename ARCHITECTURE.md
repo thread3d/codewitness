@@ -395,6 +395,13 @@ the requirement's code is written in, because a test runner, a generator and a r
 language specific. Verdicts are blocked per language too: a build failure in one language blocks the
 requirements written in it, and not the ones written in a sibling that compiled.
 
+A requirement that no file attributes to a language — written in prose, its id in no source file, and
+declaring no `paths` — has no language to be blocked by. It is blocked only when *nothing* in the tree built
+at all; otherwise it is judged on the evidence the languages that did build could produce, and the verdict
+names the languages it could not draw on and how to have it judged per language next time. Blocking it on the
+merged build instead is an aggregate gate, and it contradicts the sentence above: one language failing would
+take down a requirement written entirely in another.
+
 The run's own status follows the same rule: it is `BLOCKED` when a build failure actually stopped a
 requirement from being verified, not merely when some language somewhere failed to compile. A polyglot
 run in which every requirement was evaluated is `COMPLETED` even if a language no requirement lives in

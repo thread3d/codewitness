@@ -169,7 +169,54 @@ public final class Cargo {
 
     /** @return {@code true} when the inspected project has a Cargo manifest and can be built. */
     public static boolean hasManifest(VerificationContext context) {
-        return Files.isRegularFile(context.projectRoot().resolve("Cargo.toml"));
+        Path manifest = manifest(context);
+        return manifest != null && Files.isRegularFile(manifest);
+    }
+
+    /**
+     * @return the Cargo manifest this run builds from, resolved against this run's project root, or
+     *     {@code null} when the tree has none
+     */
+    public static Path manifest(VerificationContext context) {
+        String relative = context.projectInfo() == null ? null
+                : context.projectInfo().attributes().get(RustProjectDetector.ATTR_MANIFEST);
+        if (relative != null && !relative.isBlank()) {
+            return context.projectRoot().resolve(relative);
+        }
+        Path atRoot = context.projectRoot().resolve("Cargo.toml");
+        return Files.isRegularFile(atRoot) ? atRoot : null;
+    }
+
+    /**
+     * @return the directory holding the crate's manifest — what {@code src/} and {@code tests/} are
+     *     relative to, and the directory a user would run Cargo in
+     */
+    public static Path crateRoot(VerificationContext context) {
+        Path manifest = manifest(context);
+        return manifest == null ? context.projectRoot() : manifest.getParent();
+    }
+
+    /**
+     * @return the arguments that point Cargo at the detected manifest, or an empty list when the
+     *     manifest is the project's own
+     *
+     * <p>Cargo looks for a manifest in its working directory and resolves nothing above it, so a crate in
+     * a subdirectory has to be named. {@code --manifest-path} is used rather than changing the working
+     * directory because the commands a report prints stay runnable from the project root, which is where
+     * the user's checkout is.
+     */
+    public static List<String> manifestArguments(VerificationContext context) {
+        Path manifest = manifest(context);
+        if (manifest == null) {
+            return List.of();
+        }
+        Path root = context.projectRoot().toAbsolutePath().normalize();
+        Path atRoot = root.resolve("Cargo.toml");
+        Path normalized = manifest.toAbsolutePath().normalize();
+        if (normalized.equals(atRoot)) {
+            return List.of();
+        }
+        return List.of("--manifest-path", root.relativize(normalized).toString());
     }
 
     /** @return the last {@code count} lines of a captured output, for reports and diagnostics. */

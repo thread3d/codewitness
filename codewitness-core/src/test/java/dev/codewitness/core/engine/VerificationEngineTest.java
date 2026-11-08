@@ -443,6 +443,70 @@ class VerificationEngineTest {
                 report.limitations().toString());
     }
 
+    @Test
+    @DisplayName("a requirement no file attributes to a language is not blocked by the language that failed")
+    void anUnattributedRequirementIsNotBlockedByASiblingBuildFailure() {
+        // Found on a real polyglot tree: Python built, Rust did not, and every requirement — including
+        // "The Python front-end suite passes" — came back BLOCKED, contradicting the report's own sentence
+        // that a language which did build was verified. A requirement written in prose and mentioned by no
+        // file has no language at all, and the merged build used to decide for it.
+        LanguageAdapter service = fake("java", LanguageId.JAVA, "java", false);
+        LanguageAdapter frontend = fake("node", LanguageId.TYPESCRIPT, "ts", true);
+
+        VerificationReport report = run(List.of(service, frontend), requirements());
+
+        assertTrue(report.verdict("R-001").orElseThrow().status() != RequirementStatus.BLOCKED,
+                "one language failing to build says nothing about a requirement no file places in it: "
+                        + report.verdicts());
+        assertTrue(report.verdict("R-001").orElseThrow().unknownAspects().stream()
+                        .anyMatch(aspect -> aspect.contains("did not build")),
+                "the verdict must say which languages it could not draw on: "
+                        + report.verdict("R-001").orElseThrow().unknownAspects());
+        assertEquals(RunStatus.COMPLETED, report.run().status(),
+                "no requirement was blocked, so the run was not truncated: " + report.limitations());
+    }
+
+    @Test
+    @DisplayName("nothing at all built, so an unattributed requirement is still BLOCKED")
+    void anUnattributedRequirementIsBlockedWhenNothingBuilt() {
+        // The other side of the same rule: with no language built there is no evidence to draw on, and
+        // "we could not check" must not become "there was nothing to check".
+        LanguageAdapter service = fake("java", LanguageId.JAVA, "java", false);
+        LanguageAdapter frontend = fake("node", LanguageId.TYPESCRIPT, "ts", false);
+
+        VerificationReport report = run(List.of(service, frontend), requirements());
+
+        assertEquals(RequirementStatus.BLOCKED, report.verdict("R-001").orElseThrow().status(),
+                report.verdicts().toString());
+        assertEquals(RunStatus.BLOCKED, report.run().status());
+    }
+
+    @Test
+    @DisplayName("a build that was never attempted is not reported as a failed build")
+    void aBuildThatWasNeverAttemptedIsNotAFailedBuild() {
+        // The same run said both things at once: the merged summary reported "build failed with exit code -1
+        // ... language(s) whose build failed: [rust]", and the Rust evidence under it said "build not
+        // attempted (no Cargo.toml was found)". A language nobody built is not a language that failed.
+        LanguageAdapter service = fake("java", LanguageId.JAVA, "java", true);
+        LanguageAdapter neverBuilt = fakeWithoutBuild("node", LanguageId.TYPESCRIPT, "ts");
+
+        VerificationReport report = run(List.of(service, neverBuilt), requirements());
+
+        assertTrue(report.limitations().stream().noneMatch(l -> l.contains("could not be built")),
+                "no build failed, so the report must not say one did: " + report.limitations());
+        assertTrue(report.limitations().stream().anyMatch(l -> l.contains("No build was attempted for [node]")),
+                "the language nobody built must be named as not attempted: " + report.limitations());
+        VerificationReport.LanguageSummary node = report.languages().stream()
+                .filter(language -> LanguageId.TYPESCRIPT.equals(language.language()))
+                .findFirst().orElseThrow();
+        assertFalse(node.buildAttempted(),
+                "a language whose build was never attempted must not report it as attempted: " + node.describe());
+        assertTrue(report.build().attempted(), "one language did build, and that is what the summary describes");
+        assertTrue(report.build().success(),
+                "a language nobody built must not make the run-level build read as a failed build: "
+                        + report.build().note());
+    }
+
     // ------------------------------------------------------------------ fake adapter
 
     private static RequirementSet requirements() {
@@ -682,6 +746,59 @@ class VerificationEngineTest {
     /** @return the source text that makes the requirement ids of this test map to this language's file. */
     private static String fileBodyFor(LanguageId language) {
         return language.equals(LanguageId.JAVA) ? "class Service { // R-JAVA\n}" : "// R-TS\nexport {};\n";
+    }
+
+    /**
+     * An adapter that claims part of the project but has nothing to build — a language with no manifest, or
+     * one whose toolchain the run cannot find. Its build is {@code notAttempted}, which is not a failure.
+     */
+    private LanguageAdapter fakeWithoutBuild(String id, LanguageId language, String extension) {
+        return new LanguageAdapter() {
+            @Override
+            public String id() {
+                return id;
+            }
+
+            @Override
+            public boolean supports(ProjectRef project) {
+                return true;
+            }
+
+            @Override
+            public ProjectInfo inspect(ProjectRef project, VerificationContext context) {
+                Path source = tmp.resolve(id + "-source." + extension);
+                try {
+                    java.nio.file.Files.writeString(source, fileBodyFor(language));
+                } catch (java.io.IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+                return ProjectInfo.builder(project)
+                        .language(language)
+                        .sourceExtensions(Set.of(extension))
+                        .addModule(new ModuleInfo(id, tmp, "directory", List.of(tmp), List.of(), null))
+                        .build();
+            }
+
+            @Override
+            public BuildResult build(VerificationContext context) {
+                return BuildResult.notAttempted("no manifest was found, so the project cannot be built");
+            }
+
+            @Override
+            public TestResult runTests(VerificationContext context) {
+                return TestResult.notExecuted("this adapter declares no test capability");
+            }
+
+            @Override
+            public List<Finding> analyze(VerificationContext context) {
+                return List.of();
+            }
+
+            @Override
+            public Set<Capability> capabilities() {
+                return Set.of(Capability.INSPECT, Capability.BUILD);
+            }
+        };
     }
 
     private static BuildResult buildResult(boolean succeeds) {

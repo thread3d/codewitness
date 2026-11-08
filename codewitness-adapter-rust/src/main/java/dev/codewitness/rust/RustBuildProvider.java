@@ -37,12 +37,10 @@ public final class RustBuildProvider implements VerificationTools.Compiler {
 
     @Override
     public BuildResult build(VerificationContext context) {
-        ProjectInfo project = context.projectInfo();
         if (!Cargo.hasManifest(context)) {
             return BuildResult.notAttempted("no Cargo.toml was found, so the project cannot be built");
         }
-        String cargo = Cargo.cargo(project, context);
-        List<String> command = new ArrayList<>(List.of(cargo, "build", "--all-targets"));
+        List<String> command = command(context);
 
         ProcessSpec spec = ProcessSpec.builder(command, context.projectRoot())
                 .environment(Cargo.environment(context))
@@ -58,5 +56,17 @@ public final class RustBuildProvider implements VerificationTools.Compiler {
         context.emit("build", "cargo build " + result.describeOutcome() + " with "
                 + diagnostics.size() + " diagnostic(s)");
         return BuildResult.from(result, diagnostics);
+    }
+
+    /**
+     * @return the command that compiles the crate, naming the manifest explicitly when it is not the
+     *     project's own, because Cargo resolves no manifest above its working directory
+     */
+    List<String> command(VerificationContext context) {
+        List<String> command = new ArrayList<>(
+                List.of(Cargo.cargo(context.projectInfo(), context), "build"));
+        command.addAll(Cargo.manifestArguments(context));
+        command.add("--all-targets");
+        return List.copyOf(command);
     }
 }

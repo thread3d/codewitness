@@ -75,14 +75,19 @@ public final class RustTestProvider implements VerificationTools.TestRunner {
         if (!Cargo.hasManifest(context)) {
             return List.of();
         }
+        List<String> command = new ArrayList<>(List.of(Cargo.cargo(context.projectInfo(), context), "test"));
+        command.addAll(Cargo.manifestArguments(context));
         // --no-fail-fast so one failing test binary does not hide the rest of the crate.
-        return List.of(Cargo.cargo(context.projectInfo(), context), "test", "--no-fail-fast");
+        command.add("--no-fail-fast");
+        return List.copyOf(command);
     }
 
     @Override
     public List<String> replayCommand(VerificationContext context, TestCaseResult testCase) {
-        String cargo = Cargo.cargo(context.projectInfo(), context);
-        // --exact takes the test path libtest printed, which is unique across the crate's targets.
-        return List.of(cargo, "test", "--", "--exact", testCase.name());
+        List<String> command = new ArrayList<>(
+                List.of(Cargo.cargo(context.projectInfo(), context), "test"));
+        command.addAll(Cargo.manifestArguments(context));
+        // --exact takes the test path libtest printed, which is unique across the crate's targets.        command.addAll(List.of("--", "--exact", testCase.name()));
+        return List.copyOf(command);
     }
 }

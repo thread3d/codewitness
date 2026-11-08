@@ -22,6 +22,22 @@ Boundary cases are enumerated in three passes — a baseline, round-robin variat
 and capped at twelve per scenario. A scenario whose product exceeds the cap therefore does not exercise every
 combination; it exercises every *input*, which is the property the enumeration guarantees.
 
+## Polyglot projects
+
+Every adapter that claims part of a tree is inspected, and the build, tests, analysis, dependencies, coverage and
+mutation phases run once per language. A language failing to build blocks the requirements written in *it* and
+nothing else: a tree whose Python half builds and whose Rust half does not still verifies its Python requirements,
+and the run is `BLOCKED` only when the failure actually stopped a requirement from being verified.
+
+The case that needs a rule is a requirement that **no file attributes to a language** — written in prose, its id
+in no source file, declaring no `paths`. It is blocked only when nothing in the tree built at all; with something
+built it is judged on the evidence that exists, and its verdict names the languages it could not draw on and says
+how to have it judged per language next time (mention the id in the files, or declare `paths`). This was wrong
+before the release that closed it: such a requirement was blocked on the *merged* build, so one language failing
+took down every requirement in the run — including "The Python front-end suite passes" — while the report's own
+limitation text said the opposite. The same change stopped a language whose build was never attempted from being
+merged into the run summary and reported as a language whose build *failed*.
+
 Implemented and exercised end to end:
 
 - detection of Java 17+ projects, including Java 25, using Maven or Gradle, with multi-module layouts;
@@ -75,13 +91,21 @@ Python support is new, and the honest limits are:
   environmental fact, and the end-to-end coverage test skips rather than fails when `coverage.py` is
   absent — CI installs it and asserts it, so the skip cannot hide a regression there;
 - the heuristic rule table is intentionally small and has a known false-positive profile, exactly
-  like the Java one.
+  like the Java one. What it does not do is read prose as code: the analyzer tracks string literals
+  and comments line by line, including triple-quoted strings across lines, so a rule never fires from
+  inside a docstring or a message, and the name a `def`/`class` line *defines* is not treated as a use
+  of that name — `def eval(self, ...)` is a method, not a call to the `eval` builtin. The identity rule
+  reports only the literals Python actually warns about (numbers and strings); `is None`, `is True` and
+  `is False` are the recommended form and are not reported.
 
 The Rust adapter is implemented and exercised end to end as well (`fixtures/rust-withdrawal-ledger`):
 
 - detection of Cargo projects (`Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`) and the
   conventional `src/` and `tests/` layout, with a hyphenated package name normalised to the crate
-  identifier Rust code uses;
+  identifier Rust code uses. The manifest need not be at the project root: a crate in a subdirectory
+  (`rmath/Cargo.toml`) is found by a bounded search below the root that skips build output, VCS
+  metadata and vendor trees, and every Cargo command is then pointed at it with `--manifest-path`,
+  because Cargo resolves no manifest above its working directory;
 - a build through `cargo build --all-targets` — the library, binaries, examples and tests — whose
   rustc diagnostics are parsed from rustc's own output, so a compile error is `BLOCKED` and never a
   code defect;
@@ -109,6 +133,10 @@ The honest limits of Rust support are:
   per-file coverage is not reported;
 - a generated test calls the crate by name (`my_crate::Thing`) and any value recorded in a
   counterexample must implement `Debug`; the scenario documentation states both;
+- one crate per run. When the tree holds several `Cargo.toml` files and none is at the project root,
+  the shallowest is the crate that is built, tested, mutated and inventoried, and the report says so
+  and names the manifests that were not part of the run's evidence. A Cargo workspace declared at the
+  project root is built as a whole, as Cargo builds it;
 - the heuristic rule table is intentionally small and has a known false-positive profile.
 
 The Go adapter is implemented and exercised end to end as well (`fixtures/go-withdrawal-ledger`):

@@ -55,7 +55,7 @@ public final class RustMutationTester implements VerificationTools.MutationTeste
     }
 
     /** The Rust half of the shared mutation loop: its manifest, its sources, its cargo and its lexis. */
-    private static final class RustMutationProfile implements CommandMutationProfile {
+    static final class RustMutationProfile implements CommandMutationProfile {
 
         @Override
         public String languageName() {
@@ -103,7 +103,11 @@ public final class RustMutationTester implements VerificationTools.MutationTeste
 
         @Override
         public List<String> testCommand(ProjectInfo project, VerificationContext context) {
-            return List.of(Cargo.cargo(project, context), "test", "--no-fail-fast", "--quiet");
+            List<String> command = new java.util.ArrayList<>(
+                    List.of(Cargo.cargo(project, context), "test"));
+            command.addAll(Cargo.manifestArguments(context));
+            command.addAll(List.of("--no-fail-fast", "--quiet"));
+            return List.copyOf(command);
         }
 
         @Override

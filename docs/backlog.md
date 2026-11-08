@@ -16,6 +16,7 @@ Every release, newest first, with the item it closed.
 
 | Release | Item |
 | --- | --- |
+| 1.0.24 | Four defects found by pointing the tool at a real polyglot tree (`rMath`: Python, a nested Rust crate, Swift nothing covers). A crate whose `Cargo.toml` sits below the project root is now found by a bounded search that skips build output, vendor trees and sample fixtures, and every Cargo command names it with `--manifest-path` — before this, `rmath/Cargo.toml` produced "no Cargo.toml was found" and nothing was built, tested, mutated or measured. One language's build no longer blocks requirements in the languages that built: a requirement no file attributes to a language is blocked only when *nothing* built, and the merged build no longer counts a build that was never attempted as a failed one (the report said "build failed with exit code -1 … whose build failed: [rust]" while Rust's own note said "build not attempted", and `buildAttempted` read `true` for it). `CW-PY-SEC-002` no longer fires on a `def eval(...)` definition — nine HIGH findings on one tree, not one of them a call — because the name a `def`/`class` line defines is blanked before the rule table sees it. `CW-PY-BUG-002` no longer fires on docstring prose or on `is True`/`is False`: the Python analyzer now tracks string literals and comments line by line, including triple-quoted strings across lines, and discards any match that begins inside one, for every rule; the rule keeps only the literals Python warns about (numbers and strings). Measured on a copy of that project's own sources: 9 HIGH and 5 MEDIUM findings removed, with the rules that should still fire unchanged. Pinned by `NestedCrateTest`, `RustMutationProfileTest`, four `RustProjectDetectorTest` cases, three `VerificationEngineTest` cases and four `PythonHeuristicAnalyzerTest` cases, each proved to fire against the pre-fix code. |
 | 1.0.23 | Both `github/codeql-action` pins moved from v4.39.1 to v4.39.3 — of which v4.39.3 fixes diff-informed alert filtering wrongly removing alerts in changed files whose paths contain spaces, special or non-ASCII characters — and `CiActionPinsTest` now keys its consistency rule on the repository rather than the full action reference, so a bump applied to `init` and not to `analyze` fails the suite instead of passing it. 1.0.22's release note is corrected in the file and in the published release body: two of its statements about these pins were false, and they were what excused leaving the pins two releases stale. |
 | 1.0.22 | The workflow's action pins were brought to the releases their own comments name — `actions/setup-java` v6.2.0, `actions/setup-python` v7.1.0, `actions/setup-dotnet` v6.1.0, `ruby/setup-ruby` v1.338.0 — with `setup-java` moved in all three workflow files together, since bumping one file and not the others leaves a pipeline running two versions of one action. `CiActionPinsTest` now holds the invariant `ci.yml` stated only in prose: every `uses:` a full-length commit SHA, every SHA carrying the version comment Dependabot reads, and one SHA per action across the whole pipeline. All three assertions were proved to fire. `dtolnay/rust-toolchain` and the two `github/codeql-action` pins were deliberately left alone. |
 | 1.0.21 | The shipped jar carries `Enable-Native-Access: ALL-UNNAMED`, so every entry point — `java -jar`, an editor run configuration, a CI step, the installed launcher — is as quiet as `./codewitness` already was; the permission is a property of the artifact, which is why a launcher-only fix hid it. Pinned by `PackagingNativeAccessTest`, whose two assertions were proved to fire. |
@@ -38,20 +39,3 @@ Every release, newest first, with the item it closed.
 | 1.0.2 | `mode: process` scenarios: a command is run and its exit code and streams asserted, so the tool's own exit-code contract (CWR-007) is `VERIFIED` by execution — every ground rule in the self-check verified for the first time. |
 | 1.0.1 | The release workflow landed and published its own first release. |
 | 1.0.0 | The interface contract written down: the CLI, the report documents, the configuration keys and the adapter SPI are stable. |
-| 0.1.21 | All seven phase bodies extracted as methods; `verify()` 670 → 433 lines. |
-| 0.1.20 | The build phase extracted, and `docs/backlog.md` created so the backlog no longer lived only in a conversation. |
-| 0.1.19 | The dependency phase extracted. |
-| 0.1.18 | The security phase extracted. |
-| 0.1.17 | The static-analysis phase extracted. |
-| 0.1.16 | `RunScope`: one run-scoped object instead of sixteen arguments, eight times. |
-| 0.1.15 | An adapter that registers a provider for a phase it does not declare is reported. |
-| 0.1.14 | One implementation of the security-phase forwarding; fourteen copies removed. |
-| 0.1.13 | Release notes moved into the repository. |
-| 0.1.12 | Report hardening: surrogate safety, a content security policy, bounded tables. |
-| 0.1.11 | A contended write is retried instead of lost to a five-second timeout. |
-| 0.1.10 | One hardened XML loader instead of nine copies across seven adapters. |
-| 0.1.9 | One boundary-case enumeration instead of fourteen, with its truncation rule documented rather than assumed. |
-| 0.1.8 | One implementation of the tool-output tail; the Kotlin copies' `strip()` drift removed. |
-| 0.1.7 | Run retention; a history that can be read where it cannot be written. |
-| 0.1.6 | Findings reached CI: SARIF export, baselines, suppression. |
-| 0.1.5 | The report and the exit code stopped asserting what the run did not establish; the workspace copy stopped following symbolic links out of the project. |

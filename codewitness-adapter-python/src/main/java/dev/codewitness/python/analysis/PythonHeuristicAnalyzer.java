@@ -31,6 +31,12 @@ import java.util.regex.Pattern;
  *
  * <p>This is not a replacement for ruff or mypy; it is the analyzer that is always available, needs
  * no installation, and whose entire rule table fits in one auditable file.
+ *
+ * <p>It reads the <em>code</em>, not the text. String literals and comments are tracked line by line —
+ * triple-quoted strings across lines, which is where prose lives — and a match that begins inside one is
+ * discarded; the name a {@code def} or {@code class} line defines is blanked, so a definition is never read
+ * as a use of that name. The Java analyzer reached the same place the same way: prose in a docstring is data,
+ * not a defect.
  */
 public final class PythonHeuristicAnalyzer implements VerificationTools.StaticAnalyzer, VerificationTools.SecurityAnalyzer {
 
@@ -87,8 +93,13 @@ public final class PythonHeuristicAnalyzer implements VerificationTools.StaticAn
                     Pattern.compile("[=!]=\\s*None\\b|\\bNone\\s*[=!]="),
                     "Comparison to None with ==/!= calls __eq__; identity (is / is not) is the correct test."),
             new Rule("CW-PY-BUG-002", Severity.MEDIUM, FindingCategory.BUG, false,
-                    Pattern.compile("\\bis\\s+(?:-?\\d+(?:\\.\\d+)?|True|False|'[^']*'|\"[^\"]*\")"),
-                    "Identity comparison with a literal is an implementation detail and warns at runtime; use ==."),
+                    // Numbers and strings only: `is True`, `is False` and `is None` are the form PEP 8
+                    // recommends, and the runtime SyntaxWarning this rule is about applies to literals whose
+                    // value is compared, not to singletons. Listing True/False here reported idiomatic code.
+                    Pattern.compile("\\bis\\s+(?:-?\\d+(?:\\.\\d+)?|'[^']*'|\"[^\"]*\")"),
+                    "Identity comparison with a literal warns at runtime and compares object identity rather "
+                            + "than value; use ==. (is None, is True and is False are the recommended form and are "
+                            + "not reported.)"),
             new Rule("CW-PY-BUG-003", Severity.MEDIUM, FindingCategory.CORRECTNESS, false,
                     Pattern.compile("(?<![\\w.])float\\s*\\(\\s*(?:\"[^\"]*\"|'[^']*'|\\d)"),
                     "A literal is converted to binary floating point: money and precise quantities lose accuracy."),
@@ -97,6 +108,9 @@ public final class PythonHeuristicAnalyzer implements VerificationTools.StaticAn
                     "Calendar-based date arithmetic: a limit expressed over a rolling window is not the same as a "
                             + "limit per calendar day. Check this against the requirement."));
     private static final Pattern TEST_FUNCTION = Pattern.compile("(?m)^\\s*def\\s+(test_\\w+)\\s*\\(");
+    /** The name of the function or class a line defines, which is not a use of that name. */
+    private static final Pattern DEFINED_NAME =
+            Pattern.compile("^(\\s*(?:async\\s+)?(?:def|class)\\s+)(\\w+)");
     private static final Pattern ASSERTION = Pattern.compile(
             "\\bassert\\b|self\\.assert|pytest\\.raises|self\\.assertRaises|unittest\\.|\\braise\\b");
 
@@ -159,43 +173,175 @@ public final class PythonHeuristicAnalyzer implements VerificationTools.StaticAn
         }
         String relative = relativePath(context, file);
         String[] lines = content.split("\\R", -1);
-        for (int i = 0; i < lines.length; i++) {
-            String line = lines[i];
-            if (isComment(line)) {
+        List<LineView> views = views(content);
+        for (int i = 0; i < lines.length && i < views.size(); i++) {
+            String raw = lines[i];
+            LineView view = views.get(i);
+            if (view.code().isBlank()) {
+                // A comment-only line, or the body of a docstring: prose, not code. Matching it as code is how
+                // "a negative is 0" in a docstring became a MEDIUM bug finding.
                 continue;
             }
+            String code = blankDefinedName(view.code());
             for (Rule rule : CORRECTNESS_RULES) {
-                if (rule.pattern().matcher(line).find()) {
-                    findings.add(finding(rule, relative, i + 1, line));
+                if (matchesCode(rule.pattern(), code, view)) {
+                    findings.add(finding(rule, relative, i + 1, raw));
                 }
             }
             for (Rule rule : SECURITY_RULES) {
-                if (rule.pattern().matcher(line).find()) {
-                    findings.add(finding(rule, relative, i + 1, line));
+                if (matchesCode(rule.pattern(), code, view)) {
+                    findings.add(finding(rule, relative, i + 1, raw));
                 }
             }
-            if (ASSERT_STATEMENT.matcher(line).find() && !isTestFile(relative)) {
+            if (matchesCode(ASSERT_STATEMENT, code, view) && !isTestFile(relative)) {
                 findings.add(new Finding("python-heuristics", "CW-PY-BUG-004", Severity.LOW,
                         FindingCategory.CORRECTNESS,
                         "assert is removed when Python runs with -O: it must not be the only guard on a "
                                 + "production invariant.",
-                        relative, i + 1, null, Map.of("snippet", line.strip())));
+                        relative, i + 1, null, Map.of("snippet", raw.strip())));
             }
-            if (MUTABLE_DEFAULT.matcher(line).find()) {
+            if (matchesCode(MUTABLE_DEFAULT, code, view)) {
                 findings.add(new Finding("python-heuristics", "CW-PY-MUT-001", Severity.HIGH,
                         FindingCategory.BUG,
                         "Mutable default argument: the same list/dict/set is shared by every call, so state "
                                 + "leaks between calls. Use None and create the value inside the function.",
-                        relative, i + 1, null, Map.of("snippet", line.strip())));
+                        relative, i + 1, null, Map.of("snippet", raw.strip())));
             }
-            if (FLOAT_MONEY.matcher(line).find()) {
+            if (matchesCode(FLOAT_MONEY, code, view)) {
                 findings.add(new Finding("python-heuristics", "CW-PY-NUM-001", Severity.HIGH,
                         FindingCategory.BUG,
                         "A monetary value is held as a binary float: rounding errors accumulate and cents go "
                                 + "missing. Use decimal.Decimal or integer cents.",
-                        relative, i + 1, null, Map.of("snippet", line.strip())));
+                        relative, i + 1, null, Map.of("snippet", raw.strip())));
             }
         }
+    }
+
+    /**
+     * @return {@code true} when the pattern matches the line at a position that is code rather than the
+     *     inside of a string literal
+     *
+     * <p>A rule is about what the program does, and text inside a string is data. The distinction is what
+     * keeps prose in a docstring, or a message like {@code "the value is 1"}, out of a rule table that is
+     * looking for comparisons and calls.
+     */
+    private static boolean matchesCode(Pattern pattern, String code, LineView view) {
+        Matcher matcher = pattern.matcher(code);
+        while (matcher.find()) {
+            if (!view.startIsInsideString(matcher.start())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** One line as the rule table sees it: the comment removed, and where its string literals begin and end. */
+    private record LineView(String code, List<int[]> strings) {
+
+        boolean startIsInsideString(int index) {
+            for (int[] span : strings) {
+                if (index >= span[0] && index < span[1]) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Splits {@code content} into the code a rule may look at, keeping track of string literals so a match
+     * that falls inside one can be discarded.
+     *
+     * <p>Triple-quoted strings are tracked across lines, which is what makes a docstring body — the place
+     * prose is most often written — invisible to the rule table. Single-quoted literals are recorded as spans
+     * on their own line. Escapes are honoured; a raw string's backslash is not, because the difference only
+     * matters for a literal that ends in a backslash.
+     */
+    private static List<LineView> views(String content) {
+        List<LineView> views = new ArrayList<>();
+        String[] lines = content.split("\\R", -1);
+        String openTriple = null;
+        for (String raw : lines) {
+            List<int[]> strings = new ArrayList<>();
+            int commentAt = -1;
+            int i = 0;
+            if (openTriple != null) {
+                int close = raw.indexOf(openTriple);
+                if (close < 0) {
+                    // The whole line is inside a docstring or a multi-line string.
+                    strings.add(new int[] {0, raw.length()});
+                    views.add(new LineView("", strings));
+                    continue;
+                }
+                strings.add(new int[] {0, close + openTriple.length()});
+                i = close + openTriple.length();
+                openTriple = null;
+            }
+            while (i < raw.length()) {
+                char c = raw.charAt(i);
+                if (c == '#') {
+                    commentAt = i;
+                    break;
+                }
+                if (c == '\'' || c == '"') {
+                    String triple = String.valueOf(c).repeat(3);
+                    if (raw.startsWith(triple, i)) {
+                        int close = raw.indexOf(triple, i + 3);
+                        if (close < 0) {
+                            strings.add(new int[] {i, raw.length()});
+                            openTriple = triple;
+                            i = raw.length();
+                        } else {
+                            strings.add(new int[] {i, close + 3});
+                            i = close + 3;
+                        }
+                        continue;
+                    }
+                    int end = endOfString(raw, i);
+                    strings.add(new int[] {i, end});
+                    i = end;
+                    continue;
+                }
+                i++;
+            }
+            views.add(new LineView(commentAt < 0 ? raw : raw.substring(0, commentAt), strings));
+        }
+        return views;
+    }
+
+    /** @return the index just past the string literal that starts at {@code start}. */
+    private static int endOfString(String line, int start) {
+        char quote = line.charAt(start);
+        int i = start + 1;
+        while (i < line.length()) {
+            char c = line.charAt(i);
+            if (c == '\\') {
+                i += 2;
+                continue;
+            }
+            if (c == quote) {
+                return i + 1;
+            }
+            i++;
+        }
+        return line.length();
+    }
+
+    /**
+     * @return the line with the name it defines blanked out
+     *
+     * <p>{@code def eval(self, ...)} is a method named {@code eval}, not a call to the {@code eval} builtin,
+     * and a rule looking for the builtin fired on every such definition. The name is replaced by underscores
+     * so the line keeps its length and its {@code def name(} shape for the rules that look for one.
+     */
+    static String blankDefinedName(String line) {
+        Matcher matcher = DEFINED_NAME.matcher(line);
+        if (!matcher.find()) {
+            return line;
+        }
+        int start = matcher.start(2);
+        int end = matcher.end(2);
+        return line.substring(0, start) + "_".repeat(end - start) + line.substring(end);
     }
 
     /** Analyses test sources for tests that cannot fail, which is a real verification hazard. */
@@ -237,11 +383,6 @@ public final class PythonHeuristicAnalyzer implements VerificationTools.StaticAn
     private static Finding finding(Rule rule, String relative, int line, String snippet) {
         return new Finding("python-heuristics", rule.id(), rule.severity(), rule.category(),
                 rule.message(), relative, line, null, Map.of("snippet", snippet.strip()));
-    }
-
-    private static boolean isComment(String line) {
-        String stripped = line.stripLeading();
-        return stripped.startsWith("#");
     }
 
     static boolean isTestFile(String relative) {

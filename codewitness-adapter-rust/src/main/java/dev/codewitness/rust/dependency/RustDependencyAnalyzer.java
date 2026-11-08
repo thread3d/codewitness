@@ -6,6 +6,7 @@ import dev.codewitness.core.model.PackageCoordinate;
 import dev.codewitness.core.model.ProjectInfo;
 import dev.codewitness.core.spi.VerificationContext;
 import dev.codewitness.core.spi.VerificationTools;
+import dev.codewitness.rust.Cargo;
 import dev.codewitness.support.dependency.DependencyPathHints;
 import dev.codewitness.support.dependency.TomlPackageTable;
 
@@ -65,7 +66,10 @@ public final class RustDependencyAnalyzer implements VerificationTools.Dependenc
 
     @Override
     public DependencyReport analyseDependencies(VerificationContext context) {
-        Path lock = context.projectRoot().resolve("Cargo.lock");
+        // Both files belong to the crate, and the crate's manifest is not necessarily the project's own.
+        // A lock file may also sit at a workspace root above the crate, so the project root is checked too.
+        Path crateRoot = Cargo.crateRoot(context);
+        Path lock = lockFile(crateRoot, context.projectRoot());
         if (Files.isRegularFile(lock)) {
             String locked;
             try {
@@ -88,8 +92,8 @@ public final class RustDependencyAnalyzer implements VerificationTools.Dependenc
                     "Cargo.lock exists but records no resolved package, so the crates could not be "
                             + "inventoried");
         }
-        Path manifest = context.projectRoot().resolve("Cargo.toml");
-        if (!Files.isRegularFile(manifest)) {
+        Path manifest = Cargo.manifest(context);
+        if (manifest == null || !Files.isRegularFile(manifest)) {
             return DependencyReport.notAnalysed("cargo-manifest",
                     "no Cargo.toml was found, so no dependency manifest could be read");
         }
@@ -112,6 +116,16 @@ public final class RustDependencyAnalyzer implements VerificationTools.Dependenc
                         + "advisory scan cannot query these crates",
                 declared,
                 Map.of(moduleName(context), declared.stream().map(PackageCoordinate::display).toList()));
+    }
+
+    /** @return the lock file that resolves this crate, or a name that exists nowhere. */
+    private static Path lockFile(Path crateRoot, Path projectRoot) {
+        Path besideCrate = crateRoot.resolve("Cargo.lock");
+        if (Files.isRegularFile(besideCrate)) {
+            return besideCrate;
+        }
+        Path atRoot = projectRoot.resolve("Cargo.lock");
+        return Files.isRegularFile(atRoot) ? atRoot : besideCrate;
     }
 
     /** @return the name the report should attribute this crate's dependencies to. */
