@@ -61,7 +61,7 @@ class PackagingNativeAccessTest {
     @Test
     @DisplayName("the launcher still grants native access, so an already-built jar runs quietly")
     void launcherGrantsNativeAccess() throws IOException {
-        Path launcher = reactorRoot().resolve("codewitness");
+        Path launcher = ReactorRoot.find().resolve("codewitness");
         String script = Files.readString(launcher, StandardCharsets.UTF_8);
 
         assertTrue(script.contains("--enable-native-access=" + UNNAMED_MODULES),
@@ -80,31 +80,6 @@ class PackagingNativeAccessTest {
     }
 
     private static Path cliPom() {
-        return reactorRoot().resolve("codewitness-cli").resolve("pom.xml");
-    }
-
-    /** Walks up from the working directory, so the test does not depend on where Maven was started. */
-    private static Path reactorRoot() {
-        Path directory = Path.of("").toAbsolutePath();
-        while (directory != null) {
-            Path candidate = directory.resolve("pom.xml");
-            if (Files.isRegularFile(candidate) && isReactorRoot(candidate)) {
-                return directory;
-            }
-            directory = directory.getParent();
-        }
-        throw new IllegalStateException("could not locate the reactor root above " + Path.of("").toAbsolutePath());
-    }
-
-    /**
-     * The reactor root is the only POM that aggregates the modules, which distinguishes it from a module
-     * POM that merely names {@code codewitness-parent} as its parent.
-     */
-    private static boolean isReactorRoot(Path pom) {
-        try {
-            return Files.readString(pom, StandardCharsets.UTF_8).contains("<module>codewitness-core</module>");
-        } catch (IOException e) {
-            return false;
-        }
+        return ReactorRoot.find().resolve("codewitness-cli").resolve("pom.xml");
     }
 }
