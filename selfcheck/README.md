@@ -46,7 +46,7 @@ requirement out.
 
 ## Result
 
-Run `CW-2026-11-02-HHQFR` (isolated-copy mode, `--no-mutation`, Temurin JDK 25.0.5), with the fixes
+Run `CW-2026-11-08-EHFGG` (isolated-copy mode, `--no-mutation`, Temurin JDK 25.0.5), with the fixes
 described below in place:
 
 ```
@@ -55,7 +55,7 @@ CWR-002  VERIFIED    CWR-006  VERIFIED
 CWR-003  VERIFIED    CWR-007  VERIFIED
 CWR-004  VERIFIED
 
-1762 existing tests executed, 1762 passed, 0 failed
+1763 existing tests executed, 1763 passed, 0 failed
 coverage line 71.2% (25563/35919), branch 59.4% (12414/20890)
 30 dependencies, 0 advisories (source osv)
 overall status VERIFIED (7 verified, 0 failed, 0 unverified)
