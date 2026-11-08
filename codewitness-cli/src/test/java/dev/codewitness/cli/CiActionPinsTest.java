@@ -30,9 +30,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code .github/dependabot.yml} reads it to decide which release a SHA is; a SHA whose comment disagrees with
  * it misdirects the next update instead of failing it.
  *
- * <p>The third assertion here is the one that would have caught a defect this repository nearly shipped: the
- * same action is pinned in more than one workflow file, and bumping one file and not the others leaves two
- * versions of one action running in the same pipeline, with the stale one in whichever job nobody was looking at.
+ * <p>The third assertion is the one that would have caught a defect this repository nearly shipped: the same
+ * action is pinned in more than one workflow file, and bumping one file and not the others leaves two versions
+ * of one action running in the same pipeline, with the stale one in whichever job nobody was looking at. It is
+ * keyed on the <em>repository</em> rather than on the full reference, because one repository can supply several
+ * steps — {@code github/codeql-action/init} and {@code github/codeql-action/analyze} are two actions from one
+ * repository, and a bump applied to one and not the other is a pair that was never tested together. Keyed on the
+ * full reference they looked unrelated, which is how a half-applied CodeQL bump would have passed this test.
  */
 class CiActionPinsTest {
 
@@ -46,7 +50,7 @@ class CiActionPinsTest {
     @DisplayName("every workflow action is pinned to a full commit SHA and names the release it came from")
     void everyActionIsPinnedToAShaWithAVersionComment() throws IOException {
         List<String> problems = new ArrayList<>();
-        Map<String, String> pins = new LinkedHashMap<>();
+        Map<String, Pin> pins = new LinkedHashMap<>();
 
         for (Path workflow : workflows()) {
             List<String> lines = Files.readAllLines(workflow, StandardCharsets.UTF_8);
@@ -74,12 +78,15 @@ class CiActionPinsTest {
                 }
 
                 String action = ref.substring(0, ref.indexOf('@'));
-                String previous = pins.putIfAbsent(action, ref);
-                if (previous != null && !previous.equals(ref)) {
-                    problems.add(where + ": " + action + " is pinned to " + ref.substring(ref.indexOf('@') + 1)
-                            + " here but to " + previous.substring(previous.indexOf('@') + 1)
-                            + " elsewhere in .github/workflows. One pipeline, two versions of one action: "
-                            + "whichever job was not bumped is running code nobody reviewed.");
+                String repository = repositoryOf(action);
+                Pin seen = pins.putIfAbsent(repository, new Pin(action, ref, where));
+                if (seen != null && !shaOf(seen.ref()).equals(shaOf(ref))) {
+                    problems.add(where + ": " + action + " is pinned to " + shaOf(ref) + ", but "
+                            + seen.action() + " at " + seen.where() + " pins the same repository to "
+                            + shaOf(seen.ref()) + ". One pipeline, two versions of one repository: whichever "
+                            + "pin was not bumped is running code nobody reviewed — and when one repository "
+                            + "supplies several steps, a half-applied bump is a pair that was never tested "
+                            + "together.");
                 }
             }
         }
@@ -88,6 +95,20 @@ class CiActionPinsTest {
                 + "located a workspace copy without them, which would make this test vacuous");
         assertTrue(problems.isEmpty(), "the workflow action pins break the supply-chain contract:\n  "
                 + String.join("\n  ", problems));
+    }
+
+    /** The {@code owner/repo} an action reference names, ignoring any subdirectory after it. */
+    private static String repositoryOf(String action) {
+        String[] segments = action.split("/");
+        return segments.length >= 2 ? segments[0] + "/" + segments[1] : action;
+    }
+
+    private static String shaOf(String ref) {
+        return ref.substring(ref.indexOf('@') + 1);
+    }
+
+    /** One pin, kept with the place it was seen so that a disagreement can name both sides. */
+    private record Pin(String action, String ref, String where) {
     }
 
     /** Every workflow file under the reactor root's {@code .github/workflows}. */
