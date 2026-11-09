@@ -78,7 +78,6 @@ public final class PythonDependencyAnalyzer implements VerificationTools.Depende
 
     @Override
     public DependencyReport analyseDependencies(VerificationContext context) {
-        ProjectInfo project = context.projectInfo();
         Path root = context.projectRoot();
         Set<String> dependencies = new LinkedHashSet<>();
         Map<String, String> pinnedVersions = new LinkedHashMap<>();

@@ -104,7 +104,7 @@ import java.util.Set;
 public final class VerificationEngine {
 
     /** Version recorded in every report. */
-    public static final String VERSION = "1.0.25";
+    public static final String VERSION = "1.0.26";
 
     /** Serialises the findings artifact; a hand-built JSON string cannot be trusted with tool output. */
     private static final com.fasterxml.jackson.databind.ObjectMapper FINDINGS_MAPPER =
@@ -1718,7 +1718,7 @@ public final class VerificationEngine {
             ProgressListener listener) {
         List<String> limitations = new ArrayList<>();
         if (database.prepared()) {
-            Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.DATABASE_FIXTURE)
+            ledger.add(ledger.newEvidence(EvidenceType.DATABASE_FIXTURE)
                     .description("Prepared a database for the run: " + database.description())
                     .source(database.id())
                     .confidence(EvidenceConfidence.DETERMINISTIC)
@@ -1739,7 +1739,7 @@ public final class VerificationEngine {
         if (!config.database().enabled()) {
             return limitations;
         }
-        Evidence evidence = ledger.add(ledger.newEvidence(EvidenceType.DATABASE_FIXTURE)
+        ledger.add(ledger.newEvidence(EvidenceType.DATABASE_FIXTURE)
                 .description("A database was requested but not prepared")
                 .source(database.id())
                 .confidence(EvidenceConfidence.DETERMINISTIC)

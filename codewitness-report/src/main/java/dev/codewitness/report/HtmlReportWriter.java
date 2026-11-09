@@ -778,6 +778,19 @@ public final class HtmlReportWriter {
             html.append("<p class=\"warn\">No environment snapshot was recorded for this run, so it cannot be "
                     + "reproduced exactly.</p>\n");
         }
+        appendSnapshot(html, environment, run);
+        appendPhases(html, run);
+        appendBudget(html, run);
+        html.append("</section>\n");
+    }
+
+    /**
+     * Writes the recorded toolchain and the run's timestamps.
+     *
+     * <p>The timestamps come from the snapshot when it carries them and from the run otherwise, so a run
+     * recorded before the snapshot existed still answers when it happened.
+     */
+    private void appendSnapshot(StringBuilder html, EnvironmentSnapshot environment, VerificationRun run) {
         html.append("<dl class=\"kv\">\n");
         kv(html, "CodeWitness version", environment != null ? environment.codewitnessVersion() : null);
         kv(html, "Java version", environment != null ? environment.javaVersion() : null);
@@ -798,56 +811,64 @@ public final class HtmlReportWriter {
         kv(html, "Started at", startedAt != null ? startedAt.toString() : null);
         kv(html, "Finished at", finishedAt != null ? finishedAt.toString() : null);
         html.append("</dl>\n");
+    }
 
+    /** Writes the phase table, which includes the phases that were skipped rather than only the ones that ran. */
+    private void appendPhases(StringBuilder html, VerificationRun run) {
         html.append("<h3>Phases</h3>\n");
         if (run == null || run.phases().isEmpty()) {
             html.append("<p class=\"muted\">No phase records were reported.</p>\n");
-        } else {
-            html.append("<table>\n<thead><tr><th>Phase</th><th>Executed</th><th>Success</th>"
-                            + "<th class=\"num\">Duration (ms)</th><th>Summary</th><th>Evidence</th>"
-                            + "<th>Note</th></tr></thead>\n<tbody>\n");
-            for (PhaseRecord phase : run.phases()) {
-                html.append("<tr><td><code>").append(esc(phase.phase())).append("</code></td><td>")
-                        .append(phase.executed() ? "yes" : "no").append("</td><td>")
-                        .append(phase.success() ? "yes" : "no").append("</td><td class=\"num\">")
-                        .append(phase.duration() != null ? phase.duration().toMillis() : 0L).append("</td><td>")
-                        .append(esc(phase.summary())).append("</td><td>")
-                        .append(list(phase.evidenceIds(), false)).append("</td><td>")
-                        .append(esc(phase.note())).append("</td></tr>\n");
-            }
-            html.append("</tbody>\n</table>\n");
+            return;
         }
+        html.append("<table>\n<thead><tr><th>Phase</th><th>Executed</th><th>Success</th>"
+                        + "<th class=\"num\">Duration (ms)</th><th>Summary</th><th>Evidence</th>"
+                        + "<th>Note</th></tr></thead>\n<tbody>\n");
+        for (PhaseRecord phase : run.phases()) {
+            html.append("<tr><td><code>").append(esc(phase.phase())).append("</code></td><td>")
+                    .append(phase.executed() ? "yes" : "no").append("</td><td>")
+                    .append(phase.success() ? "yes" : "no").append("</td><td class=\"num\">")
+                    .append(phase.duration() != null ? phase.duration().toMillis() : 0L).append("</td><td>")
+                    .append(esc(phase.summary())).append("</td><td>")
+                    .append(list(phase.evidenceIds(), false)).append("</td><td>")
+                    .append(esc(phase.note())).append("</td></tr>\n");
+        }
+        html.append("</tbody>\n</table>\n");
+    }
 
+    /**
+     * Writes the budget limits, the usage recorded against them, and the warning when a limit stopped the
+     * run: a truncated run must never read as a complete one.
+     */
+    private void appendBudget(StringBuilder html, VerificationRun run) {
         html.append("<h3>Budget</h3>\n");
         if (run == null) {
             html.append("<p class=\"muted\">No budget information was reported.</p>\n");
-        } else {
-            Budget budget = run.budget();
-            BudgetUsage usage = run.usage();
-            html.append("<table>\n<thead><tr><th>Limit</th><th>Value</th></tr></thead>\n<tbody>\n");
-            if (budget != null) {
-                row(html, "Max duration (s)", String.valueOf(budget.maxDuration().toSeconds()));
-                row(html, "Max test generation iterations",
-                        String.valueOf(budget.maxTestGenerationIterations()));
-                row(html, "Max generated tests", String.valueOf(budget.maxGeneratedTests()));
-                row(html, "Max mutation time (s)", String.valueOf(budget.maxMutationTime().toSeconds()));
-                row(html, "Max LLM calls", String.valueOf(budget.maxLlmCalls()));
-            }
-            if (usage != null) {
-                row(html, "Elapsed (s)", String.format(Locale.ROOT, "%.3f", usage.elapsed().toMillis() / 1000.0));
-                row(html, "Generated tests", String.valueOf(usage.generatedTests()));
-                row(html, "LLM calls", String.valueOf(usage.llmCalls()));
-                row(html, "Exhausted", usage.exhausted() ? "yes" : "no");
-                row(html, "Exhausted because", usage.exhaustedReason());
-            }
-            html.append("</tbody>\n</table>\n");
-            if (usage != null && usage.exhausted()) {
-                html.append("<p class=\"warn\">The run stopped early because a budget limit was reached"
-                        + (usage.exhaustedReason() != null ? ": " + esc(usage.exhaustedReason()) : "")
-                        + ". Results are therefore incomplete.</p>\n");
-            }
+            return;
         }
-        html.append("</section>\n");
+        Budget budget = run.budget();
+        BudgetUsage usage = run.usage();
+        html.append("<table>\n<thead><tr><th>Limit</th><th>Value</th></tr></thead>\n<tbody>\n");
+        if (budget != null) {
+            row(html, "Max duration (s)", String.valueOf(budget.maxDuration().toSeconds()));
+            row(html, "Max test generation iterations",
+                    String.valueOf(budget.maxTestGenerationIterations()));
+            row(html, "Max generated tests", String.valueOf(budget.maxGeneratedTests()));
+            row(html, "Max mutation time (s)", String.valueOf(budget.maxMutationTime().toSeconds()));
+            row(html, "Max LLM calls", String.valueOf(budget.maxLlmCalls()));
+        }
+        if (usage != null) {
+            row(html, "Elapsed (s)", String.format(Locale.ROOT, "%.3f", usage.elapsed().toMillis() / 1000.0));
+            row(html, "Generated tests", String.valueOf(usage.generatedTests()));
+            row(html, "LLM calls", String.valueOf(usage.llmCalls()));
+            row(html, "Exhausted", usage.exhausted() ? "yes" : "no");
+            row(html, "Exhausted because", usage.exhaustedReason());
+        }
+        html.append("</tbody>\n</table>\n");
+        if (usage != null && usage.exhausted()) {
+            html.append("<p class=\"warn\">The run stopped early because a budget limit was reached"
+                    + (usage.exhaustedReason() != null ? ": " + esc(usage.exhaustedReason()) : "")
+                    + ". Results are therefore incomplete.</p>\n");
+        }
     }
 
     // ------------------------------------------------------------------ limitations
