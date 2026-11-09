@@ -40,15 +40,26 @@ final class McpServer {
     private final BufferedReader input;
     private final PrintStream output;
     private final McpTools tools;
+    private final PrintStream diagnostics;
 
     McpServer(InputStream input, PrintStream output, McpTools tools) {
+        this(input, output, tools, System.err);
+    }
+
+    /**
+     * @param diagnostics where the startup banner and every failure note go; in production this is
+     *                    standard error, and the overload exists so a test can read the channel
+     */
+    McpServer(InputStream input, PrintStream output, McpTools tools, PrintStream diagnostics) {
         this.input = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
         this.output = output;
         this.tools = tools;
+        this.diagnostics = diagnostics;
     }
 
     /** @return process exit code: 0 when the client closed stdin, 1 when stdin itself failed */
     int serve() {
+        announce();
         String line;
         try {
             while ((line = input.readLine()) != null) {
@@ -58,10 +69,25 @@ final class McpServer {
                 handle(line);
             }
         } catch (IOException e) {
-            System.err.println("codewitness mcp: stdin failed: " + e.getMessage());
+            diagnostics.println("codewitness mcp: stdin failed: " + e.getMessage());
             return 1;
         }
         return 0;
+    }
+
+    /**
+     * One line on standard error, at the moment the server starts listening.
+     *
+     * <p>A stdio MCP server is otherwise silent, and so is the harness that spawned it: a successful
+     * connection logs nothing, which leaves "the server started" and "the server never came up"
+     * indistinguishable from the outside. The line reports the version, the protocol revision and the
+     * tool count the client is about to see, so one glance at the client's console answers the question.
+     * It stays off standard output, where one non-JSON byte is enough to end the session.
+     */
+    private void announce() {
+        diagnostics.println("[codewitness] MCP server ready: " + VerificationEngine.VERSION
+                + ", protocol " + PROTOCOL_VERSION
+                + ", " + tools.list().size() + " tools: " + McpTools.toolNames());
     }
 
     private void handle(String line) {
@@ -157,8 +183,8 @@ final class McpServer {
             String text = "Internal error in " + name + ": " + e
                     + (pointer == null ? "" : "\n" + pointer)
                     + "\nSee the self-issue journal for the stack trace.";
-            System.err.println("codewitness mcp: tool " + name + " failed: " + e);
-            e.printStackTrace(System.err);
+            diagnostics.println("codewitness mcp: tool " + name + " failed: " + e);
+            e.printStackTrace(diagnostics);
             writeResult(id, McpTools.error(text));
         }
     }
@@ -191,7 +217,7 @@ final class McpServer {
             output.print('\n');
             output.flush();
         } catch (IOException e) {
-            System.err.println("codewitness mcp: cannot write protocol response: " + e.getMessage());
+            diagnostics.println("codewitness mcp: cannot write protocol response: " + e.getMessage());
         }
     }
 }

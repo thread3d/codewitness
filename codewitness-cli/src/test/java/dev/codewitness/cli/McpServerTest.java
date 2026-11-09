@@ -7,6 +7,7 @@ import dev.codewitness.core.diagnostics.SelfIssueCategory;
 import dev.codewitness.core.diagnostics.SelfIssueJournal;
 import dev.codewitness.core.diagnostics.SelfIssueRecord;
 import dev.codewitness.core.diagnostics.SelfIssueSeverity;
+import dev.codewitness.core.engine.VerificationEngine;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -147,6 +149,31 @@ class McpServerTest {
         assertEquals(1, result.path("structuredContent").path("open").asInt());
     }
 
+    @Test
+    @DisplayName("the server announces itself in one line on the diagnostics stream, never on the protocol stream")
+    void announcesItselfOnStartup() {
+        ByteArrayOutputStream protocol = new ByteArrayOutputStream();
+        ByteArrayOutputStream diagnostics = new ByteArrayOutputStream();
+        McpServer server = new McpServer(
+                new ByteArrayInputStream(
+                        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n"
+                                .getBytes(StandardCharsets.UTF_8)),
+                new PrintStream(protocol, true, StandardCharsets.UTF_8),
+                new McpTools(),
+                new PrintStream(diagnostics, true, StandardCharsets.UTF_8));
+
+        assertEquals(0, server.serve());
+
+        String banner = diagnostics.toString(StandardCharsets.UTF_8);
+        assertTrue(banner.startsWith("[codewitness] MCP server ready: "), banner);
+        assertTrue(banner.contains(VerificationEngine.VERSION), banner);
+        assertTrue(banner.contains(McpServer.PROTOCOL_VERSION), banner);
+        assertTrue(banner.contains("7 tools"), banner);
+        assertEquals(1, banner.lines().count(), "one line, not a paragraph: " + banner);
+        assertFalse(protocol.toString(StandardCharsets.UTF_8).contains("[codewitness]"),
+                "the banner must never reach the protocol stream, where a non-JSON byte ends the session");
+    }
+
     /**
      * Runs the server over a fixed input and returns the parsed protocol responses.
      *
@@ -159,7 +186,8 @@ class McpServerTest {
         McpServer server = new McpServer(
                 new ByteArrayInputStream(payload.getBytes(StandardCharsets.UTF_8)),
                 new PrintStream(output, true, StandardCharsets.UTF_8),
-                new McpTools());
+                new McpTools(),
+                new PrintStream(OutputStream.nullOutputStream(), true, StandardCharsets.UTF_8));
         assertEquals(0, server.serve(), "a client that closes stdin ends the server normally");
 
         List<JsonNode> responses = new ArrayList<>();

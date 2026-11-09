@@ -185,7 +185,10 @@ recording. The equivalent system properties are `codewitness.selfIssues.dir` and
 
 `./codewitness mcp` serves the same engine over the Model Context Protocol on standard input and
 standard output. It is a normal stdio MCP server: one JSON-RPC message per line, standard output
-reserved for protocol frames, and progress/errors on standard error.
+reserved for protocol frames, and progress/errors on standard error. On startup it prints one line
+on standard error — version, protocol revision and tool count — because a stdio MCP server is
+otherwise silent and its client logs nothing when the connection succeeds, which leaves a server that
+started indistinguishable from one that never came up.
 
 ```bash
 ./codewitness mcp

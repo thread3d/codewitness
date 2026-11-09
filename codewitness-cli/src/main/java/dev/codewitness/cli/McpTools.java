@@ -808,7 +808,13 @@ final class McpTools {
         return tool;
     }
 
-    private static String toolNames() {
+    /**
+     * The tool names in the order {@link #list()} advertises them.
+     *
+     * <p>Package-private rather than private: the startup banner in {@link McpServer} names the same
+     * tools, and one list that both read cannot drift from the other.
+     */
+    static String toolNames() {
         return "version, inspect, test, verify, report, issues, reproduce";
     }
 

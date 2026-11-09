@@ -762,6 +762,13 @@ the command captures it before redirecting the JVM's ordinary `System.out` to st
 progress line or an accidental `println` cannot corrupt a frame. The engine's progress listener writes
 to standard error explicitly for the same reason.
 
+Because a stdio server is otherwise silent — and because the harness that spawns it logs nothing when a
+connection succeeds — the server prints one line on standard error as it starts listening: version,
+protocol revision, and the tools it is about to advertise. Its diagnostics go through a stream injected
+into `McpServer` rather than straight to `System.err`, which is what lets `McpServerTest` assert the
+channel an operator actually reads; the other direction is guarded too, because the banner reaching
+standard output would end the session rather than decorate it.
+
 A verification result is not an MCP error. Exit code `1` (a requirement failed) and `2` (the run was
 blocked) are ordinary tool results, with the code in the text and in `structuredContent`; only invalid
 input and internal faults set `isError`. An unexpected exception inside a tool is also recorded in the
